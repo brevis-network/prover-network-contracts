@@ -17,7 +17,7 @@ struct ProofRequest {
     bytes inputData;
     string inputURL;
     bytes32 inputHash;
-    FeeParams fee;    
+    FeeParams fee;
 }
 
 struct Bidder {
@@ -139,9 +139,14 @@ contract BrevisMarket {
         req.proof = proof;
         req.status = ReqStatus.Fulfilled;
         // handle fee
-        (bool success, ) = req.bidder0.prover.call{value: req.bidder1.fee}("");
+        uint256 actualFee = req.bidder1.fee; // default to next bidder fee        
+        if (req.bidder1.prover == address(0)) {
+            // only 1 bidder
+            actualFee = req.bidder0.fee;
+        }
+        (bool success, ) = req.bidder0.prover.call{value: actualFee}("");
         require(success, "send fee to prover failed");
-        (success, ) = req.sender.call{value: req.fee.maxFee - req.bidder1.fee}("");
+        (success, ) = req.sender.call{value: req.fee.maxFee - actualFee}("");
         require(success, "refund fee failed");
 
         emit ProofSubmitted(reqid, msg.sender, proof);
