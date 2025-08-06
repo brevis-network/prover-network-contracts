@@ -49,8 +49,8 @@ struct ReqState {
 }
 
 contract BrevisMarket is AccessControl {
-    uint64 public constant BIDDING_PHASE_DURATION = 5;
-    uint64 public constant REVEAL_PHASE_DURATION = 5;
+    uint64 public biddingPhaseDuration; // duration of bidding phase in seconds
+    uint64 public revealPhaseDuration; // duration of reveal phase in seconds
 
     mapping(bytes32 => ReqState) requests; // proof req id -> state
 
@@ -59,6 +59,14 @@ contract BrevisMarket is AccessControl {
     event BidRevealed(bytes32 indexed reqid, address indexed prover, uint256 fee);
     event ProofSubmitted(bytes32 indexed reqid, address indexed prover, uint256[8] proof);
     event Refunded(bytes32 indexed reqid, address indexed requester, uint256 amount);
+    event BiddingPhaseDurationUpdated(uint64 oldDuration, uint64 newDuration);
+    event RevealPhaseDurationUpdated(uint64 oldDuration, uint64 newDuration);
+
+    function init(address _owner, uint64 _biddingPhaseDuration, uint64 _revealPhaseDuration) external {
+        initOwner(_owner);
+        biddingPhaseDuration = _biddingPhaseDuration;
+        revealPhaseDuration = _revealPhaseDuration;
+    }
 
     // caller must pay gas token equal to req.maxFee
     function requestProof(ProofRequest calldata req) external payable {
@@ -91,7 +99,7 @@ contract BrevisMarket is AccessControl {
         require(req.timestamp != 0, "request does not exist");
 
         // Check we're still in bidding phase
-        require(block.timestamp <= req.timestamp + BIDDING_PHASE_DURATION, "bidding phase ended");
+        require(block.timestamp <= req.timestamp + biddingPhaseDuration, "bidding phase ended");
 
         // Store the sealed bid
         req.bids[msg.sender] = bidHash;
@@ -105,8 +113,8 @@ contract BrevisMarket is AccessControl {
         // Validate request exists
         require(req.timestamp != 0, "request does not exist");
         // block in reveal phase
-        require(block.timestamp > req.timestamp + BIDDING_PHASE_DURATION, "bidding phase not ended");
-        require(block.timestamp <= req.timestamp + BIDDING_PHASE_DURATION + REVEAL_PHASE_DURATION, "reveal phase ended");
+        require(block.timestamp > req.timestamp + biddingPhaseDuration, "bidding phase not ended");
+        require(block.timestamp <= req.timestamp + biddingPhaseDuration + revealPhaseDuration, "reveal phase ended");
 
         bytes32 expectedHash = keccak256(abi.encodePacked(fee, nonce));
         require(req.bids[msg.sender] == expectedHash, "mismatch bid reveal");
@@ -151,6 +159,18 @@ contract BrevisMarket is AccessControl {
         require(success, "refund fee failed");
 
         emit Refunded(reqid, req.sender, req.fee.maxFee);
+    }
+
+    function setBiddingPhaseDuration(uint64 newDuration) external onlyOwner {
+        uint64 oldDuration = biddingPhaseDuration;
+        biddingPhaseDuration = newDuration;
+        emit BiddingPhaseDurationUpdated(oldDuration, newDuration);
+    }
+
+    function setRevealPhaseDuration(uint64 newDuration) external onlyOwner {
+        uint64 oldDuration = revealPhaseDuration;
+        revealPhaseDuration = newDuration;
+        emit RevealPhaseDurationUpdated(oldDuration, newDuration);
     }
 
     function _updateBidders(ReqState storage req, address prover, uint256 fee) internal {
