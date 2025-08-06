@@ -34,7 +34,7 @@ enum ReqStatus {
 // per req saved in state
 struct ReqState {
     ReqStatus status;
-    uint64 receiveBlock; // req is recorded at this blocknum, needed for bid/reveal phase
+    uint64 timestamp; // req is recorded at this block time, needed for bid/reveal phase
     address sender; // msg.sender of requestProof
     FeeParams fee;
     // needed for verify
@@ -47,8 +47,8 @@ struct ReqState {
 }
 
 contract BrevisMarket {
-    uint64 public constant BIDDING_PHASE_BLOCKS = 5;
-    uint64 public constant REVEAL_PHASE_BLOCKS = 5;
+    uint64 public constant BIDDING_PHASE_DURATION = 5;
+    uint64 public constant REVEAL_PHASE_DURATION = 5;
 
     mapping(bytes32 => ReqState) requests; // proof req id -> state
 
@@ -70,9 +70,9 @@ contract BrevisMarket {
         bytes32 reqid = keccak256(abi.encodePacked(req.nonce, req.vk, publicValuesHash));
 
         ReqState storage reqState = requests[reqid];
-        require(reqState.receiveBlock == 0, "request already exists");
+        require(reqState.timestamp == 0, "request already exists");
         reqState.status = ReqStatus.Pending;
-        reqState.receiveBlock = uint64(block.number);
+        reqState.timestamp = uint64(block.timestamp);
         reqState.sender = msg.sender;
         reqState.fee = req.fee;
         reqState.vk = req.vk;
@@ -86,10 +86,10 @@ contract BrevisMarket {
         ReqState storage req = requests[reqid];
 
         // Validate request exists
-        require(req.receiveBlock != 0, "request does not exist");
+        require(req.timestamp != 0, "request does not exist");
 
         // Check we're still in bidding phase
-        require(block.number <= req.receiveBlock + BIDDING_PHASE_BLOCKS, "bidding phase ended");
+        require(block.timestamp <= req.timestamp + BIDDING_PHASE_DURATION, "bidding phase ended");
 
         // Store the sealed bid
         req.bids[msg.sender] = bidHash;
@@ -101,10 +101,10 @@ contract BrevisMarket {
         ReqState storage req = requests[reqid];
 
         // Validate request exists
-        require(req.receiveBlock != 0, "request does not exist");
+        require(req.timestamp != 0, "request does not exist");
         // block in reveal phase
-        require(block.number > req.receiveBlock + BIDDING_PHASE_BLOCKS, "bidding phase not ended");
-        require(block.number <= req.receiveBlock + BIDDING_PHASE_BLOCKS + REVEAL_PHASE_BLOCKS, "reveal phase ended");
+        require(block.timestamp > req.timestamp + BIDDING_PHASE_DURATION, "bidding phase not ended");
+        require(block.timestamp <= req.timestamp + BIDDING_PHASE_DURATION + REVEAL_PHASE_DURATION, "reveal phase ended");
 
         bytes32 expectedHash = keccak256(abi.encodePacked(fee, nonce));
         require(req.bids[msg.sender] == expectedHash, "mismatch bid reveal");
