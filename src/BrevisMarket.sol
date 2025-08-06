@@ -2,6 +2,8 @@
 
 pragma solidity ^0.8.20;
 
+import "./access/AccessControl.sol";
+
 // fee/prover related
 struct FeeParams {
     uint256 maxFee; // maxFee to pay for the proof
@@ -46,7 +48,7 @@ struct ReqState {
     uint256[8] proof;
 }
 
-contract BrevisMarket {
+contract BrevisMarket is AccessControl {
     uint64 public constant BIDDING_PHASE_DURATION = 5;
     uint64 public constant REVEAL_PHASE_DURATION = 5;
 
