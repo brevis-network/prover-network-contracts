@@ -13,10 +13,10 @@ struct ProofRequest {
     uint64 nonce; // allow re-submit same data
     string imgURL; // ELF binary
     bytes32 vk; // verify key for binary
-    // inputData or (inputURL+inputHash)
+    bytes32 publicValuesHash; // hash of public values
+    // inputData or inputURL
     bytes inputData;
     string inputURL;
-    bytes32 inputHash;
     FeeParams fee;
 }
 
@@ -39,7 +39,7 @@ struct ReqState {
     FeeParams fee;
     // needed for verify
     bytes32 vk;
-    bytes32 inputHash;
+    bytes32 publicValuesHash; // hash of public values
     mapping(address => bytes32) bids; // received sealed bids by provers
 
     Bidder bidder0; // lowest fee bidder
@@ -67,11 +67,9 @@ contract BrevisMarket {
         require(req.fee.deadline > block.timestamp, "deadline must be in future");
 
         // calc reqid, save to map
-        bytes32 inputHash = req.inputHash;
-        if (req.inputData.length > 0) {
-            inputHash = keccak256(req.inputData);
-        }
-        bytes32 reqid = keccak256(abi.encodePacked(req.nonce, req.vk, inputHash));
+        bytes32 publicValuesHash = req.publicValuesHash;
+
+        bytes32 reqid = keccak256(abi.encodePacked(req.nonce, req.vk, publicValuesHash));
 
         ReqState storage reqState = requests[reqid];
         require(reqState.receiveBlock == 0, "request already exists");
@@ -80,7 +78,7 @@ contract BrevisMarket {
         reqState.sender = msg.sender;
         reqState.fee = req.fee;
         reqState.vk = req.vk;
-        reqState.inputHash = inputHash;
+        reqState.publicValuesHash = publicValuesHash;
         // emit event
         emit NewRequest(reqid, req);
     }
