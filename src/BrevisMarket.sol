@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+// SPDX-License-Identifier: MIT
 
 pragma solidity ^0.8.20;
 
@@ -41,10 +41,8 @@ struct ReqState {
     bytes32 vk;
     bytes32 publicValuesHash; // hash of public values
     mapping(address => bytes32) bids; // received sealed bids by provers
-
     Bidder bidder0; // lowest fee bidder
     Bidder bidder1; // 2nd lowest bidder
-
     uint256[8] proof;
 }
 
@@ -63,7 +61,7 @@ contract BrevisMarket {
     // caller must pay gas token equal to req.maxFee
     function requestProof(ProofRequest calldata req) external payable {
         // check req fields are valid eg. dealine, msg.value >= maxprice
-        require(msg.value>=req.fee.maxFee, "insufficient fee");
+        require(msg.value >= req.fee.maxFee, "insufficient fee");
         require(req.fee.deadline > block.timestamp, "deadline must be in future");
 
         // calc reqid, save to map
@@ -86,36 +84,27 @@ contract BrevisMarket {
     // bidHash is keccak256(fee, randnum). allow override bid
     function bid(bytes32 reqid, bytes32 bidHash) external {
         ReqState storage req = requests[reqid];
-        
+
         // Validate request exists
         require(req.receiveBlock != 0, "request does not exist");
-        
+
         // Check we're still in bidding phase
-        require(
-            block.number <= req.receiveBlock + BIDDING_PHASE_BLOCKS,
-            "bidding phase ended"
-        );
+        require(block.number <= req.receiveBlock + BIDDING_PHASE_BLOCKS, "bidding phase ended");
 
         // Store the sealed bid
         req.bids[msg.sender] = bidHash;
-        
+
         emit NewBid(reqid, msg.sender, bidHash);
     }
 
     function reveal(bytes32 reqid, uint256 fee, uint256 nonce) external {
         ReqState storage req = requests[reqid];
-        
+
         // Validate request exists
         require(req.receiveBlock != 0, "request does not exist");
         // block in reveal phase
-        require(
-            block.number > req.receiveBlock + BIDDING_PHASE_BLOCKS,
-            "bidding phase not ended"
-        );
-        require(
-            block.number <= req.receiveBlock + BIDDING_PHASE_BLOCKS + REVEAL_PHASE_BLOCKS,
-            "reveal phase ended"
-        );
+        require(block.number > req.receiveBlock + BIDDING_PHASE_BLOCKS, "bidding phase not ended");
+        require(block.number <= req.receiveBlock + BIDDING_PHASE_BLOCKS + REVEAL_PHASE_BLOCKS, "reveal phase ended");
 
         bytes32 expectedHash = keccak256(abi.encodePacked(fee, nonce));
         require(req.bids[msg.sender] == expectedHash, "mismatch bid reveal");
@@ -123,28 +112,28 @@ contract BrevisMarket {
 
         // Update lowest and second lowest bidders
         _updateBidders(req, msg.sender, fee);
-        
+
         emit BidRevealed(reqid, msg.sender, fee);
     }
 
     // verify and save proof, then send fee to prover, remaining to requester
     function submitProof(bytes32 reqid, uint256[8] calldata proof) external {
         ReqState storage req = requests[reqid];
-        require(block.timestamp<=req.fee.deadline, "deadline passed");
+        require(block.timestamp <= req.fee.deadline, "deadline passed");
         require(msg.sender == req.bidder0.prover, "not expected prover"); // is this necessary? anyway fee is paid to saved addr
         require(req.status == ReqStatus.Pending, "invalid req status");
         // TODO: verify proof via PicoVerifier
         req.proof = proof;
         req.status = ReqStatus.Fulfilled;
         // handle fee
-        uint256 actualFee = req.bidder1.fee; // default to next bidder fee        
+        uint256 actualFee = req.bidder1.fee; // default to next bidder fee
         if (req.bidder1.prover == address(0)) {
             // only 1 bidder
             actualFee = req.bidder0.fee;
         }
-        (bool success, ) = req.bidder0.prover.call{value: actualFee}("");
+        (bool success,) = req.bidder0.prover.call{value: actualFee}("");
         require(success, "send fee to prover failed");
-        (success, ) = req.sender.call{value: req.fee.maxFee - actualFee}("");
+        (success,) = req.sender.call{value: req.fee.maxFee - actualFee}("");
         require(success, "refund fee failed");
 
         emit ProofSubmitted(reqid, msg.sender, proof);
@@ -153,37 +142,26 @@ contract BrevisMarket {
     // send pending req past deadline maxfee to requester
     function refund(bytes32 reqid) external {
         ReqState storage req = requests[reqid];
-        require(block.timestamp>req.fee.deadline, "before deadline");
+        require(block.timestamp > req.fee.deadline, "before deadline");
         require(req.status == ReqStatus.Pending, "invalid req status");
         req.status = ReqStatus.Refunded;
-        (bool success, ) = req.sender.call{value: req.fee.maxFee}("");
+        (bool success,) = req.sender.call{value: req.fee.maxFee}("");
         require(success, "refund fee failed");
 
         emit Refunded(reqid, req.sender, req.fee.maxFee);
     }
 
-    function _updateBidders(
-        ReqState storage req,
-        address prover,
-        uint256 fee
-    ) internal {
+    function _updateBidders(ReqState storage req, address prover, uint256 fee) internal {
         // If no bidders yet, or this is lower than current lowest
         if (req.bidder0.prover == address(0) || fee < req.bidder0.fee) {
             // Move current lowest to second lowest
             req.bidder1 = req.bidder0;
             // Set new lowest
-            req.bidder0 = Bidder({
-                prover: prover,
-                fee: fee
-            });
+            req.bidder0 = Bidder({prover: prover, fee: fee});
         }
         // If this is lower than second lowest (but not lowest)
         else if (req.bidder1.prover == address(0) || fee < req.bidder1.fee) {
-            req.bidder1 = Bidder({
-                prover: prover,
-                fee: fee
-            });
+            req.bidder1 = Bidder({prover: prover, fee: fee});
         }
     }
-
 }
