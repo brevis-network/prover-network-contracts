@@ -3,6 +3,7 @@
 pragma solidity ^0.8.20;
 
 import "./access/AccessControl.sol";
+import "./pico/PicoVerifier.sol";
 
 // fee/prover related
 struct FeeParams {
@@ -15,7 +16,7 @@ struct ProofRequest {
     uint64 nonce; // allow re-submit same data
     string imgURL; // ELF binary
     bytes32 vk; // verify key for binary
-    bytes32 publicValuesHash; // hash of public values
+    bytes32 publicValuesDigest; // sha256(publicValues) & bytes32(uint256((1 << 253) - 1))
     // inputData or inputURL
     bytes inputData;
     string inputURL;
@@ -41,7 +42,7 @@ struct ReqState {
     FeeParams fee;
     // needed for verify
     bytes32 vk;
-    bytes32 publicValuesHash; // hash of public values
+    bytes32 publicValuesDigest; // sha256(publicValues) & bytes32(uint256((1 << 253) - 1))
     mapping(address => bytes32) bids; // received sealed bids by provers
     Bidder bidder0; // lowest fee bidder
     Bidder bidder1; // 2nd lowest bidder
@@ -51,6 +52,7 @@ struct ReqState {
 contract BrevisMarket is AccessControl {
     uint64 public biddingPhaseDuration; // duration of bidding phase in seconds
     uint64 public revealPhaseDuration; // duration of reveal phase in seconds
+    IPicoVerifier public picoVerifier; // address of the PicoVerifier contract
 
     mapping(bytes32 => ReqState) requests; // proof req id -> state
 
@@ -59,11 +61,18 @@ contract BrevisMarket is AccessControl {
     event BidRevealed(bytes32 indexed reqid, address indexed prover, uint256 fee);
     event ProofSubmitted(bytes32 indexed reqid, address indexed prover, uint256[8] proof);
     event Refunded(bytes32 indexed reqid, address indexed requester, uint256 amount);
+    event PicoVerifierUpdated(address indexed oldVerifier, address indexed newVerifier);
     event BiddingPhaseDurationUpdated(uint64 oldDuration, uint64 newDuration);
     event RevealPhaseDurationUpdated(uint64 oldDuration, uint64 newDuration);
 
-    function init(address _owner, uint64 _biddingPhaseDuration, uint64 _revealPhaseDuration) external {
+    function init(
+        address _owner,
+        IPicoVerifier _picoVerifier,
+        uint64 _biddingPhaseDuration,
+        uint64 _revealPhaseDuration
+    ) external {
         initOwner(_owner);
+        picoVerifier = _picoVerifier;
         biddingPhaseDuration = _biddingPhaseDuration;
         revealPhaseDuration = _revealPhaseDuration;
     }
@@ -74,10 +83,7 @@ contract BrevisMarket is AccessControl {
         require(msg.value >= req.fee.maxFee, "insufficient fee");
         require(req.fee.deadline > block.timestamp, "deadline must be in future");
 
-        // calc reqid, save to map
-        bytes32 publicValuesHash = req.publicValuesHash;
-
-        bytes32 reqid = keccak256(abi.encodePacked(req.nonce, req.vk, publicValuesHash));
+        bytes32 reqid = keccak256(abi.encodePacked(req.nonce, req.vk, req.publicValuesDigest));
 
         ReqState storage reqState = requests[reqid];
         require(reqState.timestamp == 0, "request already exists");
@@ -86,7 +92,7 @@ contract BrevisMarket is AccessControl {
         reqState.sender = msg.sender;
         reqState.fee = req.fee;
         reqState.vk = req.vk;
-        reqState.publicValuesHash = publicValuesHash;
+        reqState.publicValuesDigest = req.publicValuesDigest;
         // emit event
         emit NewRequest(reqid, req);
     }
@@ -132,7 +138,8 @@ contract BrevisMarket is AccessControl {
         require(block.timestamp <= req.fee.deadline, "deadline passed");
         require(msg.sender == req.bidder0.prover, "not expected prover"); // is this necessary? anyway fee is paid to saved addr
         require(req.status == ReqStatus.Pending, "invalid req status");
-        // TODO: verify proof via PicoVerifier
+        // verify proof
+        picoVerifier.verifyPicoProof(req.vk, req.publicValuesDigest, proof);
         req.proof = proof;
         req.status = ReqStatus.Fulfilled;
         // handle fee
@@ -159,6 +166,13 @@ contract BrevisMarket is AccessControl {
         require(success, "refund fee failed");
 
         emit Refunded(reqid, req.sender, req.fee.maxFee);
+    }
+
+    function setPicoVerifier(IPicoVerifier newVerifier) external onlyOwner {
+        require(address(newVerifier) != address(0), "new verifier cannot be zero address");
+        IPicoVerifier oldVerifier = picoVerifier;
+        picoVerifier = newVerifier;
+        emit PicoVerifierUpdated(address(oldVerifier), address(newVerifier));
     }
 
     function setBiddingPhaseDuration(uint64 newDuration) external onlyOwner {
