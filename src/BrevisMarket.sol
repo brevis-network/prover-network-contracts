@@ -53,7 +53,7 @@ contract BrevisMarket is AccessControl {
     uint64 public revealPhaseDuration; // duration of reveal phase in seconds
     IPicoVerifier public picoVerifier; // address of the PicoVerifier contract
 
-    mapping(bytes32 => ReqState) requests; // proof req id -> state
+    mapping(bytes32 => ReqState) public requests; // proof req id -> state
 
     event NewRequest(bytes32 indexed reqid, ProofRequest req);
     event NewBid(bytes32 indexed reqid, address indexed prover, bytes32 bidHash);
