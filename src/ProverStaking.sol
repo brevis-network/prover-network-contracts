@@ -327,6 +327,13 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
         // Update total effective active stake for streaming calculations
         uint256 newEffectiveStake = _getTotalEffectiveStake(_prover);
+
+        // === STREAMING DEBT RESET ===
+        // Reset streaming debt to prevent accounting drift with new effective stake
+        if (prover.state == ProverState.Active && newEffectiveStake > 0) {
+            prover.rewardDebtEff = (newEffectiveStake * globalAccPerEff) / SCALE_FACTOR;
+        }
+
         _updateTotalEffectiveActive(_prover, oldEffectiveStake, newEffectiveStake);
 
         emit Staked(msg.sender, _prover, _amount, newRawShares);
@@ -417,6 +424,13 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
         // Update total effective active stake for streaming calculations
         uint256 newEffectiveStake = _getTotalEffectiveStake(_prover);
+
+        // === STREAMING DEBT RESET ===
+        // Reset streaming debt to prevent accounting drift with new effective stake
+        if (prover.state == ProverState.Active && newEffectiveStake > 0) {
+            prover.rewardDebtEff = (newEffectiveStake * globalAccPerEff) / SCALE_FACTOR;
+        }
+
         _updateTotalEffectiveActive(_prover, oldEffectiveStake, newEffectiveStake);
 
         emit UnstakeRequested(msg.sender, _prover, _amount, rawSharesToUnstake);
@@ -654,6 +668,13 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
         ProverInfo storage prover = provers[_prover];
 
+        // === STREAMING SETTLEMENT ===
+        // Update global streaming and settle prover before changing effective stake
+        if (globalRatePerSec > 0) {
+            _updateGlobalStreaming();
+            _settleProverStreaming(_prover);
+        }
+
         // Calculate total effective stake before slashing (for event emission)
         uint256 totalEffectiveBefore = _getTotalEffectiveStake(_prover);
 
@@ -667,6 +688,12 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         uint256 totalEffectiveAfter = _getTotalEffectiveStake(_prover);
         uint256 totalSlashed = totalEffectiveBefore - totalEffectiveAfter;
         treasuryPool += totalSlashed;
+
+        // === STREAMING DEBT RESET ===
+        // Reset streaming debt to prevent accounting drift with new effective stake
+        if (prover.state == ProverState.Active && totalEffectiveAfter > 0) {
+            prover.rewardDebtEff = (totalEffectiveAfter * globalAccPerEff) / SCALE_FACTOR;
+        }
 
         // === AUTO-DEACTIVATION CHECK ===
         // If scale drops below minimum threshold, automatically deactivate the prover
@@ -721,6 +748,17 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
         // Update total effective active stake (add this prover back)
         uint256 newEffectiveStake = _getTotalEffectiveStake(msg.sender);
+
+        // === STREAMING DEBT RESET ===
+        // Initialize streaming debt for newly active prover
+        if (newEffectiveStake > 0) {
+            // Update global streaming before setting baseline
+            if (globalRatePerSec > 0) {
+                _updateGlobalStreaming();
+            }
+            prover.rewardDebtEff = (newEffectiveStake * globalAccPerEff) / SCALE_FACTOR;
+        }
+
         _updateTotalEffectiveActive(msg.sender, 0, newEffectiveStake);
 
         // Unretire as active prover
@@ -942,6 +980,12 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
         // Update total effective active stake (add this prover back)
         uint256 currentEffectiveStake = _getTotalEffectiveStake(_prover);
+
+        // === CLOSE INTERVAL BEFORE DENOMINATOR CHANGE ===
+        // Update global streaming again before changing totalEffectiveActive denominator
+        if (globalRatePerSec > 0) {
+            _updateGlobalStreaming();
+        }
 
         // Baseline future accrual to current global index
         prover.rewardDebtEff = (currentEffectiveStake * globalAccPerEff) / SCALE_FACTOR;
@@ -1522,6 +1566,12 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         );
         require(prover.totalRawShares == 0, "Active stakes remaining");
         require(prover.pendingCommission == 0, "Commission remaining");
+
+        // === CLOSE INTERVAL BEFORE DENOMINATOR CHANGE ===
+        // Update global streaming before changing totalEffectiveActive (even if zero)
+        if (globalRatePerSec > 0) {
+            _updateGlobalStreaming();
+        }
 
         // Update total effective active stake (remove this prover)
         uint256 currentEffectiveStake = _getTotalEffectiveStake(_prover);

@@ -920,6 +920,9 @@ contract StreamingRewardsTest is Test {
         // Check retired state by testing a different prover that we'll retire
         _initializeProver(prover2, MIN_SELF_STAKE, COMMISSION_RATE);
 
+        // Let prover2 accrue some rewards
+        vm.warp(block.timestamp + 5);
+
         // Retire prover2 (must clear stakes first)
         vm.prank(prover2);
         proverStaking.withdrawRewards(prover2);
@@ -940,5 +943,180 @@ contract StreamingRewardsTest is Test {
         assertEq(retiredTotal, 0, "Retired prover should have zero pending rewards");
         assertEq(retiredCommission, 0, "Retired prover should have zero pending commission");
         assertEq(retiredStakers, 0, "Retired prover should have zero pending staker rewards");
+    }
+
+    // ========== STREAMING ACCOUNTING DRIFT DETECTION TESTS ==========
+
+    /**
+     * @notice Test that would catch stake-change drift bugs
+     * @dev Measures rewards per time period before/after stake changes
+     */
+    function test_StakeChangeDriftDetection() public {
+        // Initialize prover with small stake
+        _initializeProver(prover1, MIN_SELF_STAKE, COMMISSION_RATE);
+
+        // Setup streaming: 100 tokens/second
+        _setGlobalRate(100e18);
+        _fundGlobalBudget(10000e18);
+
+        // === PHASE 1: Small stake for 10 seconds ===
+        uint256 startTime = block.timestamp;
+        vm.warp(startTime + 10);
+
+        // Get rewards for 10 seconds with MIN_SELF_STAKE
+        proverStaking.settleProverStreaming(prover1);
+        uint256 rewardsPhase1 = proverStaking.getPendingRewards(prover1, prover1);
+
+        // Expected: 10 seconds * 100 tokens/sec = 1000 tokens (all to prover since no other stakers)
+        assertEq(rewardsPhase1, 1000e18, "Phase 1 rewards incorrect");
+
+        // Withdraw to reset
+        vm.prank(prover1);
+        proverStaking.withdrawRewards(prover1);
+
+        // === PHASE 2: Add more stake and run for another 10 seconds ===
+        _stake(staker1, prover1, MIN_SELF_STAKE); // Double the stake
+
+        uint256 stakeChangeTime = block.timestamp;
+        vm.warp(stakeChangeTime + 10); // Another 10 seconds
+
+        // Get rewards for 10 seconds with 2x stake
+        proverStaking.settleProverStreaming(prover1);
+        uint256 rewardsPhase2 = proverStaking.getPendingRewards(prover1, prover1);
+
+        // Expected: 10 seconds * 100 tokens/sec = 1000 tokens total
+        // Prover gets: commission (10% of 1000) + staking rewards (50% of 900) = 100 + 450 = 550
+        assertEq(rewardsPhase2, 550e18, "Phase 2 rewards incorrect - possible drift bug!");
+
+        // === CRITICAL TEST: Verify staker got correct rewards ===
+        uint256 stakerRewards = proverStaking.getPendingRewards(prover1, staker1);
+        // Staker should get: 50% of staking portion = 50% of 900 = 450
+        assertEq(stakerRewards, 450e18, "Staker rewards incorrect - drift bug detected!");
+    }
+
+    /**
+     * @notice Test that would catch unstake-change drift bugs
+     */
+    function test_UnstakeChangeDriftDetection() public {
+        // Setup: Prover + Staker with equal stakes
+        _initializeProver(prover1, MIN_SELF_STAKE, COMMISSION_RATE);
+        _stake(staker1, prover1, MIN_SELF_STAKE);
+
+        // Setup streaming: 100 tokens/second
+        _setGlobalRate(100e18);
+        _fundGlobalBudget(10000e18);
+
+        // === PHASE 1: Full stake for 10 seconds ===
+        vm.warp(block.timestamp + 10);
+
+        proverStaking.settleProverStreaming(prover1);
+        uint256 proverRewardsPhase1 = proverStaking.getPendingRewards(prover1, prover1);
+        uint256 stakerRewardsPhase1 = proverStaking.getPendingRewards(prover1, staker1);
+
+        // Expected: 1000 tokens total, 100 commission + 450 staking each
+        assertEq(proverRewardsPhase1, 550e18, "Phase 1 prover rewards incorrect");
+        assertEq(stakerRewardsPhase1, 450e18, "Phase 1 staker rewards incorrect");
+
+        // Withdraw to reset
+        vm.prank(prover1);
+        proverStaking.withdrawRewards(prover1);
+        vm.prank(staker1);
+        proverStaking.withdrawRewards(prover1);
+
+        // === PHASE 2: Staker unstakes, then run for another 10 seconds ===
+        vm.prank(staker1);
+        proverStaking.requestUnstake(prover1, MIN_SELF_STAKE); // Halve the total stake
+
+        vm.warp(block.timestamp + 10); // Another 10 seconds
+
+        proverStaking.settleProverStreaming(prover1);
+        uint256 proverRewardsPhase2 = proverStaking.getPendingRewards(prover1, prover1);
+        uint256 stakerRewardsPhase2 = proverStaking.getPendingRewards(prover1, staker1);
+
+        // Expected: 1000 tokens total, but now prover gets it all since staker unstaked
+        // Commission: 10% of 1000 = 100, Staking: 90% of 1000 = 900 (all to prover)
+        assertEq(proverRewardsPhase2, 1000e18, "Phase 2 prover rewards incorrect - drift bug!");
+        assertEq(stakerRewardsPhase2, 0, "Phase 2 staker should have 0 new rewards after unstaking");
+    }
+
+    /**
+     * @notice Test that would catch slash-change drift bugs
+     */
+    function test_SlashChangeDriftDetection() public {
+        // Setup: Single prover
+        _initializeProver(prover1, MIN_SELF_STAKE, COMMISSION_RATE);
+
+        // Setup streaming: 100 tokens/second
+        _setGlobalRate(100e18);
+        _fundGlobalBudget(10000e18);
+
+        // === PHASE 1: Full stake for 10 seconds ===
+        vm.warp(block.timestamp + 10);
+
+        proverStaking.settleProverStreaming(prover1);
+        uint256 rewardsPhase1 = proverStaking.getPendingRewards(prover1, prover1);
+
+        // Expected: 1000 tokens (all to prover)
+        assertEq(rewardsPhase1, 1000e18, "Phase 1 rewards incorrect");
+
+        // Withdraw to reset
+        vm.prank(prover1);
+        proverStaking.withdrawRewards(prover1);
+
+        // === PHASE 2: Slash 50%, then run for another 10 seconds ===
+        proverStaking.slash(prover1, 500000); // 50% slash
+
+        vm.warp(block.timestamp + 10); // Another 10 seconds
+
+        proverStaking.settleProverStreaming(prover1);
+        uint256 rewardsPhase2 = proverStaking.getPendingRewards(prover1, prover1);
+
+        // Expected: Now only 5000e18 effective stake, so only 50% of streaming rate
+        // 10 seconds * 100 tokens/sec * (5000e18 / 10000e18) = 500 tokens
+        // BUT: totalEffectiveActive should also be 5000e18, so prover still gets 100% of the reduced pool
+        // So: 10 seconds * 100 tokens/sec * (5000e18 / 5000e18) = 1000 tokens
+        assertEq(rewardsPhase2, 1000e18, "Phase 2 rewards incorrect - slash drift bug!");
+    }
+
+    /**
+     * @notice Test for precise time-based reward calculation
+     * @dev This would catch any drift where rewards leak across time boundaries
+     */
+    function test_PreciseTimeBasedAccounting() public {
+        // Setup
+        _initializeProver(prover1, MIN_SELF_STAKE, COMMISSION_RATE);
+
+        _setGlobalRate(1e18); // 1 token per second for precision
+        _fundGlobalBudget(1000e18);
+
+        uint256 baseTime = block.timestamp;
+
+        // === Test: Measure rewards at exact time boundaries ===
+
+        // 5 seconds with small stake
+        vm.warp(baseTime + 5);
+        proverStaking.settleProverStreaming(prover1);
+        uint256 rewards5sec = proverStaking.getPendingRewards(prover1, prover1);
+        assertEq(rewards5sec, 5e18, "5 second rewards incorrect");
+
+        // Add staker (double stake)
+        _stake(staker1, prover1, MIN_SELF_STAKE);
+
+        // Withdraw existing rewards to reset
+        vm.prank(prover1);
+        proverStaking.withdrawRewards(prover1);
+
+        // Another 5 seconds with double stake
+        vm.warp(baseTime + 10);
+        proverStaking.settleProverStreaming(prover1);
+        uint256 rewardsNext5sec = proverStaking.getPendingRewards(prover1, prover1);
+
+        // Should be: 1 token/sec * 5 sec = 5 tokens total
+        // Prover gets: 10% commission + 50% of staking = 0.5 + 2.25 = 2.75 tokens
+        assertEq(rewardsNext5sec, 2.75e18, "Next 5 second rewards incorrect - time drift detected!");
+
+        // Verify staker got correct share
+        uint256 stakerShare = proverStaking.getPendingRewards(prover1, staker1);
+        assertEq(stakerShare, 2.25e18, "Staker share incorrect - time drift detected!");
     }
 }
