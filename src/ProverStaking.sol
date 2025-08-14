@@ -123,6 +123,9 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     // Global minimum self-stake requirement for all provers
     uint256 public globalMinSelfStake;
 
+    // Global pool of slashed tokens available for treasury withdrawal
+    uint256 public treasuryPool;
+
     mapping(address => ProverInfo) internal provers; // Prover address -> ProverInfo
     address[] public proverList; // Enumerable list of all registered provers
     EnumerableSet.AddressSet activeProvers; // Set of currently active provers
@@ -152,6 +155,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     event RewardsAdded(address indexed prover, uint256 amount, uint256 commission, uint256 distributed);
     event RewardsWithdrawn(address indexed staker, address indexed prover, uint256 amount);
     event ProverSlashed(address indexed prover, uint256 percentage, uint256 totalSlashed);
+    event TreasuryPoolWithdrawn(address indexed to, uint256 amount);
 
     // Administrative events
     event UnstakeDelayUpdated(uint256 oldDelay, uint256 newDelay);
@@ -576,6 +580,12 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         uint256 remainingFactor = SLASH_FACTOR_DENOMINATOR - _percentage;
         prover.scale = (prover.scale * remainingFactor) / SLASH_FACTOR_DENOMINATOR;
 
+        // === TREASURY POOL ACCOUNTING ===
+        // Calculate total slashed amount and add to treasury pool
+        uint256 totalEffectiveAfter = _getTotalEffectiveStake(_prover);
+        uint256 totalSlashed = totalEffectiveBefore - totalEffectiveAfter;
+        treasuryPool += totalSlashed;
+
         // === AUTO-DEACTIVATION CHECK ===
         // If scale drops below minimum threshold, automatically deactivate the prover
         if (prover.scale < MIN_SCALE_FACTOR && prover.state == ProverState.Active) {
@@ -583,10 +593,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             activeProvers.remove(_prover);
             emit ProverDeactivated(_prover);
         }
-
-        // Calculate total slashed amount for event
-        uint256 totalEffectiveAfter = _getTotalEffectiveStake(_prover);
-        uint256 totalSlashed = totalEffectiveBefore - totalEffectiveAfter;
 
         emit ProverSlashed(_prover, _percentage, totalSlashed);
     }
@@ -997,6 +1003,15 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         return (hasPendingUpdate, pendingMinSelfStake, effectiveTime, isReady);
     }
 
+    /**
+     * @notice Get treasury pool information
+     * @dev Returns the total amount of slashed tokens available for withdrawal by treasury
+     * @return treasuryPoolBalance Amount of slashed tokens in the treasury pool
+     */
+    function getTreasuryPool() external view returns (uint256 treasuryPoolBalance) {
+        return treasuryPool;
+    }
+
     // =========================================================================
     // ADMIN FUNCTIONS
     // =========================================================================
@@ -1025,7 +1040,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
     /**
      * @notice Set the global minimum self-stake requirement for all provers
-     * @dev Only affects new prover registrations, not existing provers
      * @param _newGlobalMinSelfStake The new global minimum self-stake in token units
      */
     function setGlobalMinSelfStake(uint256 _newGlobalMinSelfStake) external onlyOwner {
@@ -1070,7 +1084,27 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         emit ProverReactivated(_prover);
     }
 
-    // =========================================================================
+    /**
+     * @notice Admin function to withdraw slashed tokens from the treasury pool
+     * @dev Allows treasury to claim tokens that were slashed from all provers.
+     *      These tokens represent the difference between what stakers can withdraw
+     *      and what tokens are held in the contract.
+     * @param _to The address to send the slashed tokens to
+     * @param _amount The amount of tokens to withdraw from the treasury pool
+     */
+    function withdrawFromTreasuryPool(address _to, uint256 _amount) external onlyOwner {
+        require(_to != address(0), "Invalid recipient");
+        require(_amount > 0, "Amount must be positive");
+        require(_amount <= treasuryPool, "Insufficient treasury pool balance");
+
+        // Update treasury pool accounting
+        treasuryPool -= _amount;
+
+        // Transfer tokens to recipient
+        IERC20(brevToken).safeTransfer(_to, _amount);
+
+        emit TreasuryPoolWithdrawn(_to, _amount);
+    } // =========================================================================
     // INTERNAL HELPERS (STATE-CHANGING)
     // =========================================================================
 

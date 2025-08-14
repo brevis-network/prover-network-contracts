@@ -1213,6 +1213,49 @@ contract StakingAdvancedTest is Test {
         assertTrue(finalScale < 2e17, "Scale should be below 20% threshold");
     }
 
+    function test_GlobalTreasuryPoolAccounting() public {
+        _initializeProver(prover1);
+        _stakeToProver(staker1, prover1, 1000e18);
+
+        // Check initial treasury pool is empty
+        uint256 initialTreasuryPool = proverStaking.getTreasuryPool();
+        assertEq(initialTreasuryPool, 0, "Initial treasury pool should be empty");
+
+        // Slash 50% - should move 50% of effective stake to treasury pool
+        uint256 effectiveStakeBefore = 1000e18 + MIN_SELF_STAKE; // staker + prover self-stake
+        proverStaking.slash(prover1, 500000); // 50%
+
+        // Check treasury pool received the slashed amount
+        uint256 treasuryPoolAfter1 = proverStaking.getTreasuryPool();
+        uint256 expectedSlashed1 = effectiveStakeBefore / 2; // 50% slashed
+        assertEq(treasuryPoolAfter1, expectedSlashed1, "Treasury pool should contain 50% of original stake");
+
+        // Slash another 50% of remaining stake
+        uint256 effectiveStakeAfter1 = effectiveStakeBefore / 2; // 50% remaining
+        proverStaking.slash(prover1, 500000); // 50% of remaining
+
+        // Check treasury pool accumulated more slashed tokens
+        uint256 treasuryPoolAfter2 = proverStaking.getTreasuryPool();
+        uint256 expectedSlashed2 = expectedSlashed1 + (effectiveStakeAfter1 / 2); // Previous + 25% more
+        assertEq(treasuryPoolAfter2, expectedSlashed2, "Treasury pool should accumulate slashed tokens");
+
+        // Test withdrawal by owner
+        address treasury = makeAddr("treasury");
+        uint256 withdrawAmount = expectedSlashed2 / 2;
+
+        vm.prank(owner);
+        proverStaking.withdrawFromTreasuryPool(treasury, withdrawAmount);
+
+        // Check treasury pool decreased and treasury received tokens
+        uint256 treasuryPoolAfterWithdraw = proverStaking.getTreasuryPool();
+        assertEq(
+            treasuryPoolAfterWithdraw,
+            expectedSlashed2 - withdrawAmount,
+            "Treasury pool should decrease after withdrawal"
+        );
+        assertEq(brevToken.balanceOf(treasury), withdrawAmount, "Treasury should receive withdrawn tokens");
+    }
+
     // Event declarations
     event ProverRetired(address indexed prover);
     event ProverUnretired(address indexed prover);
