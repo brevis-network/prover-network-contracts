@@ -1,14 +1,19 @@
-# StakedProvers Contract Design Document
+# ProverStaking Contract Design Document
 
 ## Overview
 
-The `StakedProvers` contract implements a delegation-based staking system for prover networks. It enables users to stake ERC20 tokens with provers while maintaining O(1) complexity for critical operations through a dual-share mechanism and global accumulators.
+The `ProverStaking` contract implements a delegation-based staking system for prover networks. It enables users to stake ERC20 tokens with provers while maintaining O(1) complexity for critical operations through a dual-share mechanism and global accumulators. It implements three core algorithms:
+
+1. **O(1) Staking/Unstaking**: Raw shares system enables proportional calculations without iteration
+2. **O(1) Reward Distribution**: Global accumulator distributes rewards to all stakers simultaneously
+3. **O(1) Slashing**: Scale factor mechanism slashes all stakes without touching individual balances
+
 
 ## Table of Contents
 
-1. [Overview](#overview)
-2. [Core Data Structures](#core-data-structures)
-3. [Key Algorithms](#key-algorithms)
+- [Core Data Structures](#core-data-structures)
+- [Key Constants](#key-constants)
+- [Key Algorithms](#key-algorithms)
    - [Raw Shares System](#1-raw-shares-system)
    - [Staking & Unstaking](#2-staking--unstaking)
    - [Reward Distribution](#3-reward-distribution)
@@ -16,61 +21,39 @@ The `StakedProvers` contract implements a delegation-based staking system for pr
 
 ---
 
-## Overview
-
-The `StakedProvers` contract implements three core algorithms:
-
-1. **O(1) Staking/Unstaking**: Raw shares system enables proportional calculations without iteration
-2. **O(1) Reward Distribution**: Global accumulator distributes rewards to all stakers simultaneously
-3. **O(1) Slashing**: Scale factor mechanism slashes all stakes without touching individual balances
-
-### Prover Lifecycle
-
-```
-┌─────────┐    initProver()   ┌────────┐    deactivate()    ┌─────────┐
-│   Null  │ ────────────────► │ Active │ ─────────────────► │ Retired │
-└─────────┘                   └────────┘                    └─────────┘
-                                   │                             ▲
-                                   │         retire()            │
-                                   └─────────────────────────────┘
-```
-
----
-
 ## Core Data Structures
 
-### ProverInfo Structure
 
 ```solidity
+enum ProverState {
+    Null,         // Prover not initialized
+    Active,       // Prover accepting new stakes
+    Retired,      // Prover deactivated, no new stakes (can unretire)
+    Deactivated   // Prover force-deactivated by admin (cannot unretire)
+}
+
 struct ProverInfo {
     // === BASIC METADATA ===
-    ProverState state;                // Prover status: Null, Active, or Retired
-    uint256 minSelfStake;             // Individual minimum self-stake (≥ globalMinSelfStake)
+    ProverState state;                // Prover status: Null, Active, Retired, or Deactivated
     uint64 commissionRate;            // Commission in basis points (0-10000)
+    uint256 minSelfStake;             // Individual minimum self-stake (≥ globalMinSelfStake)
     
-    // === SHARE TRACKING (O(1) Slashing System) ===
+    // === SHARE TRACKING ===
     uint256 totalRawShares;           // Total raw shares (pre-slashing)
     uint256 scale;                    // Global scale factor (1e18 = no slashing)
     
-    // === REWARD DISTRIBUTION (O(1) System) ===
+    // === REWARD DISTRIBUTION ===
     uint256 accRewardPerRawShare;     // Accumulated rewards per raw share
     uint256 pendingCommission;        // Unclaimed commission
+    
+    // === MIN SELF STAKE UPDATE ===
+    PendingMinSelfStakeUpdate pendingMinSelfStakeUpdate; // Pending minSelfStake decrease
     
     // === STAKER DATA ===
     mapping(address => StakeInfo) stakes;       // Individual stake info
     EnumerableSet.AddressSet stakers;           // Staker enumeration
 }
 
-enum ProverState {
-    Null,     // Prover not initialized
-    Active,   // Prover accepting new stakes
-    Retired   // Prover deactivated, no new stakes
-}
-```
-
-### StakeInfo Structure
-
-```solidity
 struct StakeInfo {
     // === ACTIVE STAKE ===
     uint256 rawShares;                    // Raw shares owned (pre-slashing)
@@ -84,6 +67,11 @@ struct StakeInfo {
 struct PendingUnstake {
     uint256 rawShares;        // Raw shares in this unstake request
     uint256 unstakeTime;      // Timestamp when this unstake was initiated
+}
+
+struct PendingMinSelfStakeUpdate {
+    uint256 newMinSelfStake;  // The new minSelfStake value being requested
+    uint256 requestedTime;    // Timestamp when the update was requested
 }
 ```
 
@@ -137,7 +125,7 @@ Where:
 
 **Staking Process:**
 ```solidity
-function _stake(address _staker, address _prover, uint256 _amount) internal {
+function stake(address _prover, uint256 _amount) internal {
     // 1. Calculate raw shares: newRawShares = (amount * SCALE_FACTOR) / scale
     // 2. Update reward accounting before share changes
     // 3. Mint shares: rawShares += newRawShares, totalRawShares += newRawShares
@@ -173,21 +161,29 @@ function completeUnstake(address _prover) external {
 - All operations maintain proportional relationships
 - Multiple unstake requests supported (up to 10 per staker per prover)
 - Automatic completion of all eligible requests for better UX
+- Unstaking affects staker tracking: removed from stakers set when stake becomes zero
 
 ### 3. Reward Distribution
 
 Instead of updating individual staker balances, the system maintains a global accumulator (`accRewardPerRawShare`) that tracks rewards earned per raw share. Rewards are calculated on-demand.
 
 ```solidity
-function addRewards(address _prover, uint256 _amount) internal {
+function addRewards(address _prover, uint256 _amount) external {
     ProverInfo storage prover = provers[_prover];
-    
+
     uint256 commission = (_amount * prover.commissionRate) / COMMISSION_RATE_DENOMINATOR;
     uint256 stakersReward = _amount - commission;
-    
-    // O(1) operation: update accumulator
-    prover.accRewardPerRawShare += (stakersReward * SCALE_FACTOR) / prover.totalRawShares;
+
+    // Always credit commission to prover
     prover.pendingCommission += commission;
+
+    if (prover.totalRawShares == 0) {
+        // No stakers exist, prover gets all remaining rewards as commission
+        prover.pendingCommission += stakersReward;
+    } else {
+        // O(1) operation: update accumulator for stakers
+        prover.accRewardPerRawShare += (stakersReward * SCALE_FACTOR) / prover.totalRawShares;
+    }
 }
 
 // Rewards calculated on-demand when needed
@@ -200,9 +196,14 @@ pendingRewards = (rawShares * accRewardPerRawShare / SCALE_FACTOR) - rewardDebt
 Commission = totalRewards × commissionRate ÷ COMMISSION_RATE_DENOMINATOR
 StakersReward = totalRewards - Commission
 
-accRewardPerRawShare += (StakersReward × SCALE_FACTOR) ÷ totalRawShares
+If totalRawShares > 0:
+    accRewardPerRawShare += (StakersReward × SCALE_FACTOR) ÷ totalRawShares
+    pendingCommission += Commission
+Else:
+    // No stakers exist, prover gets all rewards as commission
+    pendingCommission += totalRewards
 
-Pending Rewards:
+Pending Rewards (for stakers):
 AccruedRewards = (rawShares × accRewardPerRawShare) ÷ SCALE_FACTOR
 PendingRewards = previousPendingRewards + (AccruedRewards - rewardDebt)
 
@@ -217,14 +218,17 @@ Where:
 Each prover maintains an independent scale factor that affects all stakes proportionally. Slashing updates only this single value, and all effective amounts automatically reflect the slash.
 
 ```solidity
-function slash(address _prover, uint256 _percentage) internal {
+function slash(address _prover, uint256 _percentage) external onlyRole(SLASHER_ROLE) {
+    require(_percentage < SLASH_FACTOR_DENOMINATOR, "Cannot slash 100%");
+
     ProverInfo storage prover = provers[_prover];
-    
+
     // O(1) operation: update single scale factor
     uint256 remainingFactor = SLASH_FACTOR_DENOMINATOR - _percentage;
     prover.scale = (prover.scale * remainingFactor) / SLASH_FACTOR_DENOMINATOR;
-    
+
     // All stakes automatically reflect new value via _effectiveAmount()
+    // This affects both active stakes AND pending unstakes
 }
 ```
 
@@ -233,8 +237,12 @@ function slash(address _prover, uint256 _percentage) internal {
 ```
 newScale = oldScale × (SLASH_FACTOR_DENOMINATOR - slashPercentage) ÷ SLASH_FACTOR_DENOMINATOR
 
-Example: 30% slash
-newScale = oldScale × (1000000 - 300000) ÷ 1000000 = oldScale × 0.7
+Where:
+- SLASH_FACTOR_DENOMINATOR = 1,000,000 (parts per million for higher precision)
+- slashPercentage: 0-1,000,000 (0% to 100%)
+
+Example: 30% slash (300,000 ppm)
+newScale = oldScale × (1,000,000 - 300,000) ÷ 1,000,000 = oldScale × 0.7
 ```
 
 **Example**: 30% slash → `rawShares = 1000, scale = 0.7e18, effective = 700 tokens`
