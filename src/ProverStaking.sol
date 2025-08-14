@@ -148,7 +148,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
     // Staking lifecycle events
     event Staked(address indexed staker, address indexed prover, uint256 amount, uint256 mintedShares);
-    event UnstakeRequested(address indexed staker, address indexed prover, uint256 amount, uint256 burnedShares);
+    event UnstakeRequested(address indexed staker, address indexed prover, uint256 amount, uint256 rawSharesToUnstake);
     event UnstakeCompleted(address indexed staker, address indexed prover, uint256 amount);
 
     // Reward and slashing events
@@ -320,7 +320,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _prover Address of the prover to unstake from
      * @param _amount Amount of tokens to unstake (effective amount)
      */
-    function requestUnstake(address _prover, uint256 _amount) external {
+    function requestUnstake(address _prover, uint256 _amount) public {
         require(_amount > 0, "Amount must be positive");
         require(provers[_prover].state != ProverState.Null, "Unknown prover");
 
@@ -375,6 +375,27 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         stakeInfo.rewardDebt = (stakeInfo.rawShares * accRewardPerRawShare) / SCALE_FACTOR;
 
         emit UnstakeRequested(msg.sender, _prover, _amount, rawSharesToUnstake);
+    }
+
+    /**
+     * @notice Request unstaking for all staked tokens with a prover
+     * @dev Convenience function to avoid rounding surprises when trying to unstake everything.
+     *      Calculates the current effective amount and delegates to requestUnstake for consistency.
+     * @param _prover Address of the prover to unstake all tokens from
+     */
+    function requestUnstakeAll(address _prover) external {
+        require(provers[_prover].state != ProverState.Null, "Unknown prover");
+
+        ProverInfo storage prover = provers[_prover];
+        StakeInfo storage stakeInfo = prover.stakes[msg.sender];
+
+        require(stakeInfo.rawShares > 0, "No active stake to unstake");
+
+        // Calculate current effective amount for all raw shares
+        uint256 effectiveAmount = _effectiveAmount(_prover, stakeInfo.rawShares);
+
+        // Delegate to requestUnstake to handle all the logic consistently
+        requestUnstake(_prover, effectiveAmount);
     }
 
     /**
@@ -484,7 +505,15 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             // === STAKER REWARD DISTRIBUTION ===
             // Distribute remaining rewards proportionally to all stakers (including prover if self-staked)
             // Update accumulated reward per raw share for all stakers
-            prover.accRewardPerRawShare += (stakersReward * SCALE_FACTOR) / prover.totalRawShares;
+            uint256 rewardPerShare = (stakersReward * SCALE_FACTOR) / prover.totalRawShares;
+            prover.accRewardPerRawShare += rewardPerShare;
+
+            // Add dust from rounding errors directly to treasury pool
+            uint256 dustAmount = (stakersReward * SCALE_FACTOR) % prover.totalRawShares;
+            if (dustAmount > 0) {
+                treasuryPool += dustAmount;
+            }
+
             emit RewardsAdded(_prover, _amount, commission, stakersReward);
         }
     }
@@ -1005,8 +1034,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
     /**
      * @notice Get treasury pool information
-     * @dev Returns the total amount of slashed tokens available for withdrawal by treasury
-     * @return treasuryPoolBalance Amount of slashed tokens in the treasury pool
+     * @dev Returns the total amount of slashed tokens and reward dust available for withdrawal by treasury
+     * @return treasuryPoolBalance Amount of slashed tokens and accumulated reward dust in the treasury pool
      */
     function getTreasuryPool() external view returns (uint256 treasuryPoolBalance) {
         return treasuryPool;

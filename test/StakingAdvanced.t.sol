@@ -1256,6 +1256,97 @@ contract StakingAdvancedTest is Test {
         assertEq(brevToken.balanceOf(treasury), withdrawAmount, "Treasury should receive withdrawn tokens");
     }
 
+    function test_DustAccumulation_BasicScenario() public {
+        _initializeProver(prover1);
+
+        // Create scenario that will generate dust:
+        // Stake amount that doesn't divide evenly when multiplied by SCALE_FACTOR
+        _stakeToProver(staker1, prover1, 333e18); // 333 * 1e18 tokens
+
+        uint256 initialTreasuryPool = proverStaking.getTreasuryPool();
+        assertEq(initialTreasuryPool, 0, "Treasury pool should start empty");
+
+        // Add rewards that will create dust
+        uint256 rewardAmount = 1e18; // 1 token reward
+
+        // Give owner tokens to add as rewards
+        brevToken.mint(owner, rewardAmount);
+        vm.startPrank(owner);
+        brevToken.approve(address(proverStaking), rewardAmount);
+        proverStaking.addRewards(prover1, rewardAmount);
+        vm.stopPrank();
+
+        // Check if treasury pool accumulated dust
+        uint256 treasuryPoolAfter = proverStaking.getTreasuryPool();
+
+        // Calculate expected dust manually
+        uint256 commission = (rewardAmount * COMMISSION_RATE) / 10000; // 10% commission
+        uint256 stakersReward = rewardAmount - commission;
+
+        // Get total raw shares (prover + staker)
+        (uint256 totalRawShares,,,) = proverStaking.getProverInternals(prover1);
+
+        uint256 expectedDust = (stakersReward * 1e18) % totalRawShares;
+
+        if (expectedDust > 0) {
+            assertEq(treasuryPoolAfter, expectedDust, "Treasury pool should contain expected dust");
+        } else {
+            assertEq(treasuryPoolAfter, 0, "No dust should be generated in this case");
+        }
+    }
+
+    function test_DustAccumulation_MultipleRewards() public {
+        _initializeProver(prover1);
+        _stakeToProver(staker1, prover1, 777e18); // Odd number to encourage dust
+
+        uint256 initialTreasuryPool = proverStaking.getTreasuryPool();
+
+        // Add multiple small rewards to accumulate dust
+        uint256 smallReward = 1e15; // 0.001 tokens
+
+        // Give owner tokens to add as rewards
+        brevToken.mint(owner, smallReward * 10);
+        vm.startPrank(owner);
+        brevToken.approve(address(proverStaking), smallReward * 10);
+
+        for (uint256 i = 0; i < 10; i++) {
+            proverStaking.addRewards(prover1, smallReward);
+        }
+        vm.stopPrank();
+
+        uint256 finalTreasuryPool = proverStaking.getTreasuryPool();
+
+        // Treasury pool should have accumulated some dust
+        assertGt(finalTreasuryPool, initialTreasuryPool, "Treasury pool should accumulate dust from multiple rewards");
+    }
+
+    function test_DustAccumulation_CombinedWithSlashing() public {
+        _initializeProver(prover1);
+        _stakeToProver(staker1, prover1, 555e18);
+
+        // Add rewards to generate some dust
+        brevToken.mint(owner, 1e18);
+        vm.startPrank(owner);
+        brevToken.approve(address(proverStaking), 1e18);
+        proverStaking.addRewards(prover1, 1e18);
+
+        uint256 treasuryAfterRewards = proverStaking.getTreasuryPool();
+
+        // Now slash the prover - this should add slashed tokens to treasury pool
+        // (owner already has SLASHER_ROLE from setUp)
+        proverStaking.slash(prover1, 100000); // 10% slash
+        vm.stopPrank();
+
+        uint256 treasuryAfterSlash = proverStaking.getTreasuryPool();
+
+        // Treasury pool should contain both dust from rewards AND slashed tokens
+        assertGt(treasuryAfterSlash, treasuryAfterRewards, "Treasury pool should increase from slashing");
+
+        // The increase should be meaningful (more than just dust)
+        uint256 increase = treasuryAfterSlash - treasuryAfterRewards;
+        assertGt(increase, 50e18, "Slashing should contribute significant amount to treasury");
+    }
+
     // Event declarations
     event ProverRetired(address indexed prover);
     event ProverUnretired(address indexed prover);

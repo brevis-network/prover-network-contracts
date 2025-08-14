@@ -938,6 +938,73 @@ contract StakingTest is Test {
         proverStaking.reactivateProver(prover1);
     }
 
+    function test_RequestUnstakeAll_BasicFunctionality() public {
+        _initializeProver(prover1);
+        _stakeToProver(staker1, prover1, 1000e18);
+
+        // Get initial stake info
+        (uint256 initialAmount,,,) = proverStaking.getStakeInfo(prover1, staker1);
+        assertEq(initialAmount, 1000e18, "Initial stake should be 1000e18");
+
+        // Request unstake all
+        vm.startPrank(staker1);
+        proverStaking.requestUnstakeAll(prover1);
+        vm.stopPrank();
+
+        // Verify all stake is now pending unstake
+        (uint256 remainingAmount, uint256 pendingUnstake, uint256 pendingCount,) =
+            proverStaking.getStakeInfo(prover1, staker1);
+
+        assertEq(remainingAmount, 0, "No active stake should remain");
+        assertEq(pendingUnstake, 1000e18, "All stake should be pending unstake");
+        assertEq(pendingCount, 1, "Should have one pending unstake request");
+    }
+
+    function test_RequestUnstakeAll_RevertOnNoStake() public {
+        _initializeProver(prover1);
+
+        // Try to unstake all when staker has no stake
+        vm.startPrank(staker1);
+        vm.expectRevert("No active stake to unstake");
+        proverStaking.requestUnstakeAll(prover1);
+        vm.stopPrank();
+    }
+
+    function test_RequestUnstakeAll_RevertOnUnknownProver() public {
+        address unknownProver = makeAddr("unknownProver");
+
+        vm.startPrank(staker1);
+        vm.expectRevert("Unknown prover");
+        proverStaking.requestUnstakeAll(unknownProver);
+        vm.stopPrank();
+    }
+
+    function test_RequestUnstakeAll_ConsistencyWithRegularUnstake() public {
+        _initializeProver(prover1);
+        _stakeToProver(staker1, prover1, 1000e18);
+        _stakeToProver(staker2, prover1, 1000e18);
+
+        // Get effective amounts for both stakers
+        (uint256 staker2Amount,,,) = proverStaking.getStakeInfo(prover1, staker2);
+
+        // Staker1 uses requestUnstakeAll
+        vm.startPrank(staker1);
+        proverStaking.requestUnstakeAll(prover1);
+        vm.stopPrank();
+
+        // Staker2 uses regular requestUnstake with full amount
+        vm.startPrank(staker2);
+        proverStaking.requestUnstake(prover1, staker2Amount);
+        vm.stopPrank();
+
+        // Both should have identical results
+        (, uint256 staker1Pending, uint256 staker1Count,) = proverStaking.getStakeInfo(prover1, staker1);
+        (, uint256 staker2Pending, uint256 staker2Count,) = proverStaking.getStakeInfo(prover1, staker2);
+
+        assertEq(staker1Pending, staker2Pending, "Pending amounts should be identical");
+        assertEq(staker1Count, staker2Count, "Pending counts should be identical");
+    }
+
     // ========== HELPER FUNCTIONS ==========
 
     // Add the event declarations
