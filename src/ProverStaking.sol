@@ -40,8 +40,14 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     // Slashing percentages are expressed in parts per million for higher precision
     uint256 public constant SLASH_FACTOR_DENOMINATOR = 1e6;
 
+    // Maximum single slash percentage (50% = 500,000 parts per million)
+    uint256 public constant MAX_SLASH_PERCENTAGE = 500000; // 50%
+
     // Base scale factor for mathematical precision in reward calculations
     uint256 public constant SCALE_FACTOR = 1e18;
+
+    // Minimum scale factor - provers below this get auto-deactivated (20% = 2e17)
+    uint256 public constant MIN_SCALE_FACTOR = 2e17; // 20% of original value
 
     // Maximum number of pending unstake requests per staker per prover
     uint256 public constant MAX_PENDING_UNSTAKES = 10;
@@ -540,24 +546,25 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
     /**
      * @notice Slash a prover for invalid proof submission or malicious behavior
-     * @dev Global Slashing Algorithm:
-     *      1. Calculate remaining percentage after slashing
+     * @dev Simplified Slashing Algorithm:
+     *      1. Enforce maximum slash percentage per operation
      *      2. Update global scale factor: newScale = oldScale * (1 - slashPercentage)
-     *      3. This affects ALL stakes (active + pending unstake) proportionally
-     *      4. Calculate total slashed amount for event emission
+     *      3. Auto-deactivate prover if scale drops below minimum threshold
+     *      4. This affects ALL stakes (active + pending unstake) proportionally
      *
      *      Key Properties:
-     *      - All stakers are slashed proportionally regardless of when they staked
-     *      - Pending unstakes are also subject to slashing (prevents exit to avoid punishment)
+     *      - Maximum single slash is capped
+     *      - Severely slashed provers get automatically deactivated
      *      - Scale factor creates efficient slashing without iterating over all stakers
-     *      - Slashing is irreversible and affects future effective amounts immediately
+     *      - System remains functional - no liveness issues with scale approaching zero
      *
      * @param _prover The address of the prover to be slashed
-     * @param _percentage The percentage of stake to slash (0-999999, where 1000000 = 100%)
+     * @param _percentage The percentage of stake to slash (0 to MAX_SLASH_PERCENTAGE)
      */
     function slash(address _prover, uint256 _percentage) external onlyRole(SLASHER_ROLE) {
         require(provers[_prover].state != ProverState.Null, "Unknown prover");
         require(_percentage < SLASH_FACTOR_DENOMINATOR, "Cannot slash 100%");
+        require(_percentage <= MAX_SLASH_PERCENTAGE, "Slash percentage too high");
 
         ProverInfo storage prover = provers[_prover];
 
@@ -566,11 +573,18 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
         // === GLOBAL SCALE UPDATE ===
         // Update the global scale factor to reflect the slash
-        // This is the core slashing mechanism - affects both active stakes AND pending unbonds
         uint256 remainingFactor = SLASH_FACTOR_DENOMINATOR - _percentage;
         prover.scale = (prover.scale * remainingFactor) / SLASH_FACTOR_DENOMINATOR;
 
-        // Calculate total slashed amount for event (active shares only for clarity)
+        // === AUTO-DEACTIVATION CHECK ===
+        // If scale drops below minimum threshold, automatically deactivate the prover
+        if (prover.scale < MIN_SCALE_FACTOR && prover.state == ProverState.Active) {
+            prover.state = ProverState.Deactivated;
+            activeProvers.remove(_prover);
+            emit ProverDeactivated(_prover);
+        }
+
+        // Calculate total slashed amount for event
         uint256 totalEffectiveAfter = _getTotalEffectiveStake(_prover);
         uint256 totalSlashed = totalEffectiveBefore - totalEffectiveAfter;
 

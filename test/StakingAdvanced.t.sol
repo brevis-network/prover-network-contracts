@@ -159,12 +159,12 @@ contract StakingAdvancedTest is Test {
         vm.prank(staker1);
         proverStaking.stake(prover1, massiveStake);
 
-        // Slash 99.99%
+        // Slash maximum allowed (50%)
         vm.prank(owner);
-        proverStaking.slash(prover1, 999900); // 99.99%
+        proverStaking.slash(prover1, 500000); // 50%
 
         (,,, uint256 totalStake,) = proverStaking.getProverInfo(prover1);
-        uint256 expectedRemaining = ((MIN_SELF_STAKE + massiveStake) * 1) / 10000; // 0.01%
+        uint256 expectedRemaining = (MIN_SELF_STAKE + massiveStake) / 2; // 50%
         assertApproxEqRel(totalStake, expectedRemaining, 1e15);
     }
 
@@ -172,23 +172,39 @@ contract StakingAdvancedTest is Test {
         _initializeProver(prover1);
         _stakeToProver(staker1, prover1, 4000e18);
 
-        // Multiple severe slashes
-        vm.prank(owner);
-        proverStaking.slash(prover1, 800000); // 80% slash - leaves 20%
-        vm.prank(owner);
-        proverStaking.slash(prover1, 750000); // 75% of remaining - leaves 5% total
-        vm.prank(owner);
-        proverStaking.slash(prover1, 500000); // 50% of remaining - leaves 2.5% total
+        // Multiple maximum slashes to demonstrate auto-deactivation at 20% threshold
+        proverStaking.slash(prover1, 500000); // 50% slash - leaves 50%
+
+        // Verify still active after first slash
+        (ProverStaking.ProverState state1,,,,) = proverStaking.getProverInfo(prover1);
+        assertEq(uint256(state1), uint256(ProverStaking.ProverState.Active));
+
+        proverStaking.slash(prover1, 500000); // 50% of remaining - leaves 25% total
+
+        // Verify still active after second slash (still above 20% threshold)
+        (ProverStaking.ProverState state2,,,,) = proverStaking.getProverInfo(prover1);
+        assertEq(uint256(state2), uint256(ProverStaking.ProverState.Active));
+
+        proverStaking.slash(prover1, 500000); // 50% of remaining - leaves 12.5% total
+
+        // NOW should be auto-deactivated (below 20% threshold)
+        (ProverStaking.ProverState finalState,,,,) = proverStaking.getProverInfo(prover1);
+        assertEq(uint256(finalState), uint256(ProverStaking.ProverState.Deactivated));
 
         (,,, uint256 finalStake,) = proverStaking.getProverInfo(prover1);
         uint256 originalStake = MIN_SELF_STAKE + 4000e18; // 14000e18
-        uint256 expectedFinalStake = (originalStake * 25) / 1000; // 2.5% = 350e18
+        // After 3 slashes of 50% each: 14000 * (0.5)^3 = 14000 * 0.125 = 1750e18
+        uint256 expectedFinalStake = originalStake / 8; // 12.5% remaining
 
         assertEq(finalStake, expectedFinalStake);
 
         // Staker should still be able to unstake remaining amount
+        // After 3 slashes of 50% each, the staker's stake is reduced by the same factor
+        // Original staker stake: 4000e18, after slashes: 4000e18 * (0.5)^3 = 4000e18 * 0.125 = 500e18
+        uint256 stakerRemainingStake = 4000e18 / 8; // 12.5% remaining
+
         vm.prank(staker1);
-        proverStaking.requestUnstake(prover1, (4000e18 * 25) / 1000); // 2.5% of original stake
+        proverStaking.requestUnstake(prover1, stakerRemainingStake);
 
         vm.warp(block.timestamp + 7 days + 1);
         uint256 balanceBefore = brevToken.balanceOf(staker1);
@@ -196,7 +212,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.completeUnstake(prover1);
         uint256 balanceAfter = brevToken.balanceOf(staker1);
 
-        assertEq(balanceAfter - balanceBefore, (4000e18 * 25) / 1000);
+        assertEq(balanceAfter - balanceBefore, stakerRemainingStake);
     }
 
     // ========== COMPLEX INTERACTION SEQUENCES ==========
@@ -1138,6 +1154,63 @@ contract StakingAdvancedTest is Test {
 
         // Verify prover received rewards (exact calculation is complex due to staking rewards)
         assertGt(balanceAfter, balanceBefore, "Prover should receive rewards");
+    }
+
+    function test_MaxSlashPercentageLimit() public {
+        _initializeProver(prover1);
+        _stakeToProver(staker1, prover1, 1000e18);
+
+        // Try to slash more than 50% - should revert
+        vm.expectRevert("Slash percentage too high");
+        proverStaking.slash(prover1, 500001); // 50.0001%
+
+        // Slash exactly 50% - should work
+        proverStaking.slash(prover1, 500000); // 50%
+
+        // Verify prover is still active after 50% slash
+        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover1);
+        assertTrue(state == ProverStaking.ProverState.Active, "Prover should still be active after 50% slash");
+    }
+
+    function test_AutoDeactivationOnMinScale() public {
+        _initializeProver(prover1);
+        _stakeToProver(staker1, prover1, 1000e18);
+
+        // Get initial scale
+        (, uint256 initialScale,,) = proverStaking.getProverInternals(prover1);
+        assertEq(initialScale, 1e18, "Initial scale should be 1e18");
+
+        // Slash multiple times to approach minimum scale (20% threshold)
+        // Each 50% slash reduces scale by half
+        // After 1 slash: 1e18 * 0.5 = 5e17 (50%) - still above 20%
+        // After 2 slashes: 1e18 * (0.5)^2 = 2.5e17 (25%) - still above 20%
+        // After 3 slashes: 1e18 * (0.5)^3 = 1.25e17 (12.5%) - below 20% threshold
+
+        proverStaking.slash(prover1, 500000); // 1st slash - 50%
+        (ProverStaking.ProverState state1,,,,) = proverStaking.getProverInfo(prover1);
+        assertTrue(state1 == ProverStaking.ProverState.Active, "Prover should still be active after 1st slash");
+
+        proverStaking.slash(prover1, 500000); // 2nd slash - 25% remaining
+        (ProverStaking.ProverState state2,,,,) = proverStaking.getProverInfo(prover1);
+        assertTrue(state2 == ProverStaking.ProverState.Active, "Prover should still be active after 2nd slash");
+
+        // Check scale after 2 slashes
+        (, uint256 scaleAfter2,,) = proverStaking.getProverInternals(prover1);
+        assertTrue(scaleAfter2 > 2e17, "Scale should still be above 20% minimum");
+
+        // Third 50% slash should trigger auto-deactivation (scale drops to 12.5%)
+        proverStaking.slash(prover1, 500000); // 3rd slash
+
+        // Verify prover is now deactivated
+        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover1);
+        assertTrue(
+            state == ProverStaking.ProverState.Deactivated,
+            "Prover should be auto-deactivated after scale drops below 20%"
+        );
+
+        // Verify scale is below 20% minimum
+        (, uint256 finalScale,,) = proverStaking.getProverInternals(prover1);
+        assertTrue(finalScale < 2e17, "Scale should be below 20% threshold");
     }
 
     // Event declarations

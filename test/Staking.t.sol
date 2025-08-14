@@ -158,7 +158,7 @@ contract StakingTest is Test {
 
         // Slash prover to reduce effective self-stake below minimum
         vm.prank(owner);
-        proverStaking.slash(prover1, 600000); // 60% slash
+        proverStaking.slash(prover1, 500000); // 50% slash
 
         vm.prank(staker1);
         brevToken.approve(address(proverStaking), 1000e18);
@@ -660,13 +660,13 @@ contract StakingTest is Test {
         vm.prank(prover4);
         proverStaking.initProver(1000e18, 1000);
 
-        // Slash the prover by 60%
+        // Slash the prover by 50%
         vm.prank(owner);
-        proverStaking.slash(prover4, 600000);
+        proverStaking.slash(prover4, 500000);
 
         (eligible, totalStake) = proverStaking.isProverEligible(prover4, 200e18);
         assertFalse(eligible, "Slashed prover below minSelfStake should not be eligible");
-        assertEq(totalStake, 400e18, "Should return slashed total stake"); // 1000e18 * 0.4 = 400e18
+        assertEq(totalStake, 500e18, "Should return slashed total stake"); // 1000e18 * 0.5 = 500e18
     }
 
     function test_AddRewardsExternal() public {
