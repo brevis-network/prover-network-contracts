@@ -46,8 +46,12 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     // Base scale factor for mathematical precision in reward calculations
     uint256 public constant SCALE_FACTOR = 1e18;
 
-    // Minimum scale factor - provers below this get auto-deactivated (20% = 2e17)
-    uint256 public constant MIN_SCALE_FACTOR = 2e17; // 20% of original value
+    // Soft / operational threshold (20% = 2e17): crossing this DEACTIVATION_SCALE deactivates the prover,
+    // but further slashing is still allowed down to the MIN_SCALE_FLOOR (hard floor). Once a slash
+    // would push scale below the hard floor (10%), the slash reverts to avoid pathological
+    // raw share inflation and precision loss.
+    uint256 public constant DEACTIVATION_SCALE = 2e17; // 20% (soft threshold – triggers deactivation)
+    uint256 public constant MIN_SCALE_FLOOR = DEACTIVATION_SCALE / 2; // 10% (hard invariant – cannot be crossed)
 
     // Maximum number of pending unstake requests per staker per prover
     uint256 public constant MAX_PENDING_UNSTAKES = 10;
@@ -200,7 +204,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _token ERC20 token address used for both staking and rewards
      * @param _globalMinSelfStake Global minimum self-stake requirement for all provers
      */
-    function init(address _token, uint256 _globalMinSelfStake) external onlyOwner {
+    function init(address _token, uint256 _globalMinSelfStake) external {
         _init(_token, _globalMinSelfStake);
         initOwner();
     }
@@ -679,10 +683,16 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         // Calculate total effective stake before slashing (for event emission)
         uint256 totalEffectiveBefore = _getTotalEffectiveStake(_prover);
 
-        // === GLOBAL SCALE UPDATE ===
-        // Update the global scale factor to reflect the slash
+        // === GLOBAL SCALE UPDATE WITH DUAL THRESHOLDS ===
+        // Compute prospective new scale after this slash.
         uint256 remainingFactor = SLASH_FACTOR_DENOMINATOR - _percentage;
-        prover.scale = (prover.scale * remainingFactor) / SLASH_FACTOR_DENOMINATOR;
+        uint256 newScale = (prover.scale * remainingFactor) / SLASH_FACTOR_DENOMINATOR;
+
+        // Hard stop: do not allow scale to reach or drop below MIN_SCALE_FLOOR.
+        require(newScale > MIN_SCALE_FLOOR, "Scale too low");
+
+        // Apply new scale.
+        prover.scale = newScale;
 
         // === TREASURY POOL ACCOUNTING ===
         // Calculate total slashed amount and add to treasury pool
@@ -697,8 +707,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         }
 
         // === AUTO-DEACTIVATION CHECK ===
-        // If scale drops below minimum threshold, automatically deactivate the prover
-        if (prover.scale < MIN_SCALE_FACTOR && prover.state == ProverState.Active) {
+        // If scale at or below DEACTIVATION_SCALE, deactivate (but allow future slashes until hard floor).
+        if (prover.scale <= DEACTIVATION_SCALE && prover.state == ProverState.Active) {
             prover.state = ProverState.Deactivated;
             activeProvers.remove(_prover);
             emit ProverDeactivated(_prover);
