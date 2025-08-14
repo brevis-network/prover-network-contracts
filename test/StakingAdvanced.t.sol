@@ -1279,14 +1279,17 @@ contract StakingAdvancedTest is Test {
         // Check if treasury pool accumulated dust
         uint256 treasuryPoolAfter = proverStaking.getTreasuryPool();
 
-        // Calculate expected dust manually
+        // Calculate expected dust manually using the corrected method
         uint256 commission = (rewardAmount * COMMISSION_RATE) / 10000; // 10% commission
         uint256 stakersReward = rewardAmount - commission;
 
         // Get total raw shares (prover + staker)
         (uint256 totalRawShares,,,) = proverStaking.getProverInternals(prover1);
 
-        uint256 expectedDust = (stakersReward * 1e18) % totalRawShares;
+        // Use the corrected dust calculation (in token units, not scaled units)
+        uint256 deltaAcc = (stakersReward * 1e18) / totalRawShares;
+        uint256 distributed = (deltaAcc * totalRawShares) / 1e18; // tokens actually distributed
+        uint256 expectedDust = stakersReward - distributed; // tokens
 
         if (expectedDust > 0) {
             assertEq(treasuryPoolAfter, expectedDust, "Treasury pool should contain expected dust");

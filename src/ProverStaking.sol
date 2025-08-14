@@ -563,14 +563,16 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         } else {
             // === STAKER REWARD DISTRIBUTION ===
             // Distribute remaining rewards proportionally to all stakers (including prover if self-staked)
-            // Update accumulated reward per raw share for all stakers
-            uint256 rewardPerShare = (stakersReward * SCALE_FACTOR) / prover.totalRawShares;
-            prover.accRewardPerRawShare += rewardPerShare;
+            // Calculate accumulator delta and ensure dimensional consistency for dust accounting
+            uint256 deltaAcc = (stakersReward * SCALE_FACTOR) / prover.totalRawShares;
+            uint256 distributed = (deltaAcc * prover.totalRawShares) / SCALE_FACTOR; // tokens actually distributed
+            uint256 dust = stakersReward - distributed; // tokens
 
-            // Add dust from rounding errors directly to treasury pool
-            uint256 dustAmount = (stakersReward * SCALE_FACTOR) % prover.totalRawShares;
-            if (dustAmount > 0) {
-                treasuryPool += dustAmount;
+            prover.accRewardPerRawShare += deltaAcc;
+
+            // Add dust from rounding errors to treasury pool (in token units)
+            if (dust > 0) {
+                treasuryPool += dust;
             }
 
             emit RewardsAdded(_prover, _amount, commission, stakersReward);

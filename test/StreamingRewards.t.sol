@@ -1119,4 +1119,52 @@ contract StreamingRewardsTest is Test {
         uint256 stakerShare = proverStaking.getPendingRewards(prover1, staker1);
         assertEq(stakerShare, 2.25e18, "Staker share incorrect - time drift detected!");
     }
+
+    function test_DustAccountingInTokenUnitsNotScaledUnits() public {
+        _initializeProver(prover1);
+
+        // Create a scenario that will generate dust
+        uint256 stakeAmount = 333e18; // 333 tokens
+        _stakeToProver(staker1, prover1, stakeAmount);
+
+        uint256 rewardAmount = 1e18; // 1 token
+
+        // Get prover data to calculate expected values
+        (uint256 totalRawShares,,,) = proverStaking.getProverInternals(prover1);
+
+        // Calculate what the dust should be using the CORRECTED method
+        uint256 commission = (rewardAmount * COMMISSION_RATE) / 10000;
+        uint256 stakersReward = rewardAmount - commission;
+
+        // Corrected dust calculation (in token units)
+        uint256 deltaAcc = (stakersReward * SCALE_FACTOR) / totalRawShares;
+        uint256 distributed = (deltaAcc * totalRawShares) / SCALE_FACTOR;
+        uint256 expectedDustTokens = stakersReward - distributed;
+
+        // Calculate what the dust would be using the OLD INCORRECT method
+        uint256 incorrectDustScaled = (stakersReward * SCALE_FACTOR) % totalRawShares;
+
+        // Verify these are different (proving the bug existed)
+        if (expectedDustTokens != incorrectDustScaled) {
+            assertGt(incorrectDustScaled, expectedDustTokens, "Incorrect method should give inflated dust");
+        }
+
+        uint256 treasuryBefore = proverStaking.getTreasuryPool();
+
+        // Add the rewards
+        brevToken.mint(owner, rewardAmount);
+        vm.startPrank(owner);
+        brevToken.approve(address(proverStaking), rewardAmount);
+        proverStaking.addRewards(prover1, rewardAmount);
+        vm.stopPrank();
+
+        uint256 treasuryAfter = proverStaking.getTreasuryPool();
+        uint256 actualDust = treasuryAfter - treasuryBefore;
+
+        // Verify the dust is calculated correctly (in token units)
+        assertEq(actualDust, expectedDustTokens, "Dust should be in token units");
+
+        // The dust should be small relative to the reward amount
+        assertLt(actualDust, rewardAmount / 100, "Dust should be less than 1% of reward");
+    }
 }
