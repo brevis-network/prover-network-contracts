@@ -560,7 +560,7 @@ contract StreamingRewardsTest is Test {
 
     // ========== HELPER FUNCTION TESTS ==========
 
-    function test_TopUpGlobalBudget() public {
+    function test_AddStreamingBudgetFromMultipleUsers() public {
         _fundGlobalBudget(100e18);
 
         // Add more budget from a different user to test anyone can fund

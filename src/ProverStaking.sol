@@ -173,7 +173,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
     // Emission events
     event GlobalRateUpdated(uint256 oldRate, uint256 newRate);
-    event GlobalBudgetFunded(uint256 amount, uint256 newTotal);
     event StreamingRewardsSettled(address indexed prover, uint256 totalOwed, uint256 commission, uint256 distributed);
     event StreamingRewardsWithdrawn(address indexed staker, address indexed prover, uint256 amount);
     event StreamingRateUpdated(uint256 oldRate, uint256 newRate);
@@ -863,22 +862,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     function settleProverStreaming(address _prover) external {
         _updateGlobalStreaming();
         _settleProverStreaming(_prover);
-    }
-
-    /**
-     * @notice Fund the global streaming budget with tokens
-     * @dev Transfers tokens to the contract for streaming distribution
-     * @param _amount Amount of tokens to add to the streaming budget
-     */
-    function topUpGlobalBudget(uint256 _amount) external {
-        require(_amount > 0, "Amount must be positive");
-
-        // Transfer tokens from sender to contract
-        IERC20(brevToken).safeTransferFrom(msg.sender, address(this), _amount);
-
-        globalEmissionBudget += _amount;
-
-        emit GlobalBudgetFunded(_amount, globalEmissionBudget);
     }
 
     /**
