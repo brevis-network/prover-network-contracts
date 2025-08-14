@@ -186,8 +186,17 @@ function addRewards(address _prover, uint256 _amount) external {
         // No stakers exist, prover gets all remaining rewards as commission
         prover.pendingCommission += stakersReward;
     } else {
-        // O(1) operation: update accumulator for stakers
-        prover.accRewardPerRawShare += (stakersReward * SCALE_FACTOR) / prover.totalRawShares;
+        // O(1) operation: update accumulator for stakers with dust handling
+        uint256 deltaAcc = (stakersReward * SCALE_FACTOR) / prover.totalRawShares;
+        uint256 distributed = (deltaAcc * prover.totalRawShares) / SCALE_FACTOR;
+        uint256 dust = stakersReward - distributed; // dust in token units, not scaled
+        
+        prover.accRewardPerRawShare += deltaAcc;
+        
+        // Add dust from rounding errors to treasury pool (corrected calculation)
+        if (dust > 0) {
+            treasuryPool += dust;
+        }
     }
 }
 
@@ -254,53 +263,62 @@ newScale = oldScale × (1,000,000 - 300,000) ÷ 1,000,000 = oldScale × 0.7
 
 ### 5. Streaming Rewards System
 
-The streaming rewards system provides continuous time-based reward distribution to all active provers. Unlike proof rewards which are tied to specific work completion, streaming rewards are distributed proportionally based on effective shares over time.
+The streaming rewards system provides continuous time-based reward distribution to all active provers. Unlike proof rewards which are tied to specific work completion, streaming rewards are distributed proportionally based on effective stakes over time.
 
 #### Key Components
 
-1. **Global Accumulator**: `accStreamingRewardPerEffectiveShare` tracks streaming rewards earned per effective share
-2. **Time-Based Distribution**: `streamingRate` defines tokens distributed per second across all active provers
-3. **Effective Share Weighting**: Uses effective shares (raw shares × multiplier) for proportional distribution
+1. **Global Accumulator**: `globalAccPerEff` tracks streaming rewards earned per unit of effective stake
+2. **Time-Based Distribution**: `globalRatePerSec` defines tokens distributed per second across all active provers
+3. **Effective Stake Weighting**: Uses total effective stake amounts for proportional distribution
 4. **Separate Accounting**: Streaming rewards use dedicated debt tracking (`rewardDebtEff`) independent of proof rewards
+5. **Public Budget Addition**: Anyone can add funds to the streaming budget via `addStreamingBudget`
 
 #### Streaming Reward Algorithm
 
 ```solidity
-function _updateGlobalAccumulator() internal {
+function _updateGlobalStreaming() internal {
     if (totalEffectiveActive == 0) return; // No active provers
     
-    uint256 timeElapsed = block.timestamp - lastStreamingUpdate;
-    uint256 newRewards = timeElapsed * streamingRate;
+    uint256 timeElapsed = block.timestamp - lastGlobalTime;
+    uint256 totalRewards = globalRatePerSec * timeElapsed;
     
-    accStreamingRewardPerEffectiveShare += (newRewards * SCALE_FACTOR) / totalEffectiveActive;
-    lastStreamingUpdate = block.timestamp;
+    // Cap by available budget
+    if (totalRewards > globalEmissionBudget) {
+        totalRewards = globalEmissionBudget;
+    }
+    
+    if (totalRewards > 0) {
+        globalAccPerEff += (totalRewards * SCALE_FACTOR) / totalEffectiveActive;
+        globalEmissionBudget -= totalRewards;
+    }
+    
+    lastGlobalTime = block.timestamp;
 }
 
-// Streaming rewards calculated on-demand
-streamingRewards = (effectiveShares * accStreamingRewardPerEffectiveShare / SCALE_FACTOR) - rewardDebtEff
+// Streaming rewards calculated for active provers only
+streamingRewards = (effectiveStake * globalAccPerEff / SCALE_FACTOR) - rewardDebtEff
 ```
 
-#### State Transition Impact
+#### State Transition Impact and Fixes
 
-Streaming rewards are affected by prover state changes:
+Streaming rewards are only earned by **Active** provers. Key behavioral fixes:
 
-- **Joining (Inactive → Active)**: Adds effective shares to `totalEffectiveActive`, updates debt to current accumulator
-- **Leaving (Active → Deactivated)**: Removes effective shares from `totalEffectiveActive`, settles accrued rewards
-- **Reactivation (Deactivated → Active)**: Re-adds effective shares, resets debt to prevent double-claiming
+- **Active State Requirement**: Only provers in `ProverState.Active` earn streaming rewards
+- **Inactive Period Isolation**: Deactivated or retired provers earn zero additional streaming rewards
+- **Settlement Timing**: Streaming rewards are settled before state transitions to capture earned rewards
+- **View Function Accuracy**: `getPendingStreamingRewards` returns zero for inactive provers
 
 ```solidity
-function _updateEffectiveActiveShares(address prover, bool isActive) internal {
-    ProverInfo storage info = provers[prover];
+function getPendingStreamingRewards(address _prover) external view 
+    returns (uint256 pendingTotal, uint256 pendingCommission, uint256 pendingStakers) {
     
-    if (isActive && info.status != ProverStatus.Active) {
-        // Prover becoming active
-        totalEffectiveActive += info.totalEffectiveShares;
-        info.rewardDebtEff = (info.totalEffectiveShares * accStreamingRewardPerEffectiveShare) / SCALE_FACTOR;
-    } else if (!isActive && info.status == ProverStatus.Active) {
-        // Prover becoming inactive
-        _settleStreamingRewards(prover);
-        totalEffectiveActive -= info.totalEffectiveShares;
+    // Fixed: Only Active provers earn streaming rewards
+    if (provers[_prover].state != ProverState.Active) {
+        return (0, 0, 0);
     }
+    
+    // Calculate pending rewards for active provers only
+    // ... rest of calculation
 }
 ```
 
@@ -309,20 +327,37 @@ function _updateEffectiveActiveShares(address prover, bool isActive) internal {
 Streaming rewards respect the same commission structure as proof rewards:
 - Commission percentage applied to total streaming rewards earned by prover
 - Remaining rewards distributed to stakers based on raw share percentage
-- Commission credited to `pendingCommission`, staker rewards to `pendingRewards`
+- Commission credited to `pendingCommission`, staker rewards settled to individual `pendingRewards`
+
+#### Budget and Access Control
+
+Key fixes to streaming budget management:
+
+```solidity
+function addStreamingBudget(uint256 _amount) external {
+    // Fixed: Anyone can add to streaming budget (not just owner)
+    require(_amount > 0, "Amount must be positive");
+    
+    IERC20(brevToken).safeTransferFrom(msg.sender, address(this), _amount);
+    globalEmissionBudget += _amount;
+    
+    emit StreamingBudgetAdded(_amount, globalEmissionBudget);
+}
+```
 
 #### Streaming Reward Formulas
 
 ```
-Time Elapsed = block.timestamp - lastStreamingUpdate
-New Rewards = timeElapsed × streamingRate
+Time Elapsed = block.timestamp - lastGlobalTime
+Total Rewards = min(timeElapsed × globalRatePerSec, globalEmissionBudget)
 
-If totalEffectiveActive > 0:
-    accStreamingRewardPerEffectiveShare += (newRewards × SCALE_FACTOR) ÷ totalEffectiveActive
-    lastStreamingUpdate = block.timestamp
+If totalEffectiveActive > 0 AND Total Rewards > 0:
+    globalAccPerEff += (Total Rewards × SCALE_FACTOR) ÷ totalEffectiveActive
+    globalEmissionBudget -= Total Rewards
+    lastGlobalTime = block.timestamp
 
-Streaming Rewards (for prover):
-AccruedStreamingRewards = (effectiveShares × accStreamingRewardPerEffectiveShare) ÷ SCALE_FACTOR
+Streaming Rewards (for active prover only):
+AccruedStreamingRewards = (effectiveStake × globalAccPerEff) ÷ SCALE_FACTOR
 PendingStreamingRewards = AccruedStreamingRewards - rewardDebtEff
 
 Commission Distribution:
@@ -330,14 +365,15 @@ StreamingCommission = PendingStreamingRewards × commissionRate ÷ COMMISSION_RA
 StakersStreamingReward = PendingStreamingRewards - StreamingCommission
 
 Where:
-- streamingRate: ERC20 tokens per second
-- effectiveShares: rawShares × effectiveMultiplier
-- totalEffectiveActive: sum of effective shares for all active provers
+- globalRatePerSec: ERC20 tokens per second distributed globally
+- effectiveStake: total effective stake for the prover (post-slashing)
+- totalEffectiveActive: sum of effective stakes for all active provers only
 ```
 
-#### Mathematical Properties
+#### Mathematical Properties and Fixes
 
-1. **Conservation**: Total streaming rewards distributed equals `streamingRate × timeElapsed × numActivePeriods`
-2. **Proportionality**: Each prover receives `(effectiveShares / totalEffectiveActive) × totalStreamingRewards`
-3. **Independence**: Streaming rewards calculations are independent of proof rewards
+1. **Conservation**: Total streaming rewards distributed ≤ `globalRatePerSec × timeElapsed`, capped by budget
+2. **Proportionality**: Each active prover receives `(effectiveStake / totalEffectiveActive) × totalStreamingRewards`
+3. **State Isolation**: Inactive periods do not accrue rewards, ensuring proper isolation
 4. **Precision**: Uses `SCALE_FACTOR` (1e18) to maintain precision in division operations
+5. **Dust Handling**: Corrected dust calculations in token units rather than scaled units
