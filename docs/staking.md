@@ -2,11 +2,12 @@
 
 ## Overview
 
-The `ProverStaking` contract implements a delegation-based staking system for prover networks. It enables users to stake ERC20 tokens with provers while maintaining O(1) complexity for critical operations through a dual-share mechanism and global accumulators. It implements three core algorithms:
+The `ProverStaking` contract implements a delegation-based staking system for prover networks. It enables users to stake ERC20 tokens with provers while maintaining O(1) complexity for critical operations through a dual-share mechanism and global accumulators. It implements four core algorithms:
 
 1. **O(1) Staking/Unstaking**: Raw shares system enables proportional calculations without iteration
-2. **O(1) Reward Distribution**: Global accumulator distributes rewards to all stakers simultaneously
+2. **O(1) Reward Distribution**: Global accumulator distributes proof rewards to all stakers simultaneously
 3. **O(1) Slashing**: Scale factor mechanism slashes all stakes without touching individual balances
+4. **O(1) Streaming Rewards**: Global emission system distributes time-based rewards to active provers
 
 
 ## Table of Contents
@@ -16,8 +17,9 @@ The `ProverStaking` contract implements a delegation-based staking system for pr
 - [Key Algorithms](#key-algorithms)
    - [Raw Shares System](#1-raw-shares-system)
    - [Staking & Unstaking](#2-staking--unstaking)
-   - [Reward Distribution](#3-reward-distribution)
+   - [Proof Reward Distribution](#3-proof-reward-distribution)
    - [Slashing](#4-slashing)
+   - [Streaming Rewards System](#5-streaming-rewards-system)
 
 ---
 
@@ -43,8 +45,11 @@ struct ProverInfo {
     uint256 scale;                    // Global scale factor (1e18 = no slashing)
     
     // === REWARD DISTRIBUTION ===
-    uint256 accRewardPerRawShare;     // Accumulated rewards per raw share
-    uint256 pendingCommission;        // Unclaimed commission
+    uint256 accRewardPerRawShare;     // Accumulated proof rewards per raw share
+    uint256 pendingCommission;        // Unclaimed commission (proof + streaming)
+    
+    // === STREAMING REWARDS ===
+    uint256 rewardDebtEff;            // Streaming reward debt (based on effective stake)
     
     // === MIN SELF STAKE UPDATE ===
     PendingMinSelfStakeUpdate pendingMinSelfStakeUpdate; // Pending minSelfStake decrease
@@ -163,9 +168,9 @@ function completeUnstake(address _prover) external {
 - Automatic completion of all eligible requests for better UX
 - Unstaking affects staker tracking: removed from stakers set when stake becomes zero
 
-### 3. Reward Distribution
+### 3. Proof Reward Distribution
 
-Instead of updating individual staker balances, the system maintains a global accumulator (`accRewardPerRawShare`) that tracks rewards earned per raw share. Rewards are calculated on-demand.
+Instead of updating individual staker balances, the system maintains a global accumulator (`accRewardPerRawShare`) that tracks proof rewards earned per raw share. Rewards are calculated on-demand.
 
 ```solidity
 function addRewards(address _prover, uint256 _amount) external {
@@ -186,11 +191,11 @@ function addRewards(address _prover, uint256 _amount) external {
     }
 }
 
-// Rewards calculated on-demand when needed
+// Proof rewards calculated on-demand when needed
 pendingRewards = (rawShares * accRewardPerRawShare / SCALE_FACTOR) - rewardDebt
 ```
 
-#### Distribution Formulas
+#### Proof Reward Distribution Formulas
 
 ```
 Commission = totalRewards × commissionRate ÷ COMMISSION_RATE_DENOMINATOR
@@ -246,3 +251,93 @@ newScale = oldScale × (1,000,000 - 300,000) ÷ 1,000,000 = oldScale × 0.7
 ```
 
 **Example**: 30% slash → `rawShares = 1000, scale = 0.7e18, effective = 700 tokens`
+
+### 5. Streaming Rewards System
+
+The streaming rewards system provides continuous time-based reward distribution to all active provers. Unlike proof rewards which are tied to specific work completion, streaming rewards are distributed proportionally based on effective shares over time.
+
+#### Key Components
+
+1. **Global Accumulator**: `accStreamingRewardPerEffectiveShare` tracks streaming rewards earned per effective share
+2. **Time-Based Distribution**: `streamingRate` defines tokens distributed per second across all active provers
+3. **Effective Share Weighting**: Uses effective shares (raw shares × multiplier) for proportional distribution
+4. **Separate Accounting**: Streaming rewards use dedicated debt tracking (`rewardDebtEff`) independent of proof rewards
+
+#### Streaming Reward Algorithm
+
+```solidity
+function _updateGlobalAccumulator() internal {
+    if (totalEffectiveActive == 0) return; // No active provers
+    
+    uint256 timeElapsed = block.timestamp - lastStreamingUpdate;
+    uint256 newRewards = timeElapsed * streamingRate;
+    
+    accStreamingRewardPerEffectiveShare += (newRewards * SCALE_FACTOR) / totalEffectiveActive;
+    lastStreamingUpdate = block.timestamp;
+}
+
+// Streaming rewards calculated on-demand
+streamingRewards = (effectiveShares * accStreamingRewardPerEffectiveShare / SCALE_FACTOR) - rewardDebtEff
+```
+
+#### State Transition Impact
+
+Streaming rewards are affected by prover state changes:
+
+- **Joining (Inactive → Active)**: Adds effective shares to `totalEffectiveActive`, updates debt to current accumulator
+- **Leaving (Active → Deactivated)**: Removes effective shares from `totalEffectiveActive`, settles accrued rewards
+- **Reactivation (Deactivated → Active)**: Re-adds effective shares, resets debt to prevent double-claiming
+
+```solidity
+function _updateEffectiveActiveShares(address prover, bool isActive) internal {
+    ProverInfo storage info = provers[prover];
+    
+    if (isActive && info.status != ProverStatus.Active) {
+        // Prover becoming active
+        totalEffectiveActive += info.totalEffectiveShares;
+        info.rewardDebtEff = (info.totalEffectiveShares * accStreamingRewardPerEffectiveShare) / SCALE_FACTOR;
+    } else if (!isActive && info.status == ProverStatus.Active) {
+        // Prover becoming inactive
+        _settleStreamingRewards(prover);
+        totalEffectiveActive -= info.totalEffectiveShares;
+    }
+}
+```
+
+#### Commission and Streaming Rewards
+
+Streaming rewards respect the same commission structure as proof rewards:
+- Commission percentage applied to total streaming rewards earned by prover
+- Remaining rewards distributed to stakers based on raw share percentage
+- Commission credited to `pendingCommission`, staker rewards to `pendingRewards`
+
+#### Streaming Reward Formulas
+
+```
+Time Elapsed = block.timestamp - lastStreamingUpdate
+New Rewards = timeElapsed × streamingRate
+
+If totalEffectiveActive > 0:
+    accStreamingRewardPerEffectiveShare += (newRewards × SCALE_FACTOR) ÷ totalEffectiveActive
+    lastStreamingUpdate = block.timestamp
+
+Streaming Rewards (for prover):
+AccruedStreamingRewards = (effectiveShares × accStreamingRewardPerEffectiveShare) ÷ SCALE_FACTOR
+PendingStreamingRewards = AccruedStreamingRewards - rewardDebtEff
+
+Commission Distribution:
+StreamingCommission = PendingStreamingRewards × commissionRate ÷ COMMISSION_RATE_DENOMINATOR
+StakersStreamingReward = PendingStreamingRewards - StreamingCommission
+
+Where:
+- streamingRate: ERC20 tokens per second
+- effectiveShares: rawShares × effectiveMultiplier
+- totalEffectiveActive: sum of effective shares for all active provers
+```
+
+#### Mathematical Properties
+
+1. **Conservation**: Total streaming rewards distributed equals `streamingRate × timeElapsed × numActivePeriods`
+2. **Proportionality**: Each prover receives `(effectiveShares / totalEffectiveActive) × totalStreamingRewards`
+3. **Independence**: Streaming rewards calculations are independent of proof rewards
+4. **Precision**: Uses `SCALE_FACTOR` (1e18) to maintain precision in division operations

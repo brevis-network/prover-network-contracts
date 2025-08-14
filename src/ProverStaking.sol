@@ -71,6 +71,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         // === REWARD DISTRIBUTION ===
         uint256 accRewardPerRawShare; // Accumulated rewards per raw share (scaled by SCALE_FACTOR)
         uint256 pendingCommission; // Unclaimed commission rewards for the prover
+        // === STREAMING EMISSION TRACKING ===
+        uint256 rewardDebtEff; // Effective stake × globalAccPerEff at last settlement (prevents double-claiming)
         // === MIN SELF STAKE UPDATE ===
         PendingMinSelfStakeUpdate pendingMinSelfStakeUpdate; // Pending minSelfStake decrease (empty if no pending update)
         // === STAKER DATA ===
@@ -85,7 +87,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     struct StakeInfo {
         uint256 rawShares; // Raw shares owned (before applying scale factor)
         uint256 rewardDebt; // Tracks already-accounted rewards to prevent double-claiming
-        uint256 pendingRewards; // Accumulated but unclaimed staking rewards
+        uint256 pendingRewards; // Accumulated but unclaimed rewards (both proof and streaming)
         // === UNSTAKING DATA ===
         PendingUnstake[] pendingUnstakes; // Array of pending unstake requests
     }
@@ -130,6 +132,13 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     address[] public proverList; // Enumerable list of all registered provers
     EnumerableSet.AddressSet activeProvers; // Set of currently active provers
 
+    // === GLOBAL STREAMING REWARDS ===
+    uint256 public globalRatePerSec; // Tokens per second distributed globally based on effective stake
+    uint256 public globalEmissionBudget; // Total tokens available for streaming distribution
+    uint256 public globalAccPerEff; // Global accumulator: total rewards distributed per unit of effective stake (scaled)
+    uint256 public lastGlobalTime; // Timestamp of last global streaming update
+    uint256 public totalEffectiveActive; // Total effective stake across all active provers (cached)
+
     // =========================================================================
     // EVENTS
     // =========================================================================
@@ -162,6 +171,14 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     event MinSelfStakeDecreaseDelayUpdated(uint256 oldDelay, uint256 newDelay);
     event GlobalMinSelfStakeUpdated(uint256 oldMinStake, uint256 newMinStake);
 
+    // Emission events
+    event GlobalRateUpdated(uint256 oldRate, uint256 newRate);
+    event GlobalBudgetFunded(uint256 amount, uint256 newTotal);
+    event StreamingRewardsSettled(address indexed prover, uint256 totalOwed, uint256 commission, uint256 distributed);
+    event StreamingRewardsWithdrawn(address indexed staker, address indexed prover, uint256 amount);
+    event StreamingRateUpdated(uint256 oldRate, uint256 newRate);
+    event StreamingBudgetAdded(uint256 amount, uint256 newTotal);
+
     // =========================================================================
     // CONSTRUCTOR & INITIALIZATION
     // =========================================================================
@@ -190,6 +207,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     }
 
     /**
+     * @notice Initialize the staking contract for upgradeable deployment
+     * /**
      * @notice Internal initialization logic shared by constructor and init function
      * @param _token ERC20 token address for staking and rewards
      * @param _globalMinSelfStake Global minimum self-stake requirement for all provers
@@ -198,10 +217,11 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         require(_globalMinSelfStake > 0, "Global min self stake must be positive");
         brevToken = _token;
         globalMinSelfStake = _globalMinSelfStake;
+        lastGlobalTime = block.timestamp;
     }
 
     // =========================================================================
-    // EXTERNAL/PUBLIC STATE-CHANGING FUNCTIONS (ON-CHAIN API)
+    // EXTERNAL FUNCTIONS (STATE-CHANGING)
     // =========================================================================
 
     /**
@@ -269,6 +289,13 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         // Transfer tokens from staker to contract (fail early if insufficient balance/allowance)
         IERC20(brevToken).safeTransferFrom(msg.sender, address(this), _amount);
 
+        // Calculate old effective stake for update tracking
+        uint256 oldEffectiveStake = _getTotalEffectiveStake(_prover);
+
+        // Update global streaming and settle prover before changing stake (piggyback principle)
+        _updateGlobalStreaming();
+        _settleProverStreaming(_prover);
+
         // Convert amount to raw shares at current scale
         // This ensures fair share allocation regardless of slashing history
         uint256 newRawShares = _rawSharesFromAmount(_prover, _amount);
@@ -282,7 +309,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         // Update pending rewards before changing stake to ensure accurate reward calculation
         uint256 accRewardPerRawShare = prover.accRewardPerRawShare;
         if (stakeInfo.rawShares > 0) {
-            // Calculate accrued rewards since last update
+            // Calculate accrued proof rewards since last update
             uint256 accrued = (stakeInfo.rawShares * accRewardPerRawShare) / SCALE_FACTOR;
             uint256 delta = accrued - stakeInfo.rewardDebt;
             if (delta > 0) {
@@ -297,6 +324,10 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
         // Update reward debt based on new raw shares to prevent double-claiming
         stakeInfo.rewardDebt = (stakeInfo.rawShares * accRewardPerRawShare) / SCALE_FACTOR;
+
+        // Update total effective active stake for streaming calculations
+        uint256 newEffectiveStake = _getTotalEffectiveStake(_prover);
+        _updateTotalEffectiveActive(_prover, oldEffectiveStake, newEffectiveStake);
 
         emit Staked(msg.sender, _prover, _amount, newRawShares);
     }
@@ -332,6 +363,15 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         require(stakeInfo.rawShares >= rawSharesToUnstake, "Insufficient stake");
         require(stakeInfo.pendingUnstakes.length < MAX_PENDING_UNSTAKES, "Too many pending unstakes");
 
+        // Calculate old effective stake for update tracking
+        uint256 oldEffectiveStake = _getTotalEffectiveStake(_prover);
+
+        // Update global streaming rewards before changing stake (piggyback principle)
+        if (globalRatePerSec > 0) {
+            _updateGlobalStreaming();
+            _settleProverStreaming(_prover);
+        }
+
         // === PROVER SELF-STAKE VALIDATION ===
         // For prover's self stake, ensure minimum self stake is maintained
         // EXCEPTION: Allow going to zero (complete exit) even if below minimum
@@ -350,6 +390,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         // Update pending rewards before changing stake
         uint256 accRewardPerRawShare = prover.accRewardPerRawShare;
         if (stakeInfo.rawShares > 0) {
+            // Update proof rewards
             uint256 accrued = (stakeInfo.rawShares * accRewardPerRawShare) / SCALE_FACTOR;
             uint256 delta = accrued - stakeInfo.rewardDebt;
             if (delta > 0) {
@@ -373,6 +414,10 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
         // Update reward debt based on new raw shares
         stakeInfo.rewardDebt = (stakeInfo.rawShares * accRewardPerRawShare) / SCALE_FACTOR;
+
+        // Update total effective active stake for streaming calculations
+        uint256 newEffectiveStake = _getTotalEffectiveStake(_prover);
+        _updateTotalEffectiveActive(_prover, oldEffectiveStake, newEffectiveStake);
 
         emit UnstakeRequested(msg.sender, _prover, _amount, rawSharesToUnstake);
     }
@@ -453,10 +498,10 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         }
 
         require(completedCount > 0, "No unstakes ready for completion");
-        require(totalEffectiveAmount > 0, "No tokens to withdraw");
 
-        // Transfer total amount back to staker
-        IERC20(brevToken).safeTransfer(msg.sender, totalEffectiveAmount);
+        if (totalEffectiveAmount > 0) {
+            IERC20(brevToken).safeTransfer(msg.sender, totalEffectiveAmount);
+        }
 
         emit UnstakeCompleted(msg.sender, _prover, totalEffectiveAmount);
     }
@@ -536,6 +581,12 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     function withdrawRewards(address _prover) external nonReentrant {
         require(provers[_prover].state != ProverState.Null, "Unknown prover");
 
+        // Update global streaming rewards before withdrawal (piggyback principle)
+        if (globalRatePerSec > 0) {
+            _updateGlobalStreaming();
+            _settleProverStreaming(_prover);
+        }
+
         ProverInfo storage prover = provers[_prover];
         StakeInfo storage stakeInfo = prover.stakes[msg.sender];
 
@@ -545,9 +596,9 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         // Update pending rewards for active stakes
         uint256 accRewardPerRawShare = prover.accRewardPerRawShare;
         if (stakeInfo.rawShares > 0) {
-            // Calculate total accrued rewards for this staker
+            // Calculate total accrued proof rewards for this staker
             uint256 accrued = (stakeInfo.rawShares * accRewardPerRawShare) / SCALE_FACTOR;
-            // Calculate new rewards since last claim
+            // Calculate new proof rewards since last claim
             uint256 delta = accrued - stakeInfo.rewardDebt;
             if (delta > 0) {
                 stakeInfo.pendingRewards += delta;
@@ -564,9 +615,11 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         }
 
         // Add commission if this is the prover
-        if (msg.sender == _prover && prover.pendingCommission > 0) {
-            payout += prover.pendingCommission;
-            prover.pendingCommission = 0;
+        if (msg.sender == _prover) {
+            if (prover.pendingCommission > 0) {
+                payout += prover.pendingCommission;
+                prover.pendingCommission = 0;
+            }
         }
 
         require(payout > 0, "No rewards available");
@@ -623,6 +676,9 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             emit ProverDeactivated(_prover);
         }
 
+        // Update total effective active stake for streaming calculations
+        _updateTotalEffectiveActive(_prover, totalEffectiveBefore, totalEffectiveAfter);
+
         emit ProverSlashed(_prover, _percentage, totalSlashed);
     }
 
@@ -662,6 +718,10 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
         // Reset slashing scale for fresh start
         prover.scale = SCALE_FACTOR;
+
+        // Update total effective active stake (add this prover back)
+        uint256 newEffectiveStake = _getTotalEffectiveStake(msg.sender);
+        _updateTotalEffectiveActive(msg.sender, 0, newEffectiveStake);
 
         // Unretire as active prover
         prover.state = ProverState.Active;
@@ -747,8 +807,205 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         emit CommissionRateUpdated(msg.sender, oldCommissionRate, _newCommissionRate);
     }
 
+    /**
+     * @notice Public function to manually update global streaming (keeper function)
+     * @dev Optional - system works via lazy updates during normal operations
+     */
+    function updateGlobalStreaming() external {
+        _updateGlobalStreaming();
+    }
+
+    /**
+     * @notice Manually settle streaming rewards for a specific prover
+     * @dev Public function for manual settlement without other state changes
+     * @param _prover Address of the prover to settle
+     */
+    function settleProverStreaming(address _prover) external {
+        _updateGlobalStreaming();
+        _settleProverStreaming(_prover);
+    }
+
+    /**
+     * @notice Fund the global streaming budget with tokens
+     * @dev Transfers tokens to the contract for streaming distribution
+     * @param _amount Amount of tokens to add to the streaming budget
+     */
+    function topUpGlobalBudget(uint256 _amount) external {
+        require(_amount > 0, "Amount must be positive");
+
+        // Transfer tokens from sender to contract
+        IERC20(brevToken).safeTransferFrom(msg.sender, address(this), _amount);
+
+        globalEmissionBudget += _amount;
+
+        emit GlobalBudgetFunded(_amount, globalEmissionBudget);
+    }
+
+    /**
+     * @notice Add tokens to the global streaming budget
+     * @dev Tokens are transferred from caller to contract - anyone can fund the budget
+     * @param _amount Amount of tokens to add to the streaming budget
+     */
+    function addStreamingBudget(uint256 _amount) external {
+        require(_amount > 0, "Amount must be positive");
+
+        // Transfer tokens from caller to contract
+        IERC20(brevToken).safeTransferFrom(msg.sender, address(this), _amount);
+
+        globalEmissionBudget += _amount;
+
+        emit StreamingBudgetAdded(_amount, globalEmissionBudget);
+    }
+
     // =========================================================================
-    // EXTERNAL/PUBLIC VIEW FUNCTIONS (READERS/GETTERS)
+    // EXTERNAL FUNCTIONS (ADMIN ONLY)
+    // =========================================================================
+
+    /**
+     * @notice Admin function to set the unstaking delay period
+     * @param _newDelay The new unstake delay in seconds
+     */
+    function setUnstakeDelay(uint256 _newDelay) external onlyOwner {
+        require(_newDelay <= 30 days, "Unstake delay too long");
+        uint256 oldDelay = UNSTAKE_DELAY;
+        UNSTAKE_DELAY = _newDelay;
+        emit UnstakeDelayUpdated(oldDelay, _newDelay);
+    }
+
+    /**
+     * @notice Admin function to set the minSelfStake decrease delay period
+     * @param _newDelay The new minSelfStake decrease delay in seconds
+     */
+    function setMinSelfStakeDecreaseDelay(uint256 _newDelay) external onlyOwner {
+        require(_newDelay <= 30 days, "MinSelfStake decrease delay too long");
+        uint256 oldDelay = minSelfStakeDecreaseDelay;
+        minSelfStakeDecreaseDelay = _newDelay;
+        emit MinSelfStakeDecreaseDelayUpdated(oldDelay, _newDelay);
+    }
+
+    /**
+     * @notice Set the global minimum self-stake requirement for all provers
+     * @param _newGlobalMinSelfStake The new global minimum self-stake in token units
+     */
+    function setGlobalMinSelfStake(uint256 _newGlobalMinSelfStake) external onlyOwner {
+        require(_newGlobalMinSelfStake > 0, "Global min self stake must be positive");
+        uint256 oldMinStake = globalMinSelfStake;
+        globalMinSelfStake = _newGlobalMinSelfStake;
+        emit GlobalMinSelfStakeUpdated(oldMinStake, _newGlobalMinSelfStake);
+    }
+
+    /**
+     * @notice Admin function to deactivate a malicious or problematic prover
+     * @dev Deactivation prevents new stakes but allows existing operations to continue
+     *      Existing stakers can still unstake and withdraw rewards
+     * @param _prover The address of the prover to deactivate
+     */
+    function deactivateProver(address _prover) external onlyOwner {
+        require(provers[_prover].state == ProverState.Active, "Prover already inactive");
+
+        // Finalize streaming to 'now' and settle this prover before leaving Active
+        _updateGlobalStreaming();
+        _settleProverStreaming(_prover);
+
+        // Calculate current effective stake before deactivation
+        uint256 currentEffectiveStake = _getTotalEffectiveStake(_prover);
+
+        // Update total effective active stake (remove this prover) BEFORE changing state
+        totalEffectiveActive -= currentEffectiveStake;
+
+        provers[_prover].state = ProverState.Deactivated;
+        activeProvers.remove(_prover);
+
+        emit ProverDeactivated(_prover);
+    }
+
+    /**
+     * @notice Admin function to reactivate a deactivated prover
+     * @dev Allows admin to reactivate previously deactivated provers
+     * @param _prover The address of the prover to reactivate
+     */
+    function reactivateProver(address _prover) external onlyOwner {
+        require(provers[_prover].state == ProverState.Deactivated, "Prover not deactivated");
+
+        ProverInfo storage prover = provers[_prover];
+
+        // Bring global index current
+        _updateGlobalStreaming();
+
+        // Check if prover still meets minimum self-stake requirements
+        uint256 selfEffective = _effectiveAmount(_prover, _selfRawShares(_prover));
+        require(selfEffective >= prover.minSelfStake, "Prover below min self-stake");
+        require(selfEffective >= globalMinSelfStake, "Prover below global min self-stake");
+
+        prover.state = ProverState.Active;
+        activeProvers.add(_prover);
+
+        // Update total effective active stake (add this prover back)
+        uint256 currentEffectiveStake = _getTotalEffectiveStake(_prover);
+
+        // Baseline future accrual to current global index
+        prover.rewardDebtEff = (currentEffectiveStake * globalAccPerEff) / SCALE_FACTOR;
+
+        // Add this prover's stake back to active total
+        totalEffectiveActive += currentEffectiveStake;
+
+        emit ProverReactivated(_prover);
+    }
+
+    /**
+     * @notice Admin function to withdraw slashed tokens from the treasury pool
+     * @dev Allows treasury to claim tokens that were slashed from all provers.
+     *      These tokens represent the difference between what stakers can withdraw
+     *      and what tokens are held in the contract.
+     * @param _to The address to send the slashed tokens to
+     * @param _amount The amount of tokens to withdraw from the treasury pool
+     */
+    function withdrawFromTreasuryPool(address _to, uint256 _amount) external onlyOwner {
+        require(_to != address(0), "Invalid recipient");
+        require(_amount > 0, "Amount must be positive");
+        require(_amount <= treasuryPool, "Insufficient treasury pool balance");
+
+        // Update treasury pool accounting
+        treasuryPool -= _amount;
+
+        // Transfer tokens to recipient
+        IERC20(brevToken).safeTransfer(_to, _amount);
+
+        emit TreasuryPoolWithdrawn(_to, _amount);
+    }
+
+    /**
+     * @notice Set the global streaming rate for all active provers
+     * @dev Only callable by owner to control token distribution
+     * @param _newRatePerSec New streaming rate in tokens per second
+     */
+    function setGlobalRatePerSec(uint256 _newRatePerSec) external onlyOwner {
+        // Update global accumulator before changing rate
+        if (globalRatePerSec > 0) {
+            _updateGlobalStreaming();
+        }
+
+        uint256 oldRate = globalRatePerSec;
+        globalRatePerSec = _newRatePerSec;
+
+        emit StreamingRateUpdated(oldRate, _newRatePerSec);
+    }
+
+    /**
+     * @notice Emergency function to pause streaming by setting rate to zero
+     * @dev Can be called by owner in emergency situations
+     */
+    function pauseStreaming() external onlyOwner {
+        if (globalRatePerSec > 0) {
+            _updateGlobalStreaming(); // Final update before pause
+            uint256 oldRate = globalRatePerSec;
+            globalRatePerSec = 0;
+            emit StreamingRateUpdated(oldRate, 0);
+        }
+    }
+
+    // =========================================================================
+    // EXTERNAL VIEW FUNCTIONS
     // =========================================================================
 
     /**
@@ -803,26 +1060,27 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         ProverInfo storage prover = provers[_prover];
         uint256 effectiveTotalStaked = _getTotalEffectiveStake(_prover);
         uint256 selfEffective = _effectiveAmount(_prover, _selfRawShares(_prover));
+        uint256 totalCommission = prover.pendingCommission;
         return (
             prover.state,
             prover.minSelfStake,
             prover.commissionRate,
             effectiveTotalStaked,
             selfEffective,
-            prover.pendingCommission,
+            totalCommission,
             prover.stakers.length()
         );
     }
 
     /**
      * @notice Get comprehensive stake information for a specific staker with a prover
-     * @dev Calculates real-time pending rewards including live reward accumulation
+     * @dev Calculates real-time pending rewards including live reward accumulation (proof + emission)
      * @param _prover Address of the prover
      * @param _staker Address of the staker to query
      * @return amount Current effective stake amount (post-slashing)
      * @return totalPendingUnstake Total effective amount currently in unstaking process (post-slashing)
      * @return pendingUnstakeCount Number of pending unstake requests
-     * @return pendingRewards Total pending rewards (staking rewards + commission if prover)
+     * @return pendingRewards Total pending rewards (proof + streaming rewards + commission if prover)
      */
     function getStakeInfo(address _prover, address _staker)
         external
@@ -833,33 +1091,47 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         StakeInfo storage stakeInfo = prover.stakes[_staker];
 
         // Convert raw shares to effective amounts (subject to slashing)
-        uint256 effectiveAmount = _effectiveAmount(_prover, stakeInfo.rawShares);
+        amount = _effectiveAmount(_prover, stakeInfo.rawShares);
 
         // Calculate total pending unstake amount across all requests
-        uint256 totalEffectivePendingUnstake = 0;
         for (uint256 i = 0; i < stakeInfo.pendingUnstakes.length; i++) {
-            totalEffectivePendingUnstake += _effectiveAmount(_prover, stakeInfo.pendingUnstakes[i].rawShares);
+            totalPendingUnstake += _effectiveAmount(_prover, stakeInfo.pendingUnstakes[i].rawShares);
         }
+        pendingUnstakeCount = stakeInfo.pendingUnstakes.length;
 
-        // === REAL-TIME REWARD CALCULATION ===
-        // Calculate total pending rewards with live accumulation
-        uint256 stakingRewards = stakeInfo.pendingRewards;
-        uint256 accRewardPerRawShare = prover.accRewardPerRawShare;
+        // Calculate pending rewards
+        pendingRewards = _calculateTotalPendingRewards(_prover, _staker);
+    }
 
-        // Add newly accrued staking rewards since last update
+    /**
+     * @notice Calculate total pending rewards for a staker (internal helper to avoid stack too deep)
+     * @param _prover Address of the prover
+     * @param _staker Address of the staker
+     * @return Total pending rewards including proof rewards, streaming rewards, and commission
+     */
+    function _calculateTotalPendingRewards(address _prover, address _staker) internal view returns (uint256) {
+        ProverInfo storage prover = provers[_prover];
+        StakeInfo storage stakeInfo = prover.stakes[_staker];
+
+        uint256 totalRewards = stakeInfo.pendingRewards;
+
         if (stakeInfo.rawShares > 0) {
-            uint256 accrued = (stakeInfo.rawShares * accRewardPerRawShare) / SCALE_FACTOR;
-            uint256 delta = accrued >= stakeInfo.rewardDebt ? (accrued - stakeInfo.rewardDebt) : 0;
-            stakingRewards += delta;
+            // Add accrued proof rewards
+            uint256 accrued = (stakeInfo.rawShares * prover.accRewardPerRawShare) / SCALE_FACTOR;
+            if (accrued >= stakeInfo.rewardDebt) {
+                totalRewards += (accrued - stakeInfo.rewardDebt);
+            }
+
+            // Note: Streaming rewards are now settled directly to pendingRewards
+            // via _settleProverStreaming, so no need for live calculation here
         }
 
-        // Add commission if this is the prover making the query
-        uint256 totalRewards = stakingRewards;
+        // Add any pending commission if this is the prover
         if (_staker == _prover) {
             totalRewards += prover.pendingCommission;
         }
 
-        return (effectiveAmount, totalEffectivePendingUnstake, stakeInfo.pendingUnstakes.length, totalRewards);
+        return totalRewards;
     }
 
     /**
@@ -1041,100 +1313,194 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         return treasuryPool;
     }
 
+    /**
+     * @notice Get global streaming system information
+     * @dev Returns current streaming configuration and state
+     * @return ratePerSec Current global streaming rate (tokens per second)
+     * @return budgetBalance Available tokens in streaming budget
+     * @return globalAccumulatorPerEff Current global accumulator per effective stake
+     * @return totalEffStake Total effective stake across all active provers
+     * @return lastUpdate Timestamp of last global streaming update
+     */
+    function getStreamingInfo()
+        external
+        view
+        returns (
+            uint256 ratePerSec,
+            uint256 budgetBalance,
+            uint256 globalAccumulatorPerEff,
+            uint256 totalEffStake,
+            uint256 lastUpdate
+        )
+    {
+        return (globalRatePerSec, globalEmissionBudget, globalAccPerEff, totalEffectiveActive, lastGlobalTime);
+    }
+
+    /**
+     * @notice Get total pending rewards for a staker (including streaming rewards)
+     * @dev Helper function to calculate total pending rewards including live streaming accumulation
+     * @param _prover Address of the prover
+     * @param _staker Address of the staker
+     * @return Total pending rewards (proof + streaming + commission if applicable)
+     */
+    function getPendingRewards(address _prover, address _staker) external view returns (uint256) {
+        return _calculateTotalPendingRewards(_prover, _staker);
+    }
+
+    /**
+     * @notice Get pending streaming rewards for a prover (without settling)
+     * @dev View function that calculates what would be owed if settled now
+     *      Only Active provers earn streaming rewards - inactive provers return zero
+     * @param _prover Address of the prover to query
+     * @return pendingTotal Total pending streaming rewards for this prover
+     * @return pendingCommission Commission portion of pending rewards
+     * @return pendingStakers Staker portion of pending rewards
+     */
+    function getPendingStreamingRewards(address _prover)
+        external
+        view
+        returns (uint256 pendingTotal, uint256 pendingCommission, uint256 pendingStakers)
+    {
+        // Only Active provers earn streaming rewards (matches _settleProverStreaming behavior)
+        ProverInfo storage prover = provers[_prover];
+        if (prover.state != ProverState.Active) {
+            return (0, 0, 0);
+        }
+
+        if (globalRatePerSec == 0 || totalEffectiveActive == 0) {
+            return (0, 0, 0);
+        }
+
+        uint256 effectiveStake = _getTotalEffectiveStake(_prover);
+        if (effectiveStake == 0) {
+            return (0, 0, 0);
+        }
+
+        // Calculate what global accumulator would be after update
+        uint256 timeElapsed = block.timestamp - lastGlobalTime;
+        uint256 totalRewards = globalRatePerSec * timeElapsed;
+        if (totalRewards > globalEmissionBudget) {
+            totalRewards = globalEmissionBudget;
+        }
+
+        uint256 projectedGlobalAcc = globalAccPerEff;
+        if (totalRewards > 0) {
+            projectedGlobalAcc += (totalRewards * SCALE_FACTOR) / totalEffectiveActive;
+        }
+
+        // Calculate what would be owed to this prover
+        uint256 totalOwed = (effectiveStake * projectedGlobalAcc) / SCALE_FACTOR;
+        pendingTotal = totalOwed - prover.rewardDebtEff;
+
+        if (pendingTotal > 0) {
+            pendingCommission = (pendingTotal * prover.commissionRate) / COMMISSION_RATE_DENOMINATOR;
+            pendingStakers = pendingTotal - pendingCommission;
+        }
+    }
+
     // =========================================================================
-    // ADMIN FUNCTIONS
+    // INTERNAL FUNCTIONS (STREAMING SYSTEM)
     // =========================================================================
 
     /**
-     * @notice Admin function to set the unstaking delay period
-     * @param _newDelay The new unstake delay in seconds
+     * @notice Update global streaming accumulator based on elapsed time
+     * @dev O(1) operation - updates single global state regardless of number of provers
+     *      Implements lazy accrual - only updates when system is "touched"
      */
-    function setUnstakeDelay(uint256 _newDelay) external onlyOwner {
-        require(_newDelay <= 30 days, "Unstake delay too long");
-        uint256 oldDelay = UNSTAKE_DELAY;
-        UNSTAKE_DELAY = _newDelay;
-        emit UnstakeDelayUpdated(oldDelay, _newDelay);
+    function _updateGlobalStreaming() internal {
+        if (globalRatePerSec == 0 || totalEffectiveActive == 0) {
+            lastGlobalTime = block.timestamp;
+            return;
+        }
+
+        uint256 timeElapsed = block.timestamp - lastGlobalTime;
+        if (timeElapsed == 0) return; // Already updated this block
+
+        // Calculate total rewards to distribute based on time elapsed
+        uint256 totalRewards = globalRatePerSec * timeElapsed;
+
+        // Cap by available budget
+        if (totalRewards > globalEmissionBudget) {
+            totalRewards = globalEmissionBudget;
+        }
+
+        if (totalRewards > 0) {
+            // Update global accumulator: rewards per unit of effective stake
+            // Scale by SCALE_FACTOR for precision
+            globalAccPerEff += (totalRewards * SCALE_FACTOR) / totalEffectiveActive;
+
+            // Deduct from budget
+            globalEmissionBudget -= totalRewards;
+        }
+
+        lastGlobalTime = block.timestamp;
     }
 
     /**
-     * @notice Admin function to set the minSelfStake decrease delay period
-     * @param _newDelay The new minSelfStake decrease delay in seconds
+     * @notice Settle streaming rewards for a specific prover (internal)
+     * @dev Calculates owed rewards and distributes them via commission structure
+     *      Uses the global accumulator approach for O(1) efficiency
+     * @param _prover Address of the prover to settle
      */
-    function setMinSelfStakeDecreaseDelay(uint256 _newDelay) external onlyOwner {
-        require(_newDelay <= 30 days, "MinSelfStake decrease delay too long");
-        uint256 oldDelay = minSelfStakeDecreaseDelay;
-        minSelfStakeDecreaseDelay = _newDelay;
-        emit MinSelfStakeDecreaseDelayUpdated(oldDelay, _newDelay);
+    function _settleProverStreaming(address _prover) internal {
+        ProverInfo storage prover = provers[_prover];
+        if (prover.state != ProverState.Active) return;
+
+        uint256 effectiveStake = _getTotalEffectiveStake(_prover);
+        if (effectiveStake == 0) return;
+
+        // Calculate total owed based on global accumulator
+        uint256 totalOwed = (effectiveStake * globalAccPerEff) / SCALE_FACTOR;
+
+        // Prevent underflow - only proceed if there are new rewards
+        if (totalOwed <= prover.rewardDebtEff) return;
+
+        uint256 newDebt = totalOwed - prover.rewardDebtEff;
+
+        if (newDebt == 0) return;
+
+        // Split into commission and staker rewards
+        uint256 commission = (newDebt * prover.commissionRate) / COMMISSION_RATE_DENOMINATOR;
+        uint256 stakersReward = newDebt - commission;
+
+        // Commission is always direct to prover
+        prover.pendingCommission += commission;
+
+        // **O(1) staker distribution** via accumulator (identical to addRewards path)
+        if (prover.totalRawShares == 0) {
+            // No stakers: route staker portion to commission (policy matches addRewards)
+            prover.pendingCommission += stakersReward;
+        } else {
+            prover.accRewardPerRawShare += (stakersReward * SCALE_FACTOR) / prover.totalRawShares;
+        }
+
+        // Update reward debt to current baseline
+        prover.rewardDebtEff = totalOwed;
+
+        emit StreamingRewardsSettled(_prover, newDebt, commission, stakersReward);
     }
 
     /**
-     * @notice Set the global minimum self-stake requirement for all provers
-     * @param _newGlobalMinSelfStake The new global minimum self-stake in token units
+     * @notice Update total effective active stake when prover states change
+     * @dev Maintains cached total for O(1) global streaming calculations
+     * @param _prover Address of the prover whose stake changed
+     * @param _oldEffective Previous effective stake amount
+     * @param _newEffective New effective stake amount
      */
-    function setGlobalMinSelfStake(uint256 _newGlobalMinSelfStake) external onlyOwner {
-        require(_newGlobalMinSelfStake > 0, "Global min self stake must be positive");
-        uint256 oldMinStake = globalMinSelfStake;
-        globalMinSelfStake = _newGlobalMinSelfStake;
-        emit GlobalMinSelfStakeUpdated(oldMinStake, _newGlobalMinSelfStake);
-    }
-
-    /**
-     * @notice Admin function to deactivate a malicious or problematic prover
-     * @dev Deactivation prevents new stakes but allows existing operations to continue
-     *      Existing stakers can still unstake and withdraw rewards
-     * @param _prover The address of the prover to deactivate
-     */
-    function deactivateProver(address _prover) external onlyOwner {
-        require(provers[_prover].state == ProverState.Active, "Prover already inactive");
-
-        provers[_prover].state = ProverState.Deactivated;
-        activeProvers.remove(_prover);
-        emit ProverDeactivated(_prover);
-    }
-
-    /**
-     * @notice Admin function to reactivate a deactivated prover
-     * @dev Allows admin to reactivate previously deactivated provers
-     * @param _prover The address of the prover to reactivate
-     */
-    function reactivateProver(address _prover) external onlyOwner {
-        require(provers[_prover].state == ProverState.Deactivated, "Prover not deactivated");
-
+    function _updateTotalEffectiveActive(address _prover, uint256 _oldEffective, uint256 _newEffective) internal {
         ProverInfo storage prover = provers[_prover];
 
-        // Check if prover still meets minimum self-stake requirements
-        uint256 selfEffective = _effectiveAmount(_prover, _selfRawShares(_prover));
-        require(selfEffective >= prover.minSelfStake, "Prover below min self-stake");
-        require(selfEffective >= globalMinSelfStake, "Prover below global min self-stake");
-
-        prover.state = ProverState.Active;
-        activeProvers.add(_prover);
-
-        emit ProverReactivated(_prover);
+        if (prover.state == ProverState.Active) {
+            // Active prover - update total
+            totalEffectiveActive = totalEffectiveActive - _oldEffective + _newEffective;
+        } else {
+            // Inactive prover - their stake is not part of totalEffectiveActive
+            // No update needed as they don't contribute to the active total
+        }
     }
 
-    /**
-     * @notice Admin function to withdraw slashed tokens from the treasury pool
-     * @dev Allows treasury to claim tokens that were slashed from all provers.
-     *      These tokens represent the difference between what stakers can withdraw
-     *      and what tokens are held in the contract.
-     * @param _to The address to send the slashed tokens to
-     * @param _amount The amount of tokens to withdraw from the treasury pool
-     */
-    function withdrawFromTreasuryPool(address _to, uint256 _amount) external onlyOwner {
-        require(_to != address(0), "Invalid recipient");
-        require(_amount > 0, "Amount must be positive");
-        require(_amount <= treasuryPool, "Insufficient treasury pool balance");
-
-        // Update treasury pool accounting
-        treasuryPool -= _amount;
-
-        // Transfer tokens to recipient
-        IERC20(brevToken).safeTransfer(_to, _amount);
-
-        emit TreasuryPoolWithdrawn(_to, _amount);
-    } // =========================================================================
-    // INTERNAL HELPERS (STATE-CHANGING)
+    // =========================================================================
+    // INTERNAL FUNCTIONS (STATE-CHANGING)
     // =========================================================================
 
     /**
@@ -1156,6 +1522,10 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         );
         require(prover.totalRawShares == 0, "Active stakes remaining");
         require(prover.pendingCommission == 0, "Commission remaining");
+
+        // Update total effective active stake (remove this prover)
+        uint256 currentEffectiveStake = _getTotalEffectiveStake(_prover);
+        _updateTotalEffectiveActive(_prover, currentEffectiveStake, 0);
 
         prover.state = ProverState.Retired;
         activeProvers.remove(_prover);
