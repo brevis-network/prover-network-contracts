@@ -1,13 +1,13 @@
-# ProverStaking Contract Design Document
+# ProverStaking Contract Design (Core O(1) Staking / Rewards / Slashing)
 
 ## Overview
 
-The `ProverStaking` contract implements a delegation-based staking system for prover networks. It enables users to stake ERC20 tokens with provers while maintaining O(1) complexity for critical operations through a dual-share mechanism and global accumulators. It implements four core algorithms:
+The `ProverStaking` contract implements a delegation-based staking system with O(1) complexity for all high‑frequency operations via a raw share abstraction and global accumulators:
 
-1. **O(1) Staking/Unstaking**: Raw shares system enables proportional calculations without iteration
-2. **O(1) Reward Distribution**: Global accumulator distributes proof rewards to all stakers simultaneously
-3. **O(1) Slashing**: Scale factor mechanism slashes all stakes without touching individual balances
-4. **O(1) Streaming Rewards**: Global emission system distributes time-based rewards to active provers
+1. **O(1) Stake / Unstake** – Share mint/burn proportional math without looping over stakers
+2. **O(1) Proof Reward Distribution** – Single accumulator update amortizes distribution
+3. **O(1) Slashing** – Multiplicative scale adjustment affects all stakes implicitly
+4. **O(1) Streaming Rewards** – Global time accumulator weighted by total effective stake
 
 
 ## Table of Contents
@@ -15,11 +15,13 @@ The `ProverStaking` contract implements a delegation-based staking system for pr
 - [Core Data Structures](#core-data-structures)
 - [Key Constants](#key-constants)
 - [Key Algorithms](#key-algorithms)
-   - [Raw Shares System](#1-raw-shares-system)
-   - [Staking & Unstaking](#2-staking--unstaking)
-   - [Proof Reward Distribution](#3-proof-reward-distribution)
-   - [Slashing](#4-slashing)
-   - [Streaming Rewards System](#5-streaming-rewards-system)
+    - [Raw Shares System](#1-raw-shares-system)
+    - [Staking & Unstaking](#2-staking--unstaking)
+    - [Proof Reward Distribution](#3-proof-reward-distribution)
+    - [Streaming Rewards System](#4-streaming-rewards-system)
+    - [Slashing](#5-slashing)
+- [Key Invariants](#key-invariants)
+- [Edge Cases (Core Mechanics)](#edge-cases-core-mechanics)
 
 ---
 
@@ -27,12 +29,7 @@ The `ProverStaking` contract implements a delegation-based staking system for pr
 
 
 ```solidity
-enum ProverState {
-    Null,         // Prover not initialized
-    Active,       // Prover accepting new stakes
-    Retired,      // Prover deactivated, no new stakes (can unretire)
-    Deactivated   // Prover force-deactivated by admin (cannot unretire)
-}
+enum ProverState { Null, Active, Retired, Deactivated }
 
 struct ProverInfo {
     // === BASIC METADATA ===
@@ -46,7 +43,7 @@ struct ProverInfo {
     
     // === REWARD DISTRIBUTION ===
     uint256 accRewardPerRawShare;     // Accumulated proof rewards per raw share
-    uint256 pendingCommission;        // Unclaimed commission (proof + streaming)
+    uint256 pendingCommission;        // Unclaimed prover commission (aggregated)
     
     // === STREAMING REWARDS ===
     uint256 rewardDebtEff;            // Streaming reward debt (based on effective stake)
@@ -81,6 +78,18 @@ struct PendingMinSelfStakeUpdate {
 ```
 
 ---
+
+## Key Constants (Core Parameters)
+
+| Constant | Purpose |
+|----------|---------|
+| `SCALE_FACTOR = 1e18` | Fixed point precision for share & accumulator math |
+| `SLASH_FACTOR_DENOMINATOR = 1_000_000` | PPM denominator for slashing percentages (higher precision, fewer rounding losses) |
+| `MAX_SLASH_PERCENTAGE = 500_000` | Max single slash = 50% (safety against catastrophic single events) |
+| `COMMISSION_RATE_DENOMINATOR = 10_000` | Basis points (1e4) for commission rate inputs |
+| `MAX_PENDING_UNSTAKES = 10` | Bounded per‑staker queue (gas bound for completion) |
+
+Only these constants are required to reason about the O(1) core algorithms.
 
 ## Key Algorithms
 
@@ -186,17 +195,13 @@ function addRewards(address _prover, uint256 _amount) external {
         // No stakers exist, prover gets all remaining rewards as commission
         prover.pendingCommission += stakersReward;
     } else {
-        // O(1) operation: update accumulator for stakers with dust handling
+    // O(1) operation: update accumulator for stakers with bounded dust
         uint256 deltaAcc = (stakersReward * SCALE_FACTOR) / prover.totalRawShares;
         uint256 distributed = (deltaAcc * prover.totalRawShares) / SCALE_FACTOR;
-        uint256 dust = stakersReward - distributed; // dust in token units, not scaled
+    uint256 dust = stakersReward - distributed; // token units lost to truncation ( < totalRawShares )
         
         prover.accRewardPerRawShare += deltaAcc;
-        
-        // Add dust from rounding errors to treasury pool (corrected calculation)
-        if (dust > 0) {
-            treasuryPool += dust;
-        }
+    // Dust routed to treasuryPool in implementation (prevents accumulation in limbo)
     }
 }
 
@@ -227,41 +232,7 @@ Where:
 - commissionRate: 0-10000 (0% to 100%)
 ```
 
-### 4. Slashing
-
-Each prover maintains an independent scale factor that affects all stakes proportionally. Slashing updates only this single value, and all effective amounts automatically reflect the slash.
-
-```solidity
-function slash(address _prover, uint256 _percentage) external onlyRole(SLASHER_ROLE) {
-    require(_percentage < SLASH_FACTOR_DENOMINATOR, "Cannot slash 100%");
-
-    ProverInfo storage prover = provers[_prover];
-
-    // O(1) operation: update single scale factor
-    uint256 remainingFactor = SLASH_FACTOR_DENOMINATOR - _percentage;
-    prover.scale = (prover.scale * remainingFactor) / SLASH_FACTOR_DENOMINATOR;
-
-    // All stakes automatically reflect new value via _effectiveAmount()
-    // This affects both active stakes AND pending unstakes
-}
-```
-
-#### Slashing Formula
-
-```
-newScale = oldScale × (SLASH_FACTOR_DENOMINATOR - slashPercentage) ÷ SLASH_FACTOR_DENOMINATOR
-
-Where:
-- SLASH_FACTOR_DENOMINATOR = 1,000,000 (parts per million for higher precision)
-- slashPercentage: 0-1,000,000 (0% to 100%)
-
-Example: 30% slash (300,000 ppm)
-newScale = oldScale × (1,000,000 - 300,000) ÷ 1,000,000 = oldScale × 0.7
-```
-
-**Example**: 30% slash → `rawShares = 1000, scale = 0.7e18, effective = 700 tokens`
-
-### 5. Streaming Rewards System
+### 4. Streaming Rewards System
 
 The streaming rewards system provides continuous time-based reward distribution to all active provers. Unlike proof rewards which are tied to specific work completion, streaming rewards are distributed proportionally based on effective stakes over time.
 
@@ -299,51 +270,8 @@ function _updateGlobalStreaming() internal {
 streamingRewards = (effectiveStake * globalAccPerEff / SCALE_FACTOR) - rewardDebtEff
 ```
 
-#### State Transition Impact and Fixes
-
-Streaming rewards are only earned by **Active** provers. Key behavioral fixes:
-
-- **Active State Requirement**: Only provers in `ProverState.Active` earn streaming rewards
-- **Inactive Period Isolation**: Deactivated or retired provers earn zero additional streaming rewards
-- **Settlement Timing**: Streaming rewards are settled before state transitions to capture earned rewards
-- **View Function Accuracy**: `getPendingStreamingRewards` returns zero for inactive provers
-
-```solidity
-function getPendingStreamingRewards(address _prover) external view 
-    returns (uint256 pendingTotal, uint256 pendingCommission, uint256 pendingStakers) {
-    
-    // Fixed: Only Active provers earn streaming rewards
-    if (provers[_prover].state != ProverState.Active) {
-        return (0, 0, 0);
-    }
-    
-    // Calculate pending rewards for active provers only
-    // ... rest of calculation
-}
-```
-
-#### Commission and Streaming Rewards
-
-Streaming rewards respect the same commission structure as proof rewards:
-- Commission percentage applied to total streaming rewards earned by prover
-- Remaining rewards distributed to stakers based on raw share percentage
-- Commission credited to `pendingCommission`, staker rewards settled to individual `pendingRewards`
-
-#### Budget and Access Control
-
-Key fixes to streaming budget management:
-
-```solidity
-function addStreamingBudget(uint256 _amount) external {
-    // Fixed: Anyone can add to streaming budget (not just owner)
-    require(_amount > 0, "Amount must be positive");
-    
-    IERC20(brevToken).safeTransferFrom(msg.sender, address(this), _amount);
-    globalEmissionBudget += _amount;
-    
-    emit StreamingBudgetAdded(_amount, globalEmissionBudget);
-}
-```
+#### State Consideration
+Only actively participating provers earn streaming rewards; inactive states simply freeze accrual until reactivation. Settlement is performed before state changes to ensure interval completeness.
 
 #### Streaming Reward Formulas
 
@@ -370,10 +298,55 @@ Where:
 - totalEffectiveActive: sum of effective stakes for all active provers only
 ```
 
-#### Mathematical Properties and Fixes
+#### Mathematical Properties
 
 1. **Conservation**: Total streaming rewards distributed ≤ `globalRatePerSec × timeElapsed`, capped by budget
 2. **Proportionality**: Each active prover receives `(effectiveStake / totalEffectiveActive) × totalStreamingRewards`
 3. **State Isolation**: Inactive periods do not accrue rewards, ensuring proper isolation
 4. **Precision**: Uses `SCALE_FACTOR` (1e18) to maintain precision in division operations
 5. **Dust Handling**: Corrected dust calculations in token units rather than scaled units
+
+
+### 5. Slashing
+
+Slashing applies a proportional penalty to *all* stake associated with a prover by scaling down a single variable `scale` (O(1)). No per‑staker writes are required; effective balances update implicitly when read.
+
+Core update:
+```
+remaining = SLASH_FACTOR_DENOMINATOR - slashPPM;
+newScale = oldScale * remaining / SLASH_FACTOR_DENOMINATOR;
+```
+
+Implications:
+```
+effectiveBefore_i = raw_i * oldScale / SCALE_FACTOR
+effectiveAfter_i  = raw_i * newScale / SCALE_FACTOR = effectiveBefore_i * remaining / SLASH_FACTOR_DENOMINATOR
+SlashedFraction   = slashPPM / SLASH_FACTOR_DENOMINATOR
+```
+
+Code-enforced parameters:
+```
+newScale > MIN_SCALE_FLOOR (revert if violated)
+auto-deactivate when newScale <= DEACTIVATION_SCALE (Active -> Deactivated)
+```
+
+Treasury accounting (aggregate): totalSlashed = totalEffectiveBefore - totalEffectiveAfter is credited to `treasuryPool` once per slash (O(1)).
+
+### Key Invariants
+
+| Invariant | Description |
+|-----------|-------------|
+| Accumulators Monotonic | `accRewardPerRawShare` & `globalAccPerEff` never decrease |
+| Share Conservation | Sum of individual `rawShares` equals `totalRawShares` for a prover |
+| Effective Definition | `effective = rawShares * scale / SCALE_FACTOR` (sole source of slashing impact) |
+| Linear Slash | Every slash scales all effective balances by the same multiplicative factor |
+| Streaming Neutrality | Partitioning time into more updates does not change totals (ignoring truncation dust) |
+
+### Edge Cases (Core Mechanics)
+
+- Pending unstakes are slashable; withdrawal uses the *current* scale.
+- Very small rewards: per‑raw-share delta may truncate to zero; undistributed dust is negligible and bounded by `totalRawShares` precision.
+- Commission applies only to rewards accrued after a rate change; previously accrued pending rewards unaffected.
+- If total raw shares is zero when a reward arrives, all is credited as commission (no distribution iteration required).
+- Streaming distribution short-circuits when `totalEffectiveActive == 0` (no division by zero, no accumulator drift).
+

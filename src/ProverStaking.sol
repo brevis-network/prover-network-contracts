@@ -176,7 +176,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     event GlobalMinSelfStakeUpdated(uint256 oldMinStake, uint256 newMinStake);
 
     // Emission events
-    event GlobalRateUpdated(uint256 oldRate, uint256 newRate);
     event StreamingRewardsSettled(address indexed prover, uint256 totalOwed, uint256 commission, uint256 distributed);
     event StreamingRewardsWithdrawn(address indexed staker, address indexed prover, uint256 amount);
     event StreamingRateUpdated(uint256 oldRate, uint256 newRate);
@@ -1579,7 +1578,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
     /**
      * @notice Internal function to apply minSelfStake update
-     * @dev Validates that the prover still meets the new requirement before applying
      * @param _prover The address of the prover
      * @param _newMinSelfStake The new minimum self-stake amount
      */
