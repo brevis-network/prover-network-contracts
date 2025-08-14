@@ -99,6 +99,18 @@ contract StreamingRewardsTest is Test {
         return totalStaked;
     }
 
+    function _getEffectiveAmount(address prover, uint256 rawShares) internal view returns (uint256) {
+        (, uint256 scale,,) = proverStaking.getProverInternals(prover);
+        return (rawShares * scale) / SCALE_FACTOR;
+    }
+
+    function _getSelfRawShares(address prover) internal view returns (uint256) {
+        (uint256 amount,,,) = proverStaking.getStakeInfo(prover, prover);
+        // Convert back to raw shares using current scale
+        (, uint256 scale,,) = proverStaking.getProverInternals(prover);
+        return (amount * SCALE_FACTOR) / scale;
+    }
+
     function _initializeProver(address prover, uint256 selfStake, uint64 commission) internal {
         vm.prank(prover);
         brevToken.approve(address(proverStaking), selfStake);
@@ -1166,5 +1178,544 @@ contract StreamingRewardsTest is Test {
 
         // The dust should be small relative to the reward amount
         assertLt(actualDust, rewardAmount / 100, "Dust should be less than 1% of reward");
+    }
+
+    /**
+     * @notice Test stake increase mid-epoch with precise timing validation
+     * @dev Verifies rewards are correctly allocated before/after stake changes
+     */
+    function test_StakeIncreaseMidEpoch() public {
+        // Setup: 1 active prover with effective stake S
+        _initializeProver(prover1, 100e18, COMMISSION_RATE); // S = 100 tokens
+        _setGlobalRate(1e18); // 1 token per second
+        _fundGlobalBudget(1000e18); // Large budget
+
+        uint256 t0 = block.timestamp;
+
+        // Let time elapse to t1
+        uint256 t1 = t0 + 10; // 10 seconds elapsed
+        vm.warp(t1);
+
+        // Before stake increase: rewards should be based on stake S only
+        proverStaking.settleProverStreaming(prover1);
+        uint256 rewardsBeforeStakeIncrease = proverStaking.getPendingRewards(prover1, prover1);
+        // Expected: 10 seconds * 1 token/sec = 10 tokens (all to prover, no other stakers)
+        assertEq(rewardsBeforeStakeIncrease, 10e18, "Pre-stake-increase rewards incorrect");
+
+        // Withdraw to reset counters
+        vm.prank(prover1);
+        proverStaking.withdrawRewards(prover1);
+
+        // Delegate ΔS at t1 (stake increase)
+        uint256 deltaS = 50e18; // Add 50 tokens
+        _stake(staker1, prover1, deltaS); // New total effective stake = S + ΔS = 150 tokens
+
+        // Let time elapse to t2
+        uint256 t2 = t1 + 5; // 5 more seconds
+        vm.warp(t2);
+
+        // Settlement after stake increase
+        proverStaking.settleProverStreaming(prover1);
+
+        // Expected with fix: Rewards in (t1, t2] use S+ΔS = 150 tokens
+        // 5 seconds * 1 token/sec = 5 tokens total
+        // Prover gets: commission (10% of 5) + staking portion (100/150 of 4.5) = 0.5 + 3 = 3.5 tokens
+        uint256 proverRewardsAfter = proverStaking.getPendingRewards(prover1, prover1);
+        // Allow for small rounding errors (within 1000 wei)
+        assertApproxEqAbs(proverRewardsAfter, 3.5e18, 1000, "Post-stake-increase prover rewards incorrect");
+
+        // Staker should get: 50/150 of 4.5 = 1.5 tokens
+        uint256 stakerRewards = proverStaking.getPendingRewards(prover1, staker1);
+        assertApproxEqAbs(stakerRewards, 1.5e18, 1000, "Post-stake-increase staker rewards incorrect");
+
+        // Critical: No overpayment due to new stake being counted for earlier time
+        uint256 totalRewards = proverRewardsAfter + stakerRewards;
+        assertApproxEqAbs(totalRewards, 5e18, 1000, "Total rewards should match time elapsed * rate");
+    }
+
+    /**
+     * @notice Test stake decrease mid-epoch with precise timing validation
+     * @dev Verifies rewards before decrease use higher stake, after use lower stake
+     */
+    function test_StakeDecreaseMidEpoch() public {
+        // Setup: prover + staker with combined effective stake
+        _initializeProver(prover1, 100e18, COMMISSION_RATE);
+        _stake(staker1, prover1, 100e18); // Total effective stake = 200 tokens
+        _setGlobalRate(2e18); // 2 tokens per second
+        _fundGlobalBudget(1000e18);
+
+        uint256 t0 = block.timestamp;
+
+        // Let time elapse to t1
+        uint256 t1 = t0 + 8; // 8 seconds elapsed
+        vm.warp(t1);
+
+        // Before unstake: settle and capture rewards at higher stake level
+        proverStaking.settleProverStreaming(prover1);
+        uint256 proverRewardsBefore = proverStaking.getPendingRewards(prover1, prover1);
+        uint256 stakerRewardsBefore = proverStaking.getPendingRewards(prover1, staker1);
+
+        // Expected: 8 seconds * 2 tokens/sec = 16 tokens total
+        // Prover: commission (10% of 16) + staking (100/200 of 14.4) = 1.6 + 7.2 = 8.8 tokens
+        // Staker: 100/200 of 14.4 = 7.2 tokens
+        assertEq(proverRewardsBefore, 8.8e18, "Pre-unstake prover rewards incorrect");
+        assertEq(stakerRewardsBefore, 7.2e18, "Pre-unstake staker rewards incorrect");
+
+        // Withdraw to reset
+        vm.prank(prover1);
+        proverStaking.withdrawRewards(prover1);
+        vm.prank(staker1);
+        proverStaking.withdrawRewards(prover1);
+
+        // Unstake at t1 (stake decrease)
+        vm.prank(staker1);
+        proverStaking.requestUnstake(prover1, 50e18); // Remove 50 tokens, new total = 150 tokens
+
+        // Let time elapse to t2
+        uint256 t2 = t1 + 6; // 6 more seconds
+        vm.warp(t2);
+
+        // Settlement after stake decrease
+        proverStaking.settleProverStreaming(prover1);
+
+        // Expected with fix: Rewards in (t1, t2] use reduced stake = 150 tokens
+        // 6 seconds * 2 tokens/sec = 12 tokens total
+        // Prover: commission (10% of 12) + staking (100/150 of 10.8) = 1.2 + 7.2 = 8.4 tokens
+        uint256 proverRewardsAfter = proverStaking.getPendingRewards(prover1, prover1);
+        assertEq(proverRewardsAfter, 8.4e18, "Post-unstake prover rewards incorrect");
+
+        // Remaining staker: 50/150 of 10.8 = 3.6 tokens
+        uint256 stakerRewardsAfter = proverStaking.getPendingRewards(prover1, staker1);
+        assertEq(stakerRewardsAfter, 3.6e18, "Post-unstake staker rewards incorrect");
+
+        // Verify total matches expected
+        uint256 totalAfter = proverRewardsAfter + stakerRewardsAfter;
+        assertEq(totalAfter, 12e18, "Total post-unstake rewards should match time * rate");
+    }
+
+    /**
+     * @notice Test slash mid-epoch with precise timing and treasury validation
+     * @dev Verifies streaming up to slash uses pre-slash stake, after uses reduced stake
+     */
+    function test_SlashMidEpoch() public {
+        // Setup: prover with stake that will be slashed
+        _initializeProver(prover1, 200e18, COMMISSION_RATE); // Large stake for clear slash effect
+        _setGlobalRate(5e18); // 5 tokens per second
+        _fundGlobalBudget(1000e18);
+
+        uint256 t0 = block.timestamp;
+        uint256 treasuryBefore = proverStaking.getTreasuryPool();
+
+        // Let time elapse to t1
+        uint256 t1 = t0 + 4; // 4 seconds elapsed
+        vm.warp(t1);
+
+        // Get effective stake before slash
+        uint256 stakeBefore = proverStaking.getTotalEffectiveStake(prover1);
+        assertEq(stakeBefore, 200e18, "Pre-slash stake should be 200 tokens");
+
+        // Slash prover 50% at t1 (maximum allowed)
+        uint256 slashPercentage = 500000; // 50% (MAX_SLASH_PERCENTAGE)
+        proverStaking.slash(prover1, slashPercentage);
+
+        // Verify streaming rewards up to t1 were priced at pre-slash stake
+        uint256 proverRewardsAtSlash = proverStaking.getPendingRewards(prover1, prover1);
+        // Expected: 4 seconds * 5 tokens/sec = 20 tokens (all to prover, no other stakers)
+        assertEq(proverRewardsAtSlash, 20e18, "Rewards up to slash should use pre-slash stake");
+
+        // Verify treasury pool increased by slashed amount
+        uint256 stakeAfter = proverStaking.getTotalEffectiveStake(prover1);
+        uint256 expectedStakeAfter = (200e18 * (1000000 - slashPercentage)) / 1000000; // 50% remaining
+        assertEq(stakeAfter, expectedStakeAfter, "Post-slash stake calculation incorrect");
+
+        uint256 slashedAmount = stakeBefore - stakeAfter;
+        uint256 treasuryAfter = proverStaking.getTreasuryPool();
+        assertEq(treasuryAfter - treasuryBefore, slashedAmount, "Treasury should increase by slashed amount");
+
+        // Check auto-deactivation if scale drops below MIN_SCALE_FACTOR
+        // (In this case 50% remaining > MIN_SCALE_FACTOR typically, so should remain active)
+        (ProverStaking.ProverState state,,,,,,) = proverStaking.getProverDetails(prover1);
+        // Assuming MIN_SCALE_FACTOR is something like 10%, prover should still be active at 50%
+        assertTrue(state == ProverStaking.ProverState.Active, "Prover should remain active after 50% slash");
+
+        // Withdraw to reset
+        vm.prank(prover1);
+        proverStaking.withdrawRewards(prover1);
+
+        // Let time elapse to t2
+        uint256 t2 = t1 + 3; // 3 more seconds
+        vm.warp(t2);
+
+        // Settlement after slash
+        proverStaking.settleProverStreaming(prover1);
+
+        // Expected with fix: Rewards in (t1, t2] use reduced stake
+        // 3 seconds * 5 tokens/sec = 15 tokens total
+        uint256 proverRewardsPostSlash = proverStaking.getPendingRewards(prover1, prover1);
+        assertEq(proverRewardsPostSlash, 15e18, "Post-slash rewards should use reduced stake");
+
+        // Verify effective stake is correctly reduced for ongoing calculations
+        (,,, uint256 totalEffActive,) = proverStaking.getStreamingInfo();
+        assertEq(totalEffActive, stakeAfter, "Total effective active should reflect post-slash stake");
+    }
+
+    /**
+     * @notice Comprehensive test for dust remainder accounting in addRewards
+     * @dev Validates exact mathematical correctness of dust calculations per ChatGPT requirements
+     */
+    function test_DustRemainderAccountingCorrectness() public {
+        // Setup: Choose odd stakes to create non-zero remainder in distribution
+        _initializeProver(prover1, 111e18, 1000); // 10% commission, odd number for prover stake
+        _stake(staker1, prover1, 333e18); // Another odd number for staker
+        _stake(staker2, prover1, 777e18); // Third odd number
+
+        // Total raw shares = 111 + 333 + 777 = 1221 tokens
+        (uint256 totalRawShares,,,) = proverStaking.getProverInternals(prover1);
+        assertEq(totalRawShares, 1221e18, "Total raw shares setup verification");
+
+        // Choose reward amount that creates remainder
+        uint256 rewardAmount = 1000e18; // 1000 tokens
+        uint256 stakersReward = (rewardAmount * 9000) / 10000; // 900 tokens (90% to stakers)
+
+        // Verify we will have a non-zero remainder
+        uint256 expectedRemainder = (stakersReward * SCALE_FACTOR) % totalRawShares;
+        assertTrue(expectedRemainder != 0, "Test setup should create non-zero remainder");
+
+        _testDustCalculation(prover1, rewardAmount, stakersReward, totalRawShares);
+        _testRewardDistribution(prover1, stakersReward, totalRawShares);
+    }
+
+    function _testDustCalculation(address prover, uint256 rewardAmount, uint256 stakersReward, uint256 totalRawShares)
+        internal
+    {
+        // Calculate expected values using the corrected dust method
+        uint256 expectedDeltaAcc = (stakersReward * SCALE_FACTOR) / totalRawShares;
+        uint256 expectedDistributed = (expectedDeltaAcc * totalRawShares) / SCALE_FACTOR;
+        uint256 expectedDust = stakersReward - expectedDistributed;
+
+        // Capture initial state
+        uint256 treasuryBefore = proverStaking.getTreasuryPool();
+        (,, uint256 proverAccBefore,) = proverStaking.getProverInternals(prover);
+
+        // Execute addRewards
+        brevToken.mint(owner, rewardAmount);
+        vm.startPrank(owner);
+        brevToken.approve(address(proverStaking), rewardAmount);
+        proverStaking.addRewards(prover, rewardAmount);
+        vm.stopPrank();
+
+        // Verify accumulator delta
+        (,, uint256 proverAccAfter,) = proverStaking.getProverInternals(prover);
+        uint256 actualDeltaAcc = proverAccAfter - proverAccBefore;
+        assertEq(
+            actualDeltaAcc, expectedDeltaAcc, "deltaAcc should equal (stakersReward * SCALE_FACTOR) / totalRawShares"
+        );
+
+        // Verify treasury pool increased by exact dust amount
+        uint256 treasuryAfter = proverStaking.getTreasuryPool();
+        uint256 actualDustInTreasury = treasuryAfter - treasuryBefore;
+        assertEq(actualDustInTreasury, expectedDust, "Treasury should increase by stakersReward - distributed (tokens)");
+
+        // Verify dust is in token units (small relative to total)
+        assertLt(actualDustInTreasury, stakersReward / 1000, "Dust should be small fraction of stakersReward");
+
+        // Final verification: Total tokens distributed + dust = original stakersReward
+        assertEq(
+            expectedDistributed + expectedDust, stakersReward, "Distributed + dust should equal stakersReward exactly"
+        );
+
+        // Mathematical identity verification
+        assertEq(
+            (expectedDeltaAcc * totalRawShares) / SCALE_FACTOR + expectedDust,
+            stakersReward,
+            "Mathematical identity: ((stakersReward * SCALE) / shares) * shares / SCALE + dust = stakersReward"
+        );
+    }
+
+    function _testRewardDistribution(address prover, uint256 stakersReward, uint256 totalRawShares) internal {
+        // Calculate expected distributed amount
+        uint256 expectedDeltaAcc = (stakersReward * SCALE_FACTOR) / totalRawShares;
+        uint256 expectedDistributed = (expectedDeltaAcc * totalRawShares) / SCALE_FACTOR;
+
+        // Calculate what each staker should receive from distributed amount
+        uint256 proverShare = (expectedDistributed * 111e18) / totalRawShares;
+        uint256 staker1Share = (expectedDistributed * 333e18) / totalRawShares;
+        uint256 staker2Share = (expectedDistributed * 777e18) / totalRawShares;
+
+        // Get actual pending rewards (prover gets commission + staking rewards)
+        uint256 commission = (1000e18 * 1000) / 10000; // 10% = 100 tokens
+        uint256 actualProverReward = proverStaking.getPendingRewards(prover, prover1);
+        uint256 actualStaker1Reward = proverStaking.getPendingRewards(prover, staker1);
+        uint256 actualStaker2Reward = proverStaking.getPendingRewards(prover, staker2);
+
+        // Verify rewards
+        assertEq(actualProverReward, commission + proverShare, "Prover should get commission + staking share");
+        assertEq(actualStaker1Reward, staker1Share, "Staker1 should get correct staking share");
+        assertEq(actualStaker2Reward, staker2Share, "Staker2 should get correct staking share");
+
+        // Critical test: Total staking rewards should sum to exactly distributed amount
+        uint256 totalStakingRewards = proverShare + staker1Share + staker2Share;
+        assertEq(totalStakingRewards, expectedDistributed, "Total staking rewards should equal distributed amount");
+
+        // Withdraw all rewards and verify exactness
+        vm.prank(prover1);
+        proverStaking.withdrawRewards(prover);
+        vm.prank(staker1);
+        proverStaking.withdrawRewards(prover);
+        vm.prank(staker2);
+        proverStaking.withdrawRewards(prover);
+
+        // After withdrawals, pending rewards should be 0
+        assertEq(
+            proverStaking.getPendingRewards(prover, prover1), 0, "Prover pending rewards should be 0 after withdrawal"
+        );
+        assertEq(
+            proverStaking.getPendingRewards(prover, staker1), 0, "Staker1 pending rewards should be 0 after withdrawal"
+        );
+        assertEq(
+            proverStaking.getPendingRewards(prover, staker2), 0, "Staker2 pending rewards should be 0 after withdrawal"
+        );
+    }
+
+    function test_StreamingDenominatorIntegrity() public {
+        // Setup: Initialize two provers P1 and P2 with different stakes
+        _initializeProver(prover1, 100e18, 1000); // P1: 100 tokens, 10% commission
+        _initializeProver(prover2, 200e18, 1500); // P2: 200 tokens, 15% commission
+
+        // Setup streaming with budget and rate
+        uint256 ratePerSec = 1e18; // 1 token per second
+        uint256 budget = 1000e18;
+        _setStreamingParameters(ratePerSec, budget);
+
+        // Initial state: totalEffectiveActive = 300e18 (100 + 200)
+        (,,, uint256 initialTotalEffective,) = proverStaking.getStreamingInfo();
+        assertEq(initialTotalEffective, 300e18, "Initial total effective should be 300");
+
+        _testDenominatorFreezeOnStateChange(initialTotalEffective, ratePerSec);
+    }
+
+    function _testDenominatorFreezeOnStateChange(uint256 initialTotal, uint256 rate) internal {
+        // Let time elapse: 100 seconds
+        uint256 elapsedTime = 100;
+        vm.warp(block.timestamp + elapsedTime);
+
+        // Capture state before P2's large stake increase
+        (,, uint256 globalAccBefore,,) = proverStaking.getStreamingInfo();
+        uint256 prover2Before = proverStaking.getPendingRewards(prover2, prover2);
+
+        // Expected streaming rewards for elapsed time
+        uint256 expectedRewards = rate * elapsedTime; // 100e18
+        uint256 expectedAccIncrease = (expectedRewards * SCALE_FACTOR) / initialTotal;
+
+        // P2 stakes large amount (should trigger _updateGlobalStreaming BEFORE denominator change)
+        uint256 largeStake = 1000e18;
+        vm.prank(prover2);
+        brevToken.approve(address(proverStaking), largeStake);
+        vm.prank(prover2);
+        proverStaking.stake(prover2, largeStake);
+
+        _verifyDenominatorIntegrity(globalAccBefore, expectedAccIncrease, initialTotal, largeStake);
+        _verifyRewardDistribution(prover2Before, expectedRewards, initialTotal);
+    }
+
+    function _verifyDenominatorIntegrity(
+        uint256 globalAccBefore,
+        uint256 expectedAccIncrease,
+        uint256 initialTotal,
+        uint256 largeStake
+    ) internal view {
+        // Capture state after stake
+        (,, uint256 globalAccAfter, uint256 newTotal, uint256 timeAfter) = proverStaking.getStreamingInfo();
+
+        // Verify globalAccPerEff increased using OLD denominator
+        uint256 actualAccIncrease = globalAccAfter - globalAccBefore;
+        assertApproxEqAbs(actualAccIncrease, expectedAccIncrease, 1e15, "Global accumulator should use old denominator");
+
+        // Verify totalEffectiveActive was updated AFTER streaming settlement
+        uint256 expectedNewTotal = initialTotal + largeStake;
+        assertEq(newTotal, expectedNewTotal, "Total effective should include new stake");
+
+        // Verify timestamp was updated
+        assertEq(timeAfter, block.timestamp, "Last global time should be current");
+    }
+
+    function _verifyRewardDistribution(uint256 prover2Before, uint256 expectedRewards, uint256 initialTotal) internal {
+        // Get rewards after stake operation - but P1 needs settlement to see streaming rewards
+        uint256 prover2After = proverStaking.getPendingRewards(prover2, prover2);
+
+        // Trigger settlement for P1 to get their streaming rewards
+        vm.prank(prover1);
+        proverStaking.withdrawRewards(prover1);
+        uint256 prover1Withdrawn = brevToken.balanceOf(prover1) - (INITIAL_SUPPLY - 100e18);
+
+        // P1 should get rewards proportional to 100e18 out of 300e18 total
+        uint256 expectedP1Reward = (expectedRewards * 100e18) / initialTotal;
+        assertApproxEqAbs(prover1Withdrawn, expectedP1Reward, 1e15, "P1 should get rewards based on old denominator");
+
+        // P2 should get rewards proportional to 200e18 out of 300e18 total
+        uint256 expectedP2Reward = (expectedRewards * 200e18) / initialTotal;
+        uint256 actualP2Reward = prover2After - prover2Before;
+        assertApproxEqAbs(actualP2Reward, expectedP2Reward, 1e15, "P2 should get rewards based on old denominator");
+
+        // Verify total distributed equals expected
+        uint256 totalDistributed = prover1Withdrawn + actualP2Reward;
+        assertApproxEqAbs(totalDistributed, expectedRewards, 1e15, "Total distributed should equal streaming rewards");
+    }
+
+    function test_LifecycleDeactivateReactivate() public {
+        // Setup: Initialize prover with streaming enabled
+        _initializeProver(prover1, 100e18, 1000); // 100 tokens, 10% commission
+        _setStreamingParameters(1e18, 1000e18); // 1 token/sec, 1000 budget
+
+        // Let time elapse to accumulate streaming rewards
+        vm.warp(block.timestamp + 50);
+
+        // Capture state before deactivation
+        (,, uint256 globalAccBefore, uint256 totalEffectiveBefore,) = proverStaking.getStreamingInfo();
+        assertEq(totalEffectiveBefore, 100e18, "Initial total effective should be 100");
+
+        uint256 pendingBefore = proverStaking.getPendingRewards(prover1, prover1);
+
+        // Deactivate prover - should settle streaming and adjust denominator
+        vm.prank(owner);
+        proverStaking.deactivateProver(prover1);
+
+        // Verify streaming was settled during deactivation
+        (,, uint256 globalAccAfter, uint256 totalEffectiveAfter,) = proverStaking.getStreamingInfo();
+        assertTrue(globalAccAfter > globalAccBefore, "Global accumulator should increase on settlement");
+        assertEq(totalEffectiveAfter, 0, "Total effective should be 0 after deactivation");
+
+        uint256 pendingAfter = proverStaking.getPendingRewards(prover1, prover1);
+        assertTrue(pendingAfter > pendingBefore, "Prover should have accrued streaming rewards");
+
+        // Let more time pass while deactivated
+        vm.warp(block.timestamp + 30);
+
+        // Reactivate prover - should baseline rewardDebtEff and update denominator
+        vm.prank(owner);
+        proverStaking.reactivateProver(prover1);
+
+        // Verify reactivation effects
+        (,,, uint256 totalEffectiveReactivate,) = proverStaking.getStreamingInfo();
+        assertEq(totalEffectiveReactivate, 100e18, "Total effective should be restored");
+
+        // Get prover's reward debt by checking if additional streaming doesn't increase pending rewards
+        uint256 pendingAtReactivation = proverStaking.getPendingRewards(prover1, prover1);
+
+        // Small time advancement should accrue rewards since rewardDebtEff baseline is working
+        vm.warp(block.timestamp + 1);
+        uint256 pendingAfterSmallTime = proverStaking.getPendingRewards(prover1, prover1);
+
+        // Should accrue approximately 1 token for 1 second (rate=1e18 per second, 100% of stake)
+        // But pending rewards need manual settlement to be visible, so we expect same value
+        assertEq(
+            pendingAfterSmallTime, pendingAtReactivation, "Pending rewards should remain same until manual settlement"
+        );
+
+        // Trigger settlement to see accrued streaming rewards
+        vm.prank(prover1);
+        proverStaking.withdrawRewards(prover1);
+
+        // After withdrawal, any new streaming should start fresh
+        uint256 balanceAfterWithdrawal = brevToken.balanceOf(prover1);
+        // Prover accrued 50 tokens during 50 seconds active, plus ~1 token for 1 second after reactivation
+        uint256 expectedWithdrawn = INITIAL_SUPPLY - 100e18 + 51e18; // Initial - stake + total rewards
+        assertApproxEqAbs(
+            balanceAfterWithdrawal, expectedWithdrawn, 1e15, "Should have withdrawn ~51 tokens of total rewards"
+        );
+    }
+
+    function test_LifecycleRetireUnretirePolicy() public {
+        // Setup: Initialize prover with self-stake and additional staker
+        _initializeProver(prover1, 100e18, 1000);
+        _stake(staker1, prover1, 50e18);
+
+        // Add some proof rewards to create commission
+        vm.prank(owner);
+        proverStaking.addRewards(prover1, 100e18);
+
+        // Try to retire with active stakes - should fail
+        vm.prank(prover1);
+        vm.expectRevert("Active stakes remaining");
+        proverStaking.retireProver();
+
+        // Try to retire with pending commission - first remove stakes
+        vm.prank(staker1);
+        proverStaking.requestUnstake(prover1, 50e18);
+
+        vm.prank(prover1);
+        proverStaking.requestUnstake(prover1, 100e18);
+
+        // Complete unstakes
+        vm.warp(block.timestamp + proverStaking.UNSTAKE_DELAY() + 1);
+
+        vm.prank(staker1);
+        proverStaking.completeUnstake(prover1);
+
+        vm.prank(prover1);
+        proverStaking.completeUnstake(prover1);
+
+        // Should still fail due to pending commission
+        vm.prank(prover1);
+        vm.expectRevert("Commission remaining");
+        proverStaking.retireProver();
+
+        // Withdraw commission first
+        vm.prank(prover1);
+        proverStaking.withdrawRewards(prover1);
+
+        // Now retirement should succeed
+        vm.prank(prover1);
+        proverStaking.retireProver();
+
+        // Verify retirement state
+        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover1);
+        assertTrue(state == ProverStaking.ProverState.Retired, "Prover should be retired");
+
+        _testUnretirePolicy(prover1);
+    }
+
+    function _testUnretirePolicy(address prover) internal {
+        // Verify scale reset on unretire and effective stake calculations
+
+        // Check pre-unretire state
+        (uint256 totalRawShares,,,) = proverStaking.getProverInternals(prover);
+        assertEq(totalRawShares, 0, "Should have no raw shares when retired");
+
+        // Self-stake to meet minimum requirements for unretiring
+        vm.prank(prover);
+        brevToken.approve(address(proverStaking), 100e18);
+
+        vm.prank(prover);
+        proverStaking.stake(prover, 100e18);
+
+        // Unretire the prover
+        vm.prank(prover);
+        proverStaking.unretireProver();
+
+        // Verify scale reset to 1e18
+        (uint256 rawSharesAfterUnretire, uint256 scaleAfterUnretire,,) = proverStaking.getProverInternals(prover);
+        assertEq(scaleAfterUnretire, SCALE_FACTOR, "Scale should be reset to 1e18 on unretire");
+
+        // Verify effective stake calculation with new scale
+        uint256 effectiveStake = _getTotalEffectiveStake(prover);
+        uint256 expectedEffective = (rawSharesAfterUnretire * scaleAfterUnretire) / SCALE_FACTOR;
+        assertEq(effectiveStake, expectedEffective, "Effective stake should match expected calculation");
+        assertEq(effectiveStake, 100e18, "Effective stake should equal stake amount after scale reset");
+
+        // Verify prover eligibility - should be active and meet requirements
+        (ProverStaking.ProverState stateAfter,,,,) = proverStaking.getProverInfo(prover);
+        assertTrue(stateAfter == ProverStaking.ProverState.Active, "Prover should be active after unretire");
+
+        // Verify eligibility computations
+        (bool eligible,) = proverStaking.isProverEligible(prover, 0);
+        assertTrue(eligible, "Prover should be eligible after unretire");
+
+        // Verify minimum stake requirements are met
+        uint256 selfEffective = _getEffectiveAmount(prover, _getSelfRawShares(prover));
+        (, uint256 minSelfStake,,,) = proverStaking.getProverInfo(prover);
+        uint256 globalMin = proverStaking.globalMinSelfStake();
+        assertTrue(selfEffective >= minSelfStake, "Should meet prover min self-stake");
+        assertTrue(selfEffective >= globalMin, "Should meet global min self-stake");
     }
 }
