@@ -881,7 +881,7 @@ contract StreamingRewardsTest is Test {
         proverStaking.requestUnstake(prover1, 500e18);
 
         // Wait for delay
-        vm.warp(block.timestamp + proverStaking.UNSTAKE_DELAY() + 1);
+        vm.warp(block.timestamp + proverStaking.unstakeDelay() + 1);
 
         // Heavy slashing (multiple 50% slashes) - this should make effective amount near zero
         proverStaking.slash(prover1, 500000); // 50% slash
@@ -1647,7 +1647,7 @@ contract StreamingRewardsTest is Test {
         proverStaking.requestUnstake(prover1, 100e18);
 
         // Complete unstakes
-        vm.warp(block.timestamp + proverStaking.UNSTAKE_DELAY() + 1);
+        vm.warp(block.timestamp + proverStaking.unstakeDelay() + 1);
 
         vm.prank(staker1);
         proverStaking.completeUnstake(prover1);

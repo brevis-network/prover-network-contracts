@@ -119,7 +119,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     // =========================================================================
 
     // Configurable unstaking delay period (default: 7 days, max: 30 days)
-    uint256 public UNSTAKE_DELAY = 7 days;
+    uint256 public unstakeDelay = 7 days;
 
     // Configurable delay for decreasing minSelfStake (default: 7 days, max: 30 days)
     uint256 public minSelfStakeDecreaseDelay = 7 days;
@@ -490,7 +490,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             PendingUnstake storage unstakeRequest = stakeInfo.pendingUnstakes[i];
 
             // Check if this request meets the delay requirement
-            if (block.timestamp >= unstakeRequest.unstakeTime + UNSTAKE_DELAY) {
+            if (block.timestamp >= unstakeRequest.unstakeTime + unstakeDelay) {
                 // Calculate effective amount for this request
                 uint256 effectiveAmount = _effectiveAmount(_prover, unstakeRequest.rawShares);
                 totalEffectiveAmount += effectiveAmount;
@@ -899,8 +899,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      */
     function setUnstakeDelay(uint256 _newDelay) external onlyOwner {
         require(_newDelay <= 30 days, "Unstake delay too long");
-        uint256 oldDelay = UNSTAKE_DELAY;
-        UNSTAKE_DELAY = _newDelay;
+        uint256 oldDelay = unstakeDelay;
+        unstakeDelay = _newDelay;
         emit UnstakeDelayUpdated(oldDelay, _newDelay);
     }
 
@@ -1194,7 +1194,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
         PendingUnstake storage unstakeRequest = stakeInfo.pendingUnstakes[_requestIndex];
         uint256 effectiveAmount = _effectiveAmount(_prover, unstakeRequest.rawShares);
-        bool canComplete = block.timestamp >= unstakeRequest.unstakeTime + UNSTAKE_DELAY;
+        bool canComplete = block.timestamp >= unstakeRequest.unstakeTime + unstakeDelay;
 
         return (effectiveAmount, unstakeRequest.rawShares, unstakeRequest.unstakeTime, canComplete);
     }
