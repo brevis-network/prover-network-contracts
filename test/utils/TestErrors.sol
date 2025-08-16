@@ -27,4 +27,8 @@ library TestErrors {
     error CommissionRemain();
     error InvalidScale();
     error NoRewards();
+    // ProverRewards specific errors
+    error RewardsInvalidCommission();
+    error RewardsProverNotRegistered();
+    error RewardsZeroAmount();
 }

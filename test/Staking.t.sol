@@ -66,26 +66,23 @@ contract StakingTest is Test {
         (
             ProverStaking.ProverState state,
             uint256 minSelfStake,
-            uint64 commissionRate,
             uint256 totalStaked,
-            ,
-            ,
+            uint256 selfEffectiveStake,
             uint256 stakersCount
         ) = proverStaking.getProverInfo(prover1);
 
         assertTrue(state == ProverStaking.ProverState.Active);
         assertEq(minSelfStake, MIN_SELF_STAKE);
-        assertEq(commissionRate, COMMISSION_RATE);
         assertEq(totalStaked, MIN_SELF_STAKE);
         assertEq(stakersCount, 1); // Prover counts as one staker
 
         // Verify prover's stake
-        (uint256 amount, uint256 pendingUnstake, uint256 unstakeTime, uint256 pendingRewards) =
+        (uint256 amount, uint256 pendingUnstake, uint256 pendingUnstakeCount, uint256 pendingRewards) =
             proverStaking.getStakeInfo(prover1, prover1);
 
         assertEq(amount, MIN_SELF_STAKE);
         assertEq(pendingUnstake, 0);
-        assertEq(unstakeTime, 0);
+        assertEq(pendingUnstakeCount, 0);
         assertEq(pendingRewards, 0);
 
         // Verify active prover list
@@ -138,7 +135,7 @@ contract StakingTest is Test {
         assertEq(amount, stakeAmount);
 
         // Verify total stake increased
-        (,,, uint256 totalStaked,,,) = proverStaking.getProverInfo(prover1);
+        (,, uint256 totalStaked,,) = proverStaking.getProverInfo(prover1);
         assertEq(totalStaked, MIN_SELF_STAKE + stakeAmount);
     }
 
@@ -282,80 +279,6 @@ contract StakingTest is Test {
         assertEq(pendingUnstake, MIN_SELF_STAKE);
     }
 
-    function test_RewardDistribution() public {
-        // Setup: initialize prover and add stakers
-        _initializeProver(prover1);
-        uint256 stakeAmount1 = 8000e18;
-        uint256 stakeAmount2 = 2000e18;
-        _stakeToProver(staker1, prover1, stakeAmount1);
-        _stakeToProver(staker2, prover1, stakeAmount2);
-
-        uint256 rewardAmount = 1000e18;
-
-        // Add rewards
-        brevToken.transfer(address(proverStaking), rewardAmount);
-        proverStaking.addRewards(prover1, rewardAmount);
-
-        // Calculate expected rewards
-        uint256 totalStake = MIN_SELF_STAKE + stakeAmount1 + stakeAmount2; // 20000e18
-        uint256 expectedCommission = (rewardAmount * COMMISSION_RATE) / 10000; // 10% of 1000e18 = 100e18
-        uint256 stakersReward = rewardAmount - expectedCommission; // 900e18
-
-        // Expected individual rewards (proportional to stake)
-        uint256 expectedRewards1 = (stakersReward * stakeAmount1) / totalStake; // 900e18 * 8000e18 / 20000e18 = 360e18
-        uint256 expectedRewards2 = (stakersReward * stakeAmount2) / totalStake; // 900e18 * 2000e18 / 20000e18 = 90e18
-        uint256 expectedProverRewards = (stakersReward * MIN_SELF_STAKE) / totalStake + expectedCommission; // 450e18 + 100e18 = 550e18
-
-        // Check pending rewards
-        (,,, uint256 pendingRewards1) = proverStaking.getStakeInfo(prover1, staker1);
-        (,,, uint256 pendingRewards2) = proverStaking.getStakeInfo(prover1, staker2);
-        (,,, uint256 proverPendingRewards) = proverStaking.getStakeInfo(prover1, prover1);
-
-        // Allow for small rounding differences
-        assertApproxEqRel(pendingRewards1, expectedRewards1, 1e15); // 0.1% tolerance
-        assertApproxEqRel(pendingRewards2, expectedRewards2, 1e15);
-        assertApproxEqRel(proverPendingRewards, expectedProverRewards, 1e15);
-    }
-
-    function test_WithdrawRewards() public {
-        // Setup: add rewards
-        _initializeProver(prover1);
-        uint256 stakeAmount = 10000e18;
-        _stakeToProver(staker1, prover1, stakeAmount);
-
-        uint256 rewardAmount = 1000e18;
-        brevToken.transfer(address(proverStaking), rewardAmount);
-        proverStaking.addRewards(prover1, rewardAmount);
-
-        uint256 balanceBefore = brevToken.balanceOf(staker1);
-
-        // Withdraw rewards
-        vm.prank(staker1);
-        proverStaking.withdrawRewards(prover1);
-
-        uint256 balanceAfter = brevToken.balanceOf(staker1);
-        uint256 withdrawn = balanceAfter - balanceBefore;
-
-        assertGt(withdrawn, 0, "Should have withdrawn some rewards");
-
-        // Check that pending rewards are now zero
-        (,,, uint256 pendingRewards) = proverStaking.getStakeInfo(prover1, staker1);
-        assertEq(pendingRewards, 0);
-    }
-
-    function test_WithdrawFromInactiveProver() public {
-        // Setup rewards first
-        _initializeProver(prover1);
-        _stakeToProver(staker1, prover1, 1000e18);
-
-        brevToken.transfer(address(proverStaking), 100e18);
-        proverStaking.addRewards(prover1, 100e18);
-
-        // Should still be able to withdraw rewards even if prover becomes inactive
-        vm.prank(staker1);
-        proverStaking.withdrawRewards(prover1); // Should not revert
-    }
-
     function test_SlashProver() public {
         // Setup staking
         _initializeProver(prover1);
@@ -368,7 +291,7 @@ contract StakingTest is Test {
         vm.prank(owner);
         proverStaking.slash(prover1, slashPercentage);
 
-        (,,, uint256 totalStakeAfter,,,) = proverStaking.getProverInfo(prover1);
+        (,, uint256 totalStakeAfter,,) = proverStaking.getProverInfo(prover1);
         uint256 expectedStakeAfter = (totalStakeBefore * 80) / 100; // 80% remaining = 15200e18
 
         assertEq(totalStakeAfter, expectedStakeAfter);
@@ -387,7 +310,7 @@ contract StakingTest is Test {
         vm.prank(owner);
         proverStaking.slash(prover1, 100000); // 10%
 
-        (,,, uint256 stakeAfter,,,) = proverStaking.getProverInfo(prover1);
+        (,, uint256 stakeAfter,,) = proverStaking.getProverInfo(prover1);
         assertEq(stakeAfter, (stakeBefore * 90) / 100);
     }
 
@@ -443,7 +366,7 @@ contract StakingTest is Test {
         assertEq(stakers[0], prover1, "Prover should be in stakers list");
 
         // Check staker count from getProverInfo
-        (,,,,,, uint256 stakerCount) = proverStaking.getProverInfo(prover1);
+        (,,,, uint256 stakerCount) = proverStaking.getProverInfo(prover1);
         assertEq(stakerCount, 1, "Staker count should be 1");
 
         // Add another staker
@@ -464,7 +387,7 @@ contract StakingTest is Test {
         assertTrue(foundStaker, "Staker should be in stakers list");
 
         // Check staker count
-        (,,,,,, stakerCount) = proverStaking.getProverInfo(prover1);
+        (,,,, stakerCount) = proverStaking.getProverInfo(prover1);
         assertEq(stakerCount, 2, "Staker count should be 2");
 
         // Fully unstake one staker
@@ -477,7 +400,7 @@ contract StakingTest is Test {
         assertEq(stakers[0], prover1, "Only prover should remain in stakers list");
 
         // Check staker count
-        (,,,,,, stakerCount) = proverStaking.getProverInfo(prover1);
+        (,,,, stakerCount) = proverStaking.getProverInfo(prover1);
         assertEq(stakerCount, 1, "Staker count should be 1 after unstaking");
     }
 
@@ -554,7 +477,7 @@ contract StakingTest is Test {
 
         vm.stopPrank();
 
-        (ProverStaking.ProverState state,,,,,,) = proverStaking.getProverInfo(prover2);
+        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover2);
         assertTrue(state == ProverStaking.ProverState.Active);
     }
 
@@ -581,7 +504,7 @@ contract StakingTest is Test {
         proverStaking.initProver(MIN_SELF_STAKE, COMMISSION_RATE);
 
         // Verify prover1 is active
-        (ProverStaking.ProverState initialState,,,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState initialState,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(initialState == ProverStaking.ProverState.Active);
 
         // Increase global minimum above prover1's current requirement
@@ -589,7 +512,7 @@ contract StakingTest is Test {
         proverStaking.setGlobalMinSelfStake(20000e18);
 
         // prover1 should still be active (not retroactive)
-        (ProverStaking.ProverState state1,,,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state1,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state1 == ProverStaking.ProverState.Active);
 
         // But new provers must meet the new requirement
@@ -673,26 +596,6 @@ contract StakingTest is Test {
         assertEq(totalStake, 500e18, "Should return slashed total stake"); // 1000e18 * 0.5 = 500e18
     }
 
-    function test_AddRewardsExternal() public {
-        _initializeProver(prover1);
-
-        // Add a staker
-        vm.prank(staker1);
-        brevToken.approve(address(proverStaking), 5000e18);
-        vm.prank(staker1);
-        proverStaking.stake(prover1, 5000e18);
-
-        uint256 rewardAmount = 1000e18;
-
-        // Approve and add rewards
-        brevToken.approve(address(proverStaking), rewardAmount);
-        proverStaking.addRewards(prover1, rewardAmount);
-
-        // Check that rewards were distributed
-        (,,, uint256 pendingRewards) = proverStaking.getStakeInfo(prover1, staker1);
-        assertGt(pendingRewards, 0, "Staker should have pending rewards");
-    }
-
     function test_SlashExternalWithRole() public {
         _initializeProver(prover1);
 
@@ -719,34 +622,6 @@ contract StakingTest is Test {
         assertApproxEqRel(finalStake, expectedStake, 0.01e18, "Should be approximately 10% slashed");
     }
 
-    function test_AddRewardsTransfersTokens() public {
-        _initializeProver(prover1);
-
-        // Add a staker
-        vm.prank(staker1);
-        brevToken.approve(address(proverStaking), 5000e18);
-        vm.prank(staker1);
-        proverStaking.stake(prover1, 5000e18);
-
-        uint256 rewardAmount = 500e18;
-        uint256 initialBalance = brevToken.balanceOf(address(this));
-        uint256 initialContractBalance = brevToken.balanceOf(address(proverStaking));
-
-        // Approve and add rewards
-        brevToken.approve(address(proverStaking), rewardAmount);
-        proverStaking.addRewards(prover1, rewardAmount);
-
-        // Check token transfer occurred
-        assertEq(
-            brevToken.balanceOf(address(this)), initialBalance - rewardAmount, "Test contract balance should decrease"
-        );
-        assertEq(
-            brevToken.balanceOf(address(proverStaking)),
-            initialContractBalance + rewardAmount,
-            "Contract balance should increase"
-        );
-    }
-
     function test_OnlySlasherRoleCanSlash() public {
         _initializeProver(prover1);
 
@@ -767,7 +642,7 @@ contract StakingTest is Test {
         _initializeProver(prover1);
 
         // Verify prover is active
-        (ProverStaking.ProverState state1,,,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state1,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state1 == ProverStaking.ProverState.Active, "Prover should be active");
 
         // Deactivate prover (admin action)
@@ -777,7 +652,7 @@ contract StakingTest is Test {
         proverStaking.deactivateProver(prover1);
 
         // Verify prover is deactivated after deactivation
-        (ProverStaking.ProverState state2,,,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state2,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state2 == ProverStaking.ProverState.Deactivated, "Prover should be deactivated");
     }
 
@@ -830,7 +705,7 @@ contract StakingTest is Test {
         proverStaking.retireProver(prover1);
 
         // Verify prover is retired
-        (ProverStaking.ProverState state,,,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state == ProverStaking.ProverState.Retired, "Prover should be retired");
     }
 
@@ -850,7 +725,7 @@ contract StakingTest is Test {
         proverStaking.retireProver(prover1);
 
         // Verify prover is retired
-        (ProverStaking.ProverState state1,,,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state1,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state1 == ProverStaking.ProverState.Retired, "Prover should be retired");
 
         // Self-stake while retired to meet minimum requirements
@@ -866,7 +741,7 @@ contract StakingTest is Test {
         proverStaking.unretireProver();
 
         // Verify prover is active again
-        (ProverStaking.ProverState state2,,,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state2,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state2 == ProverStaking.ProverState.Active, "Prover should be active after unretiring");
 
         // Verify stake was applied
@@ -883,7 +758,7 @@ contract StakingTest is Test {
         proverStaking.deactivateProver(prover1);
 
         // Verify prover is deactivated
-        (ProverStaking.ProverState state1,,,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state1,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state1 == ProverStaking.ProverState.Deactivated, "Prover should be deactivated");
 
         // Admin reactivates prover
@@ -893,7 +768,7 @@ contract StakingTest is Test {
         proverStaking.reactivateProver(prover1);
 
         // Verify prover is active again
-        (ProverStaking.ProverState state2,,,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state2,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state2 == ProverStaking.ProverState.Active, "Prover should be active after admin reactivation");
     }
 

@@ -5,6 +5,7 @@ import {Test, console} from "forge-std/Test.sol";
 import "forge-std/Test.sol";
 import {TestProverStaking} from "./TestProverStaking.sol";
 import {ProverStaking} from "../src/ProverStaking.sol";
+import {ProverRewards} from "../src/ProverRewards.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 
 /**
@@ -16,6 +17,7 @@ import {MockERC20} from "./mocks/MockERC20.sol";
  */
 contract StakingGasEfficiencyTest is Test {
     TestProverStaking public proverStaking;
+    ProverRewards public proverRewards;
     MockERC20 public brevToken;
 
     address public owner = makeAddr("owner");
@@ -39,6 +41,10 @@ contract StakingGasEfficiencyTest is Test {
         // Deploy with direct deployment pattern (simpler for tests)
         vm.startPrank(owner);
         proverStaking = new TestProverStaking(address(brevToken), GLOBAL_MIN_SELF_STAKE);
+        proverRewards = new ProverRewards(address(proverStaking), address(brevToken));
+
+        // Set ProverRewards address in ProverStaking
+        proverStaking.setProverRewardsContract(address(proverRewards));
 
         // Grant slasher role to both this test contract and owner for testing
         proverStaking.grantRole(proverStaking.SLASHER_ROLE(), address(this));
@@ -54,6 +60,7 @@ contract StakingGasEfficiencyTest is Test {
 
         // Approve tokens for the test contract to distribute rewards
         brevToken.approve(address(proverStaking), INITIAL_SUPPLY);
+        brevToken.approve(address(proverRewards), INITIAL_SUPPLY);
     }
 
     // ========== SLASHING EFFICIENCY TESTS ==========
@@ -217,16 +224,16 @@ contract StakingGasEfficiencyTest is Test {
         console.log("Stake:", gasUsed);
 
         // Test reward distribution
-        brevToken.transfer(address(proverStaking), 100e18);
+        brevToken.transfer(address(proverRewards), 100e18);
         gasUsed = gasleft();
-        proverStaking.addRewards(prover, 100e18);
+        proverRewards.addRewards(prover, 100e18);
         gasUsed = gasUsed - gasleft();
         console.log("Add rewards:", gasUsed);
 
         // Test reward withdrawal
         gasUsed = gasleft();
         vm.prank(staker1);
-        proverStaking.withdrawRewards(prover);
+        proverRewards.withdrawRewards(prover);
         gasUsed = gasUsed - gasleft();
         console.log("Withdraw rewards:", gasUsed);
     }

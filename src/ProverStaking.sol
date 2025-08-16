@@ -8,6 +8,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import "./access/AccessControl.sol";
+import "./interfaces/IProverRewards.sol";
 
 // =============================================================
 // Custom Errors (grouped by functional domain)
@@ -35,9 +36,8 @@ error NoStake(); // No active stake for operation
 error NoPendingUnstakes(); // No pending unstake entries exist
 error NoReadyUnstakes(); // Pending unstakes exist but none matured
 
-// --- Reward / Commission Accounting ---
-error InvalidCommission(); // Commission rate > denominator
-error NoRewards(); // Nothing to withdraw
+// --- Commission / Rewards (Legacy) ---
+error InvalidCommission(); // Commission rate > denominator (kept for backwards compatibility)
 
 // --- Min Self-Stake Update Workflow ---
 error NoMinStakeChange(); // New min self-stake equals current
@@ -55,9 +55,9 @@ error TreasuryInsufficient(); // Treasury pool balance too low for withdrawal
  * @dev This contract implements a delegation-based staking system where:
  *      - Provers can initialize themselves with minimum self-stake requirements
  *      - Users can delegate stakes to active provers
- *      - Rewards are distributed proportionally with commission to provers
  *      - Slashing affects all stakes proportionally through a global scale factor
  *      - Unstaking has a configurable delay period for security
+ *      - Rewards are handled by a separate ProverRewards contract for security isolation
  */
 contract ProverStaking is ReentrancyGuard, AccessControl {
     using SafeERC20 for IERC20;
@@ -104,17 +104,14 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @notice Core information for each prover in the network
      * @dev Uses a dual-share system: raw shares (pre-slash) and effective shares (post-slash)
      *      Raw shares remain constant until stake changes, while effective value fluctuates with slashing
+     *      Reward accounting is handled by ProverRewards contract
      */
     struct ProverInfo {
-        ProverState state; // Current state of the prover (Null, Active, Retired)
-        uint64 commissionRate; // Commission rate in basis points (0-10000, where 10000 = 100%)
+        ProverState state; // Current state of the prover (Null, Active, Retired, Deactivated)
         uint256 minSelfStake; // Minimum self-stake required to accept delegations
         // === SHARE TRACKING ===
         uint256 totalRawShares; // Total raw shares across all stakers (invariant to slashing)
         uint256 scale; // Global scale factor for this prover (decreases with slashing)
-        // === REWARD DISTRIBUTION ===
-        uint256 accRewardPerRawShare; // Accumulated rewards per raw share (scaled by SCALE_FACTOR)
-        uint256 pendingCommission; // Unclaimed commission rewards for the prover
         // === MIN SELF STAKE UPDATE ===
         PendingMinSelfStakeUpdate pendingMinSelfStakeUpdate; // Pending minSelfStake decrease (empty if no pending update)
         // === STAKER DATA ===
@@ -124,12 +121,11 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
     /**
      * @notice Individual stake information for each staker-prover pair
-     * @dev Tracks both active stakes and pending unstake operations
+     * @dev Tracks active stakes and pending unstake operations
+     *      Reward accounting is handled by ProverRewards contract
      */
     struct StakeInfo {
         uint256 rawShares; // Raw shares owned (before applying scale factor)
-        uint256 rewardDebt; // Tracks already-accounted rewards to prevent double-claiming
-        uint256 pendingRewards; // Accumulated but unclaimed proof rewards
         // === UNSTAKING DATA ===
         PendingUnstake[] pendingUnstakes; // Array of pending unstake requests
     }
@@ -162,13 +158,16 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     // Configurable delay for decreasing minSelfStake (default: 7 days, max: 30 days)
     uint256 public minSelfStakeDecreaseDelay = 7 days;
 
-    address public brevToken; // ERC20 token used for both staking and rewards
+    address public stakingToken; // ERC20 token used for staking (renamed from brevToken)
 
     // Global minimum self-stake requirement for all provers
     uint256 public globalMinSelfStake;
 
     // Global pool of slashed tokens available for treasury withdrawal
     uint256 public treasuryPool;
+
+    // Optional ProverRewards contract for reward distribution
+    IProverRewards public proverRewards;
 
     mapping(address => ProverInfo) internal provers; // Prover address -> ProverInfo
     address[] public proverList; // Enumerable list of all registered provers
@@ -188,16 +187,14 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     // Prover configuration events
     event MinSelfStakeUpdateRequested(address indexed prover, uint256 newMinSelfStake, uint256 requestTime);
     event MinSelfStakeUpdated(address indexed prover, uint256 newMinSelfStake);
-    event CommissionRateUpdated(address indexed prover, uint64 oldCommissionRate, uint64 newCommissionRate);
+    event ProverRewardsContractUpdated(address indexed oldContract, address indexed newContract);
 
     // Staking lifecycle events
     event Staked(address indexed staker, address indexed prover, uint256 amount, uint256 mintedShares);
     event UnstakeRequested(address indexed staker, address indexed prover, uint256 amount, uint256 rawSharesToUnstake);
     event UnstakeCompleted(address indexed staker, address indexed prover, uint256 amount);
 
-    // Reward and slashing events
-    event RewardsAdded(address indexed prover, uint256 amount, uint256 commission, uint256 distributed);
-    event RewardsWithdrawn(address indexed staker, address indexed prover, uint256 amount);
+    // Slashing events
     event ProverSlashed(address indexed prover, uint256 percentage, uint256 totalSlashed);
     event TreasuryPoolWithdrawn(address indexed to, uint256 amount);
 
@@ -212,24 +209,24 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
     /**
      * @notice Constructor for direct deployment (non-upgradeable)
-     * @dev Initializes the contract with token and global minimum self-stake.
+     * @dev Initializes the contract with staking token and global minimum self-stake.
      *      For upgradeable deployment, use the no-arg constructor and call init() instead.
-     * @param _token ERC20 token address for staking and rewards
+     * @param _stakingToken ERC20 token address for staking
      * @param _globalMinSelfStake Global minimum self-stake requirement for all provers
      */
-    constructor(address _token, uint256 _globalMinSelfStake) {
-        _init(_token, _globalMinSelfStake);
+    constructor(address _stakingToken, uint256 _globalMinSelfStake) {
+        _init(_stakingToken, _globalMinSelfStake);
         // Note: Ownable constructor automatically sets msg.sender as owner
     }
 
     /**
      * @notice Initialize the staking contract for upgradeable deployment
      * @dev This function sets up the contract state after deployment.
-     * @param _token ERC20 token address used for both staking and rewards
+     * @param _stakingToken ERC20 token address used for staking
      * @param _globalMinSelfStake Global minimum self-stake requirement for all provers
      */
-    function init(address _token, uint256 _globalMinSelfStake) external {
-        _init(_token, _globalMinSelfStake);
+    function init(address _stakingToken, uint256 _globalMinSelfStake) external {
+        _init(_stakingToken, _globalMinSelfStake);
         initOwner();
     }
 
@@ -237,12 +234,12 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @notice Initialize the staking contract for upgradeable deployment
      * /**
      * @notice Internal initialization logic shared by constructor and init function
-     * @param _token ERC20 token address for staking and rewards
+     * @param _stakingToken ERC20 token address for staking
      * @param _globalMinSelfStake Global minimum self-stake requirement for all provers
      */
-    function _init(address _token, uint256 _globalMinSelfStake) private {
+    function _init(address _stakingToken, uint256 _globalMinSelfStake) private {
         if (_globalMinSelfStake == 0) revert GlobalMinSelfStakeZero();
-        brevToken = _token;
+        stakingToken = _stakingToken;
         globalMinSelfStake = _globalMinSelfStake;
         // Initialize core parameters
     }
@@ -254,7 +251,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     /**
      * @notice Initialize a new prover and self-stake with a minimum amount
      * @param _minSelfStake Minimum tokens the prover must self-stake to accept delegations
-     * @param _commissionRate Commission percentage in basis points (0-10000)
+     * @param _commissionRate Commission percentage in basis points (0-10000) - used for ProverRewards contract
      */
     function initProver(uint256 _minSelfStake, uint64 _commissionRate) external {
         if (provers[msg.sender].state != ProverState.Null) revert InvalidProverState();
@@ -264,12 +261,16 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         ProverInfo storage prover = provers[msg.sender];
         prover.state = ProverState.Active;
         prover.minSelfStake = _minSelfStake;
-        prover.commissionRate = _commissionRate;
         prover.scale = SCALE_FACTOR; // Initialize scale to 1.0 (no slashing yet)
 
         // Register prover in global mappings
         proverList.push(msg.sender);
         activeProvers.add(msg.sender);
+
+        // Initialize prover rewards if rewards contract is set
+        if (address(proverRewards) != address(0)) {
+            proverRewards.initProverRewards(msg.sender, _commissionRate);
+        }
 
         // Prover must stake at least the minimum self stake to accept delegations
         stake(msg.sender, _minSelfStake);
@@ -283,13 +284,9 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      *      1. Validate prover meets minimum self-stake for new delegations
      *      2. Transfer tokens from staker to contract
      *      3. Convert amount to raw shares using current scale
-     *      4. Update reward accounting (settle pending rewards before share change)
+     *      4. Update reward accounting via ProverRewards contract (if set)
      *      5. Mint new raw shares and update totals
-     *      6. Update reward debt to current accumulated rewards
-     *
-     *      Reward Accounting Algorithm:
-     *      - pendingRewards += (currentShares * accRewardPerRawShare / SCALE_FACTOR) - rewardDebt
-     *      - rewardDebt = newShares * accRewardPerRawShare / SCALE_FACTOR
+     *      6. Update reward debt via ProverRewards contract (if set)
      *
      *      Self-staking is always allowed regardless of prover state
      * @param _prover Address of the prover to stake with
@@ -314,7 +311,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         }
 
         // Transfer tokens from staker to contract (fail early if insufficient balance/allowance)
-        IERC20(brevToken).safeTransferFrom(msg.sender, address(this), _amount);
+        IERC20(stakingToken).safeTransferFrom(msg.sender, address(this), _amount);
 
         // Convert amount to raw shares at current scale
         // This ensures fair share allocation regardless of slashing history
@@ -325,16 +322,20 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             prover.stakers.add(msg.sender);
         }
 
-        // === REWARD ACCOUNTING === (pre-share-change accrual)
-        uint256 accRewardPerRawShare = _settleProofRewards(prover, stakeInfo);
+        // === REWARD ACCOUNTING === (via ProverRewards contract if set)
+        if (address(proverRewards) != address(0)) {
+            proverRewards.settleStakerRewards(_prover, msg.sender, stakeInfo.rawShares);
+        }
 
         // === SHARE MINTING ===
         // Update stake amount (in raw shares) - follows CEI (Checks-Effects-Interactions) pattern
         stakeInfo.rawShares += newRawShares;
         prover.totalRawShares += newRawShares;
 
-        // Update reward debt based on new raw shares to prevent double-claiming
-        stakeInfo.rewardDebt = (stakeInfo.rawShares * accRewardPerRawShare) / SCALE_FACTOR;
+        // === UPDATE REWARD DEBT === (via ProverRewards contract if set)
+        if (address(proverRewards) != address(0)) {
+            proverRewards.updateStakerRewardDebt(_prover, msg.sender, stakeInfo.rawShares);
+        }
 
         emit Staked(msg.sender, _prover, _amount, newRawShares);
     }
@@ -384,8 +385,10 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             }
         }
 
-        // === REWARD ACCOUNTING === (pre-share-change accrual)
-        uint256 accRewardPerRawShare = _settleProofRewards(prover, stakeInfo);
+        // === REWARD ACCOUNTING === (via ProverRewards contract if set)
+        if (address(proverRewards) != address(0)) {
+            proverRewards.settleStakerRewards(_prover, msg.sender, stakeInfo.rawShares);
+        }
 
         // === SHARE BURNING ===
         // Update stake amount (in raw shares) - CEI ordering
@@ -401,8 +404,10 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         // Add new pending unstake request
         stakeInfo.pendingUnstakes.push(PendingUnstake({rawShares: rawSharesToUnstake, unstakeTime: block.timestamp}));
 
-        // Update reward debt based on new raw shares
-        stakeInfo.rewardDebt = (stakeInfo.rawShares * accRewardPerRawShare) / SCALE_FACTOR;
+        // === UPDATE REWARD DEBT === (via ProverRewards contract if set)
+        if (address(proverRewards) != address(0)) {
+            proverRewards.updateStakerRewardDebt(_prover, msg.sender, stakeInfo.rawShares);
+        }
 
         emit UnstakeRequested(msg.sender, _prover, _amount, rawSharesToUnstake);
     }
@@ -485,130 +490,10 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         if (completedCount == 0) revert NoReadyUnstakes();
 
         if (totalEffectiveAmount > 0) {
-            IERC20(brevToken).safeTransfer(msg.sender, totalEffectiveAmount);
+            IERC20(stakingToken).safeTransfer(msg.sender, totalEffectiveAmount);
         }
 
         emit UnstakeCompleted(msg.sender, _prover, totalEffectiveAmount);
-    }
-
-    /**
-     * @notice Distribute rewards to a prover and their stakers
-     * @dev Reward Distribution Algorithm:
-     *      1. Transfer tokens from sender to this contract
-     *      2. Calculate commission for prover (commissionRate * totalRewards)
-     *      3. Remaining rewards go to stakers proportionally
-     *      4. Update accRewardPerRawShare for stakers using: newAcc = oldAcc + (stakersReward * SCALE_FACTOR) / totalRawShares
-     *      5. If no stakers exist, prover gets all rewards as commission
-     *
-     *      Mathematical Properties:
-     *      - Rewards are distributed per raw share, not effective shares
-     *      - This ensures fair distribution regardless of slashing history
-     *      - accRewardPerRawShare is scaled by SCALE_FACTOR for precision
-     *      - Stakers claim rewards based on: (rawShares * accRewardPerRawShare / SCALE_FACTOR) - rewardDebt
-     *
-     * @param _prover The address of the prover receiving rewards
-     * @param _amount Total amount of tokens to distribute as rewards
-     */
-    function addRewards(address _prover, uint256 _amount) external nonReentrant {
-        if (provers[_prover].state == ProverState.Null) revert ProverNotRegistered();
-        if (_amount == 0) return;
-
-        // Transfer tokens from sender to this contract
-        IERC20(brevToken).safeTransferFrom(msg.sender, address(this), _amount);
-
-        ProverInfo storage prover = provers[_prover];
-
-        // === COMMISSION CALCULATION ===
-        // Calculate commission for prover (always paid regardless of staker count)
-        uint256 commission = (_amount * prover.commissionRate) / COMMISSION_RATE_DENOMINATOR;
-        uint256 stakersReward = _amount - commission;
-
-        // Always credit commission to prover
-        prover.pendingCommission += commission;
-
-        if (prover.totalRawShares == 0) {
-            // === NO STAKERS CASE ===
-            // No stakers exist, prover gets all remaining rewards as commission
-            prover.pendingCommission += stakersReward;
-            emit RewardsAdded(_prover, _amount, _amount, 0);
-        } else {
-            // === STAKER REWARD DISTRIBUTION ===
-            // Distribute remaining rewards proportionally to all stakers (including prover if self-staked)
-            // Calculate accumulator delta and ensure dimensional consistency for dust accounting
-            uint256 deltaAcc = (stakersReward * SCALE_FACTOR) / prover.totalRawShares;
-            uint256 distributed = (deltaAcc * prover.totalRawShares) / SCALE_FACTOR; // tokens actually distributed
-            uint256 dust = stakersReward - distributed; // tokens
-
-            prover.accRewardPerRawShare += deltaAcc;
-
-            // Add dust from rounding errors to treasury pool (in token units)
-            if (dust > 0) {
-                treasuryPool += dust;
-            }
-
-            emit RewardsAdded(_prover, _amount, commission, stakersReward);
-        }
-    }
-
-    /**
-     * @notice Withdraw accumulated rewards for a staker or prover
-     * @dev Reward Withdrawal Algorithm:
-     *      1. Update pending staking rewards: pendingRewards += (rawShares * accRewardPerRawShare / SCALE_FACTOR) - rewardDebt
-     *      2. Update rewardDebt to current accumulated amount to prevent double-claiming
-     *      3. If caller is the prover, add pending commission to payout
-     *      4. Transfer total payout to caller
-     *
-     *      Security Features:
-     *      - rewardDebt prevents double-claiming of rewards
-     *      - All reward calculations are done in raw shares for fairness
-     *      - Commission is separate from staking rewards
-     *
-     * @param _prover The address of the prover to withdraw rewards from
-     */
-    function withdrawRewards(address _prover) external nonReentrant {
-        if (provers[_prover].state == ProverState.Null) revert ProverNotRegistered();
-
-        ProverInfo storage prover = provers[_prover];
-        StakeInfo storage stakeInfo = prover.stakes[msg.sender];
-
-        uint256 payout = 0;
-
-        // === STAKING REWARDS UPDATE ===
-        // Update pending rewards for active stakes
-        uint256 accRewardPerRawShare = prover.accRewardPerRawShare;
-        if (stakeInfo.rawShares > 0) {
-            // Calculate total accrued proof rewards for this staker
-            uint256 accrued = (stakeInfo.rawShares * accRewardPerRawShare) / SCALE_FACTOR;
-            // Calculate new proof rewards since last claim
-            uint256 delta = accrued - stakeInfo.rewardDebt;
-            if (delta > 0) {
-                stakeInfo.pendingRewards += delta;
-            }
-            // Update reward debt to prevent double-claiming
-            stakeInfo.rewardDebt = accrued;
-        }
-
-        // === PAYOUT CALCULATION ===
-        // Add accumulated staking rewards to payout
-        if (stakeInfo.pendingRewards > 0) {
-            payout += stakeInfo.pendingRewards;
-            stakeInfo.pendingRewards = 0;
-        }
-
-        // Add commission if this is the prover
-        if (msg.sender == _prover) {
-            if (prover.pendingCommission > 0) {
-                payout += prover.pendingCommission;
-                prover.pendingCommission = 0;
-            }
-        }
-
-        if (payout == 0) revert NoRewards();
-
-        // Transfer rewards to caller
-        IERC20(brevToken).safeTransfer(msg.sender, payout);
-
-        emit RewardsWithdrawn(msg.sender, _prover, payout);
     }
 
     /**
@@ -771,26 +656,23 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         _applyMinSelfStakeUpdate(msg.sender, newMinSelfStake);
     }
 
-    /**
-     * @notice Update commission rate for a prover
-     * @param _newCommissionRate New commission rate in basis points (0-10000, where 10000 = 100%)
-     */
-    function updateCommissionRate(uint64 _newCommissionRate) external {
-        if (provers[msg.sender].state == ProverState.Null) revert ProverNotRegistered();
-        if (_newCommissionRate > COMMISSION_RATE_DENOMINATOR) revert InvalidCommission();
-
-        ProverInfo storage prover = provers[msg.sender];
-        uint64 oldCommissionRate = prover.commissionRate;
-
-        // Update commission rate immediately
-        prover.commissionRate = _newCommissionRate;
-
-        emit CommissionRateUpdated(msg.sender, oldCommissionRate, _newCommissionRate);
-    }
+    // =========================================================================
+    // EXTERNAL FUNCTIONS (ADMIN ONLY)
+    // ========================================================================="
 
     // =========================================================================
     // EXTERNAL FUNCTIONS (ADMIN ONLY)
     // =========================================================================
+
+    /**
+     * @notice Admin function to set the ProverRewards contract
+     * @param _proverRewards Address of the ProverRewards contract
+     */
+    function setProverRewardsContract(address _proverRewards) external onlyOwner {
+        address oldContract = address(proverRewards);
+        proverRewards = IProverRewards(_proverRewards);
+        emit ProverRewardsContractUpdated(oldContract, _proverRewards);
+    }
 
     /**
      * @notice Admin function to set the unstaking delay period
@@ -878,7 +760,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         treasuryPool -= _amount;
 
         // Transfer tokens to recipient
-        IERC20(brevToken).safeTransfer(_to, _amount);
+        IERC20(stakingToken).safeTransfer(_to, _amount);
 
         emit TreasuryPoolWithdrawn(_to, _amount);
     }
@@ -888,14 +770,12 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     // =========================================================================
 
     /**
-     * @notice Get detailed prover information including self-stake and commission data
+     * @notice Get detailed prover information including self-stake data
      * @param _prover Address of the prover to query
-     * @return state Current state of the prover (Null, Active, Retired)
+     * @return state Current state of the prover (Null, Active, Retired, Deactivated)
      * @return minSelfStake Minimum self-stake required for accepting delegations
-     * @return commissionRate Commission rate in basis points (0-10000)
      * @return totalStaked Total effective stake from all stakers (post-slashing)
      * @return selfEffectiveStake Prover's own effective stake amount (post-slashing)
-     * @return pendingCommission Unclaimed commission rewards for the prover
      * @return stakerCount Number of active stakers (excluding zero-balance stakers)
      */
     function getProverInfo(address _prover)
@@ -904,37 +784,26 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         returns (
             ProverState state,
             uint256 minSelfStake,
-            uint64 commissionRate,
             uint256 totalStaked,
             uint256 selfEffectiveStake,
-            uint256 pendingCommission,
             uint256 stakerCount
         )
     {
         ProverInfo storage prover = provers[_prover];
         uint256 effectiveTotalStaked = _getTotalEffectiveStake(_prover);
         uint256 selfEffective = _effectiveAmount(_prover, _selfRawShares(_prover));
-        uint256 totalCommission = prover.pendingCommission;
-        return (
-            prover.state,
-            prover.minSelfStake,
-            prover.commissionRate,
-            effectiveTotalStaked,
-            selfEffective,
-            totalCommission,
-            prover.stakers.length()
-        );
+        return (prover.state, prover.minSelfStake, effectiveTotalStaked, selfEffective, prover.stakers.length());
     }
 
     /**
      * @notice Get comprehensive stake information for a specific staker with a prover
-     * @dev Calculates real-time pending rewards including live proof reward accumulation
+     * @dev Calculates real-time pending rewards via ProverRewards contract if available
      * @param _prover Address of the prover
      * @param _staker Address of the staker to query
      * @return amount Current effective stake amount (post-slashing)
      * @return totalPendingUnstake Total effective amount currently in unstaking process (post-slashing)
      * @return pendingUnstakeCount Number of pending unstake requests
-     * @return pendingRewards Total pending rewards (proof rewards + commission if prover)
+     * @return pendingRewards Total pending rewards (from ProverRewards contract if available)
      */
     function getStakeInfo(address _prover, address _staker)
         external
@@ -953,36 +822,49 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         }
         pendingUnstakeCount = stakeInfo.pendingUnstakes.length;
 
-        // Calculate pending rewards
-        pendingRewards = _calculateTotalPendingRewards(_prover, _staker);
+        // Calculate pending rewards via ProverRewards contract if available
+        if (address(proverRewards) != address(0)) {
+            pendingRewards = proverRewards.calculateTotalPendingRewards(_prover, _staker);
+        } else {
+            pendingRewards = 0;
+        }
     }
 
     /**
-     * @notice Calculate total pending rewards for a staker (internal helper to avoid stack too deep)
+     * @notice Check if a prover is registered (interface for ProverRewards)
+     * @param _prover Address of the prover
+     * @return True if prover is registered
+     */
+    function isProverRegistered(address _prover) external view returns (bool) {
+        return provers[_prover].state != ProverState.Null;
+    }
+
+    /**
+     * @notice Get total raw shares for a prover (interface for ProverRewards)
+     * @param _prover Address of the prover
+     * @return Total raw shares
+     */
+    function getTotalRawShares(address _prover) external view returns (uint256) {
+        return provers[_prover].totalRawShares;
+    }
+
+    /**
+     * @notice Get raw shares for a specific staker (interface for ProverRewards)
      * @param _prover Address of the prover
      * @param _staker Address of the staker
-     * @return Total pending rewards including proof rewards and commission
+     * @return Raw shares owned by the staker
      */
-    function _calculateTotalPendingRewards(address _prover, address _staker) internal view returns (uint256) {
-        ProverInfo storage prover = provers[_prover];
-        StakeInfo storage stakeInfo = prover.stakes[_staker];
+    function getStakerRawShares(address _prover, address _staker) external view returns (uint256) {
+        return provers[_prover].stakes[_staker].rawShares;
+    }
 
-        uint256 totalRewards = stakeInfo.pendingRewards;
-
-        if (stakeInfo.rawShares > 0) {
-            // Add accrued proof rewards
-            uint256 accrued = (stakeInfo.rawShares * prover.accRewardPerRawShare) / SCALE_FACTOR;
-            if (accrued >= stakeInfo.rewardDebt) {
-                totalRewards += (accrued - stakeInfo.rewardDebt);
-            }
-        }
-
-        // Add any pending commission if this is the prover
-        if (_staker == _prover) {
-            totalRewards += prover.pendingCommission;
-        }
-
-        return totalRewards;
+    /**
+     * @notice Get prover state (interface for ProverRewards)
+     * @param _prover Address of the prover
+     * @return Current state of the prover
+     */
+    function getProverState(address _prover) external view returns (ProverState) {
+        return provers[_prover].state;
     }
 
     /**
@@ -1085,32 +967,29 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _prover Address of the prover to query
      * @return totalRawShares Total raw shares across all stakers (invariant to slashing)
      * @return scale Current scale factor for this prover (SCALE_FACTOR = 1.0, decreases with slashing)
-     * @return accRewardPerRawShare Accumulated rewards per raw share (scaled by SCALE_FACTOR)
      * @return stakersCount Number of active stakers (from EnumerableSet)
      */
     function getProverInternals(address _prover)
         external
         view
-        returns (uint256 totalRawShares, uint256 scale, uint256 accRewardPerRawShare, uint256 stakersCount)
+        returns (uint256 totalRawShares, uint256 scale, uint256 stakersCount)
     {
         ProverInfo storage prover = provers[_prover];
-        return (prover.totalRawShares, prover.scale, prover.accRewardPerRawShare, prover.stakers.length());
+        return (prover.totalRawShares, prover.scale, prover.stakers.length());
     }
 
     /**
      * @notice Get internal stake information for a specific staker with a prover
-     * @dev Provides access to low-level stake data including raw shares and reward debt
+     * @dev Provides access to low-level stake data including raw shares
      * @param _prover Address of the prover
      * @param _staker Address of the staker to query
      * @return rawShares Raw shares owned by the staker (before applying scale factor)
-     * @return rewardDebt Tracks already-accounted rewards to prevent double-claiming
-     * @return pendingRewards Accumulated but unclaimed staking rewards
      * @return totalPendingUnstakeRaw Total raw shares currently in unstaking process across all requests
      */
     function getStakeInternals(address _prover, address _staker)
         external
         view
-        returns (uint256 rawShares, uint256 rewardDebt, uint256 pendingRewards, uint256 totalPendingUnstakeRaw)
+        returns (uint256 rawShares, uint256 totalPendingUnstakeRaw)
     {
         ProverInfo storage prover = provers[_prover];
         StakeInfo storage stakeInfo = prover.stakes[_staker];
@@ -1121,7 +1000,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             totalPendingRawShares += stakeInfo.pendingUnstakes[i].rawShares;
         }
 
-        return (stakeInfo.rawShares, stakeInfo.rewardDebt, stakeInfo.pendingRewards, totalPendingRawShares);
+        return (stakeInfo.rawShares, totalPendingRawShares);
     }
 
     /**
@@ -1164,21 +1043,14 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         return treasuryPool;
     }
 
-    /// @dev Settle proof rewards for a stake before mutating rawShares; returns current accRewardPerRawShare.
-    function _settleProofRewards(ProverInfo storage prover, StakeInfo storage stakeInfo)
-        internal
-        returns (uint256 accRewardPerRawShare)
-    {
-        accRewardPerRawShare = prover.accRewardPerRawShare;
-        uint256 rawShares = stakeInfo.rawShares;
-        if (rawShares == 0) return accRewardPerRawShare;
-        uint256 accrued = (rawShares * accRewardPerRawShare) / SCALE_FACTOR;
-        uint256 prevDebt = stakeInfo.rewardDebt;
-        if (accrued > prevDebt) {
-            stakeInfo.pendingRewards += (accrued - prevDebt);
-        }
-        // rewardDebt updated by caller after rawShares mutation
-        return accRewardPerRawShare;
+    /**
+     * @notice Gets the prover's self-stake in raw shares
+     * @param _prover Prover address
+     * @return Raw shares owned by the prover themselves
+     */
+    function _selfRawShares(address _prover) internal view returns (uint256) {
+        ProverInfo storage prover = provers[_prover];
+        return prover.stakes[_prover].rawShares;
     }
 
     // =========================================================================
@@ -1190,7 +1062,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @dev Retirement Requirements (ensures clean state):
      *      1. Prover must be inactive (no new stakes accepted)
      *      2. No active stakes remaining (totalRawShares = 0)
-     *      3. No pending commission rewards
+     *      3. No pending commission rewards (checked via ProverRewards contract if set)
      *
      *      This ensures all economic relationships are settled before retirement
      *
@@ -1202,7 +1074,12 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             revert InvalidProverState();
         }
         if (prover.totalRawShares != 0) revert ActiveStakesRemain();
-        if (prover.pendingCommission != 0) revert CommissionRemain();
+
+        // Check for pending commission in ProverRewards contract if set
+        if (address(proverRewards) != address(0)) {
+            (, uint256 pendingCommission,) = proverRewards.getProverRewardInfo(_prover);
+            if (pendingCommission != 0) revert CommissionRemain();
+        }
 
         prover.state = ProverState.Retired;
         activeProvers.remove(_prover);
@@ -1262,15 +1139,5 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     function _getTotalEffectiveStake(address _prover) internal view returns (uint256) {
         ProverInfo storage prover = provers[_prover];
         return _effectiveAmount(_prover, prover.totalRawShares);
-    }
-
-    /**
-     * @notice Gets the prover's self-stake in raw shares
-     * @param _prover Prover address
-     * @return Raw shares owned by the prover themselves
-     */
-    function _selfRawShares(address _prover) internal view returns (uint256) {
-        ProverInfo storage prover = provers[_prover];
-        return prover.stakes[_prover].rawShares;
     }
 }

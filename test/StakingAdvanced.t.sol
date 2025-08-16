@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import {TestProverStaking} from "./TestProverStaking.sol";
 import {ProverStaking} from "../src/ProverStaking.sol";
+import {ProverRewards} from "../src/ProverRewards.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {TestErrors} from "./utils/TestErrors.sol";
 
@@ -14,6 +15,7 @@ import {TestErrors} from "./utils/TestErrors.sol";
  */
 contract StakingAdvancedTest is Test {
     TestProverStaking public proverStaking;
+    ProverRewards public proverRewards;
     MockERC20 public brevToken;
 
     address public owner = makeAddr("owner");
@@ -37,6 +39,12 @@ contract StakingAdvancedTest is Test {
         // Deploy with direct deployment pattern (simpler for tests)
         vm.startPrank(owner);
         proverStaking = new TestProverStaking(address(brevToken), GLOBAL_MIN_SELF_STAKE);
+
+        // Deploy ProverRewards
+        proverRewards = new ProverRewards(address(proverStaking), address(brevToken));
+
+        // Set ProverRewards in ProverStaking
+        proverStaking.setProverRewardsContract(address(proverRewards));
 
         // Grant slasher role to both this test contract and owner for testing
         proverStaking.grantRole(proverStaking.SLASHER_ROLE(), address(this));
@@ -63,6 +71,7 @@ contract StakingAdvancedTest is Test {
         vm.prank(staker3);
         brevToken.approve(address(proverStaking), INITIAL_SUPPLY);
         brevToken.approve(address(proverStaking), INITIAL_SUPPLY);
+        brevToken.approve(address(proverRewards), INITIAL_SUPPLY);
     }
 
     // ========== COMMISSION EDGE CASES ==========
@@ -75,19 +84,18 @@ contract StakingAdvancedTest is Test {
         _stakeToProver(staker1, prover1, 5000e18);
 
         uint256 rewardAmount = 1000e18;
-        brevToken.transfer(address(proverStaking), rewardAmount);
-        proverStaking.addRewards(prover1, rewardAmount);
+        _addRewards(prover1, rewardAmount);
 
         // With 0% commission, all rewards go to stake proportionally
         uint256 totalStake = MIN_SELF_STAKE + 5000e18; // 15000e18
 
-        (,,, uint256 proverRewards) = proverStaking.getStakeInfo(prover1, prover1);
+        (,,, uint256 proverRewardsAmount) = proverStaking.getStakeInfo(prover1, prover1);
         (,,, uint256 stakerRewards) = proverStaking.getStakeInfo(prover1, staker1);
 
         uint256 expectedProverRewards = (rewardAmount * MIN_SELF_STAKE) / totalStake; // 666.67e18
         uint256 expectedStakerRewards = (rewardAmount * 5000e18) / totalStake; // 333.33e18
 
-        assertApproxEqRel(proverRewards, expectedProverRewards, 1e15);
+        assertApproxEqRel(proverRewardsAmount, expectedProverRewards, 1e15);
         assertApproxEqRel(stakerRewards, expectedStakerRewards, 1e15);
     }
 
@@ -99,14 +107,13 @@ contract StakingAdvancedTest is Test {
         _stakeToProver(staker1, prover1, 5000e18);
 
         uint256 rewardAmount = 1000e18;
-        brevToken.transfer(address(proverStaking), rewardAmount);
-        proverStaking.addRewards(prover1, rewardAmount);
+        _addRewards(prover1, rewardAmount);
 
         // With 100% commission, all rewards go to prover
-        (,,, uint256 proverRewards) = proverStaking.getStakeInfo(prover1, prover1);
+        (,,, uint256 proverRewardsAmount) = proverStaking.getStakeInfo(prover1, prover1);
         (,,, uint256 stakerRewards) = proverStaking.getStakeInfo(prover1, staker1);
 
-        assertEq(proverRewards, rewardAmount);
+        assertEq(proverRewardsAmount, rewardAmount);
         assertEq(stakerRewards, 0);
     }
 
@@ -115,12 +122,11 @@ contract StakingAdvancedTest is Test {
 
         // No external stakers, only prover's self-stake
         uint256 rewardAmount = 1000e18;
-        brevToken.transfer(address(proverStaking), rewardAmount);
-        proverStaking.addRewards(prover1, rewardAmount);
+        _addRewards(prover1, rewardAmount);
 
         // All rewards should go to prover (as commission since no other stakers)
-        (,,, uint256 proverRewards) = proverStaking.getStakeInfo(prover1, prover1);
-        assertEq(proverRewards, rewardAmount);
+        (,,, uint256 proverRewardsAmount) = proverStaking.getStakeInfo(prover1, prover1);
+        assertEq(proverRewardsAmount, rewardAmount);
     }
 
     function test_CommissionWithoutSelfStake() public {
@@ -138,12 +144,11 @@ contract StakingAdvancedTest is Test {
 
         // Add rewards
         uint256 rewardAmount = 100e18;
-        brevToken.transfer(address(proverStaking), rewardAmount);
-        proverStaking.addRewards(prover1, rewardAmount);
+        _addRewards(prover1, rewardAmount);
 
         // Check commission is correctly calculated
         uint256 expectedCommission = (rewardAmount * 2000) / 10000; // 20%
-        (,,,,, uint256 actualCommission,) = proverStaking.getProverInfo(prover1);
+        (, uint256 actualCommission,) = proverRewards.getProverRewardInfo(prover1);
         assertEq(actualCommission, expectedCommission, "Commission should be 20% of rewards");
     }
 
@@ -164,7 +169,7 @@ contract StakingAdvancedTest is Test {
         vm.prank(owner);
         proverStaking.slash(prover1, 500000); // 50%
 
-        (,,, uint256 totalStake,,,) = proverStaking.getProverInfo(prover1);
+        (,, uint256 totalStake,,) = proverStaking.getProverInfo(prover1);
         uint256 expectedRemaining = (MIN_SELF_STAKE + massiveStake) / 2; // 50%
         assertApproxEqRel(totalStake, expectedRemaining, 1e15);
     }
@@ -177,22 +182,22 @@ contract StakingAdvancedTest is Test {
         proverStaking.slash(prover1, 500000); // 50% slash - leaves 50%
 
         // Verify still active after first slash
-        (ProverStaking.ProverState state1,,,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state1,,,,) = proverStaking.getProverInfo(prover1);
         assertEq(uint256(state1), uint256(ProverStaking.ProverState.Active));
 
         proverStaking.slash(prover1, 500000); // 50% of remaining - leaves 25% total
 
         // Verify still active after second slash (still above 20% threshold)
-        (ProverStaking.ProverState state2,,,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state2,,,,) = proverStaking.getProverInfo(prover1);
         assertEq(uint256(state2), uint256(ProverStaking.ProverState.Active));
 
         proverStaking.slash(prover1, 500000); // 50% of remaining - leaves 12.5% total
 
         // NOW should be auto-deactivated (below 20% threshold)
-        (ProverStaking.ProverState finalState,,,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState finalState,,,,) = proverStaking.getProverInfo(prover1);
         assertEq(uint256(finalState), uint256(ProverStaking.ProverState.Deactivated));
 
-        (,,, uint256 finalStake,,,) = proverStaking.getProverInfo(prover1);
+        (,, uint256 finalStake,,) = proverStaking.getProverInfo(prover1);
         uint256 originalStake = MIN_SELF_STAKE + 4000e18; // 14000e18
         // After 3 slashes of 50% each: 14000 * (0.5)^3 = 14000 * 0.125 = 1750e18
         uint256 expectedFinalStake = originalStake / 8; // 12.5% remaining
@@ -224,12 +229,10 @@ contract StakingAdvancedTest is Test {
         _stakeToProver(staker2, prover1, 500e18);
 
         // First reward round
-        brevToken.transfer(address(proverStaking), 200e18);
-        proverStaking.addRewards(prover1, 200e18);
+        _addRewards(prover1, 200e18);
 
         // Second reward round BEFORE withdrawals
-        brevToken.transfer(address(proverStaking), 300e18);
-        proverStaking.addRewards(prover1, 300e18);
+        _addRewards(prover1, 300e18);
 
         // Total stake: 10000e18 + 400e18 + 500e18 = 10900e18
         // Total rewards: 500e18, commission: 50e18, stakers: 450e18
@@ -258,8 +261,7 @@ contract StakingAdvancedTest is Test {
 
         // First reward round
         uint256 firstReward = 400e18;
-        brevToken.transfer(address(proverStaking), firstReward);
-        proverStaking.addRewards(prover1, firstReward);
+        _addRewards(prover1, firstReward);
 
         // Calculate expected rewards after first round
         // Total stake: 10000e18 (prover) + 100e18 (A) + 300e18 (B) = 10400e18
@@ -279,8 +281,7 @@ contract StakingAdvancedTest is Test {
         // Second reward round (with gap in time and different stake distribution)
         vm.warp(block.timestamp + 1 days);
         uint256 secondReward = 500e18;
-        brevToken.transfer(address(proverStaking), secondReward);
-        proverStaking.addRewards(prover1, secondReward);
+        _addRewards(prover1, secondReward);
 
         // Calculate expected rewards after second round
         // New total stake: 10000e18 (prover) + 40e18 (A) + 300e18 (B) = 10340e18
@@ -308,9 +309,9 @@ contract StakingAdvancedTest is Test {
         uint256 balanceBBefore = brevToken.balanceOf(staker2);
 
         vm.prank(staker1);
-        proverStaking.withdrawRewards(prover1);
+        proverRewards.withdrawRewards(prover1);
         vm.prank(staker2);
-        proverStaking.withdrawRewards(prover1);
+        proverRewards.withdrawRewards(prover1);
 
         uint256 balanceAAfter = brevToken.balanceOf(staker1);
         uint256 balanceBAfter = brevToken.balanceOf(staker2);
@@ -355,22 +356,21 @@ contract StakingAdvancedTest is Test {
         proverStaking.completeUnstake(prover1);
 
         // Verify totalRawShares is now 0
-        (uint256 totalRawShares,,,) = proverStaking.getProverInternals(prover1);
+        (uint256 totalRawShares,,) = proverStaking.getProverInternals(prover1);
         assertEq(totalRawShares, 0, "Total raw shares should be 0");
 
         // Add rewards when no stakers exist (totalRawShares == 0)
         uint256 rewardAmount = 1000e18;
-        brevToken.transfer(address(proverStaking), rewardAmount);
-        proverStaking.addRewards(prover1, rewardAmount);
+        _addRewards(prover1, rewardAmount);
 
         // All rewards should go to prover's commission (100% to pendingCommission)
-        (,,, uint256 proverRewards) = proverStaking.getStakeInfo(prover1, prover1);
-        assertEq(proverRewards, rewardAmount, "All rewards should go to commission when no stakers");
+        (,,, uint256 proverRewardsAmount) = proverStaking.getStakeInfo(prover1, prover1);
+        assertEq(proverRewardsAmount, rewardAmount, "All rewards should go to commission when no stakers");
 
         // Prover can withdraw rewards even when retired/no stakes
         uint256 balanceBefore = brevToken.balanceOf(prover1);
         vm.prank(prover1);
-        proverStaking.withdrawRewards(prover1);
+        proverRewards.withdrawRewards(prover1);
         uint256 balanceAfter = brevToken.balanceOf(prover1);
 
         assertEq(balanceAfter - balanceBefore, rewardAmount, "Prover should receive all rewards as commission");
@@ -383,31 +383,27 @@ contract StakingAdvancedTest is Test {
         _stakeToProver(staker1, prover1, 1000e18);
 
         // First reward
-        brevToken.transfer(address(proverStaking), 500e18);
-        proverStaking.addRewards(prover1, 500e18);
+        _addRewards(prover1, 500e18);
 
         // Staker2 joins
         _stakeToProver(staker2, prover1, 2000e18);
 
         // Second reward (different stake distribution)
-        brevToken.transfer(address(proverStaking), 600e18);
-        proverStaking.addRewards(prover1, 600e18);
+        _addRewards(prover1, 600e18);
 
         // Staker1 partially unstakes
         vm.prank(staker1);
         proverStaking.requestUnstake(prover1, 400e18);
 
         // Third reward (with pending unstake)
-        brevToken.transfer(address(proverStaking), 300e18);
-        proverStaking.addRewards(prover1, 300e18);
+        _addRewards(prover1, 300e18);
 
         // Complete unstake and add fourth reward
         vm.warp(block.timestamp + 7 days + 1);
         vm.prank(staker1);
         proverStaking.completeUnstake(prover1);
 
-        brevToken.transfer(address(proverStaking), 200e18);
-        proverStaking.addRewards(prover1, 200e18);
+        _addRewards(prover1, 200e18);
 
         // Verify accumulated rewards are correct
         (,,, uint256 staker1Rewards) = proverStaking.getStakeInfo(prover1, staker1);
@@ -423,12 +419,11 @@ contract StakingAdvancedTest is Test {
         _stakeToProver(staker1, prover1, 500e18);
 
         // Add rewards
-        brevToken.transfer(address(proverStaking), 100e18);
-        proverStaking.addRewards(prover1, 100e18);
+        _addRewards(prover1, 100e18);
 
         // Withdraw rewards
         vm.prank(staker1);
-        proverStaking.withdrawRewards(prover1);
+        proverRewards.withdrawRewards(prover1);
 
         // Full unstake and complete
         vm.prank(staker1);
@@ -438,8 +433,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.completeUnstake(prover1);
 
         // Add more rewards while staker is out
-        brevToken.transfer(address(proverStaking), 200e18);
-        proverStaking.addRewards(prover1, 200e18);
+        _addRewards(prover1, 200e18);
 
         // Staker re-stakes
         vm.prank(staker1);
@@ -450,8 +444,7 @@ contract StakingAdvancedTest is Test {
         assertEq(pendingRewards, 0);
 
         // Add new rewards after re-staking
-        brevToken.transfer(address(proverStaking), 150e18);
-        proverStaking.addRewards(prover1, 150e18);
+        _addRewards(prover1, 150e18);
 
         // Should get new rewards proportionally
         (,,, pendingRewards) = proverStaking.getStakeInfo(prover1, staker1);
@@ -463,8 +456,7 @@ contract StakingAdvancedTest is Test {
         _stakeToProver(staker1, prover1, 5000e18);
 
         // Add rewards before retirement
-        brevToken.transfer(address(proverStaking), 1000e18);
-        proverStaking.addRewards(prover1, 1000e18);
+        _addRewards(prover1, 1000e18);
 
         // Prover completely exits by unstaking all self-stake
         vm.prank(prover1);
@@ -480,14 +472,14 @@ contract StakingAdvancedTest is Test {
         assertEq(proverStake, 0);
 
         // Prover should still be able to withdraw accumulated rewards
-        (,,, uint256 proverRewards) = proverStaking.getStakeInfo(prover1, prover1);
-        assertGt(proverRewards, 0);
+        (,,, uint256 proverRewardsAmount) = proverStaking.getStakeInfo(prover1, prover1);
+        assertGt(proverRewardsAmount, 0);
 
         vm.prank(prover1);
-        proverStaking.withdrawRewards(prover1);
+        proverRewards.withdrawRewards(prover1);
 
-        (,,, proverRewards) = proverStaking.getStakeInfo(prover1, prover1);
-        assertEq(proverRewards, 0);
+        (,,, uint256 proverRewardsAfter) = proverStaking.getStakeInfo(prover1, prover1);
+        assertEq(proverRewardsAfter, 0);
     }
 
     function test_SlashDuringMultipleUnbonding() public {
@@ -538,8 +530,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.stake(prover1, 1000e18);
 
         // Add rewards
-        brevToken.transfer(address(proverStaking), 1200e18);
-        proverStaking.addRewards(prover1, 1200e18);
+        _addRewards(prover1, 1200e18);
 
         // All stakers unstake simultaneously
         vm.prank(staker1);
@@ -582,8 +573,7 @@ contract StakingAdvancedTest is Test {
             proverStaking.stake(prover1, 1000e18);
 
             // Add rewards
-            brevToken.transfer(address(proverStaking), 100e18);
-            proverStaking.addRewards(prover1, 100e18);
+            _addRewards(prover1, 100e18);
 
             // Unstake
             vm.prank(staker1);
@@ -596,7 +586,7 @@ contract StakingAdvancedTest is Test {
 
             // Withdraw rewards
             vm.prank(staker1);
-            proverStaking.withdrawRewards(prover1);
+            proverRewards.withdrawRewards(prover1);
         }
 
         // Final state should be clean
@@ -652,7 +642,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.retireProver();
 
         // Verify prover is retired
-        (ProverStaking.ProverState state,,,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state == ProverStaking.ProverState.Retired, "Prover should be retired");
     }
 
@@ -689,8 +679,7 @@ contract StakingAdvancedTest is Test {
         _stakeToProver(staker1, prover1, 100e18);
 
         // Add rewards
-        brevToken.transfer(address(proverStaking), 50e18);
-        proverStaking.addRewards(prover1, 50e18);
+        _addRewards(prover1, 50e18);
 
         // Deactivate prover
         vm.prank(owner);
@@ -698,7 +687,7 @@ contract StakingAdvancedTest is Test {
 
         // Prover can still withdraw rewards
         vm.prank(prover1);
-        proverStaking.withdrawRewards(prover1);
+        proverRewards.withdrawRewards(prover1);
 
         // Staker can request unstake after deactivation
         vm.prank(staker1);
@@ -724,6 +713,10 @@ contract StakingAdvancedTest is Test {
     function _stakeToProver(address staker, address prover, uint256 amount) internal {
         vm.prank(staker);
         proverStaking.stake(prover, amount);
+    }
+
+    function _addRewards(address prover, uint256 amount) internal {
+        proverRewards.addRewards(prover, amount);
     }
 
     function test_UnretirePreservesProverConfiguration() public {
@@ -757,7 +750,8 @@ contract StakingAdvancedTest is Test {
         proverStaking.unretireProver();
 
         // Verify configuration is preserved
-        (, uint256 minSelfStake, uint64 commissionRate,,,,) = proverStaking.getProverInfo(prover1);
+        (, uint256 minSelfStake,,,) = proverStaking.getProverInfo(prover1);
+        (uint64 commissionRate,,) = proverRewards.getProverRewardInfo(prover1);
         assertEq(minSelfStake, customMinSelfStake, "Min self-stake should be preserved");
         assertEq(commissionRate, customCommissionRate, "Commission rate should be preserved");
 
@@ -809,7 +803,7 @@ contract StakingAdvancedTest is Test {
         assertTrue(totalStaked2 > MIN_SELF_STAKE, "Stake should be worth more after scale reset");
 
         // Verify prover scale is reset to 1.0
-        (, uint256 scale,,) = proverStaking.getProverInternals(prover1);
+        (, uint256 scale,) = proverStaking.getProverInternals(prover1);
         assertEq(scale, 1e18, "Scale should be reset to 1.0 for new prover session");
     }
 
@@ -823,7 +817,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.updateMinSelfStake(newMinStake);
 
         // Should be applied immediately (no pending update created for increases)
-        (, uint256 currentMin,,,,,) = proverStaking.getProverInfo(prover1);
+        (, uint256 currentMin,,,) = proverStaking.getProverInfo(prover1);
         assertEq(currentMin, newMinStake, "Increase should be applied immediately");
 
         (bool hasPending,,,) = proverStaking.getPendingMinSelfStakeUpdate(prover1);
@@ -850,7 +844,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.updateMinSelfStake(newMinStake);
 
         // Should be applied immediately for retired prover
-        (, uint256 currentMin,,,,,) = proverStaking.getProverInfo(prover1);
+        (, uint256 currentMin,,,) = proverStaking.getProverInfo(prover1);
         assertEq(currentMin, newMinStake, "Decrease should be applied immediately for retired prover");
 
         // Should have no pending update
@@ -868,7 +862,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.updateMinSelfStake(newMinStake);
 
         // Should not be applied immediately
-        (, uint256 currentMin,,,,,) = proverStaking.getProverInfo(prover1);
+        (, uint256 currentMin,,,) = proverStaking.getProverInfo(prover1);
         assertEq(currentMin, MIN_SELF_STAKE, "Decrease should not be applied immediately for active prover");
 
         // Should have pending update
@@ -884,7 +878,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.completeMinSelfStakeUpdate();
 
         // Should be applied now
-        (, currentMin,,,,,) = proverStaking.getProverInfo(prover1);
+        (, currentMin,,,) = proverStaking.getProverInfo(prover1);
         assertEq(currentMin, newMinStake, "Decrease should be applied after delay");
 
         // Should have no pending update
@@ -905,7 +899,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.updateMinSelfStake(newMinStake);
 
         // Should not be applied immediately
-        (, uint256 currentMin,,,,,) = proverStaking.getProverInfo(prover1);
+        (, uint256 currentMin,,,) = proverStaking.getProverInfo(prover1);
         assertEq(currentMin, MIN_SELF_STAKE, "Decrease should not be applied immediately for deactivated prover");
 
         // Should have pending update
@@ -1032,7 +1026,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.completeMinSelfStakeUpdate();
 
         // Should be applied now
-        (, uint256 currentMin,,,,,) = proverStaking.getProverInfo(prover1);
+        (, uint256 currentMin,,,) = proverStaking.getProverInfo(prover1);
         assertEq(currentMin, 5_000e18, "Decrease should be applied after new delay");
     }
 
@@ -1074,7 +1068,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.completeMinSelfStakeUpdate();
 
         // Should be applied
-        (, uint256 currentMin,,,,,) = proverStaking.getProverInfo(prover1);
+        (, uint256 currentMin,,,) = proverStaking.getProverInfo(prover1);
         assertEq(currentMin, 5_000e18, "Decrease should be applied");
     }
 
@@ -1083,7 +1077,7 @@ contract StakingAdvancedTest is Test {
         _initializeProver(prover1);
 
         // Verify initial commission rate
-        (,, uint64 initialRate,,,,) = proverStaking.getProverInfo(prover1);
+        (uint64 initialRate,,) = proverRewards.getProverRewardInfo(prover1);
         assertEq(initialRate, COMMISSION_RATE, "Initial commission rate should match");
 
         // Update commission rate to a new value
@@ -1091,10 +1085,10 @@ contract StakingAdvancedTest is Test {
         vm.prank(prover1);
         vm.expectEmit(true, false, false, true);
         emit CommissionRateUpdated(prover1, COMMISSION_RATE, newCommissionRate);
-        proverStaking.updateCommissionRate(newCommissionRate);
+        proverRewards.updateCommissionRate(newCommissionRate);
 
         // Verify commission rate was updated
-        (,, uint64 updatedRate,,,,) = proverStaking.getProverInfo(prover1);
+        (uint64 updatedRate,,) = proverRewards.getProverRewardInfo(prover1);
         assertEq(updatedRate, newCommissionRate, "Commission rate should be updated");
     }
 
@@ -1104,15 +1098,15 @@ contract StakingAdvancedTest is Test {
 
         // Try to set commission rate above 100%
         vm.prank(prover1);
-        vm.expectRevert(TestErrors.InvalidCommission.selector);
-        proverStaking.updateCommissionRate(10001); // 100.01%
+        vm.expectRevert(TestErrors.RewardsInvalidCommission.selector);
+        proverRewards.updateCommissionRate(10001); // 100.01%
     }
 
     function test_CannotUpdateCommissionRateNotProver() public {
         // Try to update commission rate without being a prover
         vm.prank(user);
-        vm.expectRevert(TestErrors.ProverNotRegistered.selector);
-        proverStaking.updateCommissionRate(1000);
+        vm.expectRevert(TestErrors.RewardsProverNotRegistered.selector);
+        proverRewards.updateCommissionRate(1000);
     }
 
     function test_UpdateCommissionRateSameValueNoRevert() public {
@@ -1120,14 +1114,14 @@ contract StakingAdvancedTest is Test {
         _initializeProver(prover1);
 
         // Capture current rate
-        (,, uint64 beforeRate,,,,) = proverStaking.getProverInfo(prover1);
+        (uint64 beforeRate,,) = proverRewards.getProverRewardInfo(prover1);
         assertEq(beforeRate, COMMISSION_RATE, "Precondition");
 
         // Update with same value should not revert and rate stays same
         vm.prank(prover1);
-        proverStaking.updateCommissionRate(COMMISSION_RATE);
+        proverRewards.updateCommissionRate(COMMISSION_RATE);
 
-        (,, uint64 afterRate,,,,) = proverStaking.getProverInfo(prover1);
+        (uint64 afterRate,,) = proverRewards.getProverRewardInfo(prover1);
         assertEq(afterRate, beforeRate, "Rate should remain unchanged");
     }
 
@@ -1137,25 +1131,24 @@ contract StakingAdvancedTest is Test {
         _stakeToProver(staker1, prover1, 1000e18);
 
         // Check initial commission rate
-        (,, uint64 initialRate,,,,) = proverStaking.getProverInfo(prover1);
+        (uint64 initialRate,,) = proverRewards.getProverRewardInfo(prover1);
         assertEq(initialRate, COMMISSION_RATE, "Initial rate should be 10%");
 
         // Update commission rate to 20%
         vm.prank(prover1);
-        proverStaking.updateCommissionRate(2000);
+        proverRewards.updateCommissionRate(2000);
 
         // Verify commission rate was updated
-        (,, uint64 newRate,,,,) = proverStaking.getProverInfo(prover1);
+        (uint64 newRate,,) = proverRewards.getProverRewardInfo(prover1);
         assertEq(newRate, 2000, "Commission rate should be updated to 20%");
 
         // Add rewards after rate change - this should use the new rate
         uint256 balanceBefore = brevToken.balanceOf(prover1);
-        brevToken.transfer(address(proverStaking), 100e18);
-        proverStaking.addRewards(prover1, 100e18);
+        _addRewards(prover1, 100e18);
 
         // Withdraw rewards
         vm.prank(prover1);
-        proverStaking.withdrawRewards(prover1);
+        proverRewards.withdrawRewards(prover1);
         uint256 balanceAfter = brevToken.balanceOf(prover1);
 
         // Verify prover received rewards (exact calculation is complex due to staking rewards)
@@ -1174,7 +1167,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.slash(prover1, 500000); // 50%
 
         // Verify prover is still active after 50% slash
-        (ProverStaking.ProverState state,,,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state == ProverStaking.ProverState.Active, "Prover should still be active after 50% slash");
     }
 
@@ -1183,7 +1176,7 @@ contract StakingAdvancedTest is Test {
         _stakeToProver(staker1, prover1, 1000e18);
 
         // Get initial scale
-        (, uint256 initialScale,,) = proverStaking.getProverInternals(prover1);
+        (, uint256 initialScale,) = proverStaking.getProverInternals(prover1);
         assertEq(initialScale, 1e18, "Initial scale should be 1e18");
 
         // Slash multiple times to approach minimum scale (20% threshold)
@@ -1193,29 +1186,29 @@ contract StakingAdvancedTest is Test {
         // After 3 slashes: 1e18 * (0.5)^3 = 1.25e17 (12.5%) - below 20% threshold
 
         proverStaking.slash(prover1, 500000); // 1st slash - 50%
-        (ProverStaking.ProverState state1,,,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state1,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state1 == ProverStaking.ProverState.Active, "Prover should still be active after 1st slash");
 
         proverStaking.slash(prover1, 500000); // 2nd slash - 25% remaining
-        (ProverStaking.ProverState state2,,,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state2,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state2 == ProverStaking.ProverState.Active, "Prover should still be active after 2nd slash");
 
         // Check scale after 2 slashes
-        (, uint256 scaleAfter2,,) = proverStaking.getProverInternals(prover1);
+        (, uint256 scaleAfter2,) = proverStaking.getProverInternals(prover1);
         assertTrue(scaleAfter2 > 2e17, "Scale should still be above 20% minimum");
 
         // Third 50% slash should trigger auto-deactivation (scale drops to 12.5%)
         proverStaking.slash(prover1, 500000); // 3rd slash
 
         // Verify prover is now deactivated
-        (ProverStaking.ProverState state,,,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(
             state == ProverStaking.ProverState.Deactivated,
             "Prover should be auto-deactivated after scale drops below 20%"
         );
 
         // Verify scale is below 20% minimum
-        (, uint256 finalScale,,) = proverStaking.getProverInternals(prover1);
+        (, uint256 finalScale,) = proverStaking.getProverInternals(prover1);
         assertTrue(finalScale < 2e17, "Scale should be below 20% threshold");
     }
 
@@ -1269,8 +1262,8 @@ contract StakingAdvancedTest is Test {
         // Stake amount that doesn't divide evenly when multiplied by SCALE_FACTOR
         _stakeToProver(staker1, prover1, 333e18); // 333 * 1e18 tokens
 
-        uint256 initialTreasuryPool = proverStaking.getTreasuryPool();
-        assertEq(initialTreasuryPool, 0, "Treasury pool should start empty");
+        uint256 initialDustPool = proverRewards.dustPool();
+        assertEq(initialDustPool, 0, "Dust pool should start empty");
 
         // Add rewards that will create dust
         uint256 rewardAmount = 1e18; // 1 token reward
@@ -1278,19 +1271,19 @@ contract StakingAdvancedTest is Test {
         // Give owner tokens to add as rewards
         brevToken.mint(owner, rewardAmount);
         vm.startPrank(owner);
-        brevToken.approve(address(proverStaking), rewardAmount);
-        proverStaking.addRewards(prover1, rewardAmount);
+        brevToken.approve(address(proverRewards), rewardAmount);
+        proverRewards.addRewards(prover1, rewardAmount);
         vm.stopPrank();
 
-        // Check if treasury pool accumulated dust
-        uint256 treasuryPoolAfter = proverStaking.getTreasuryPool();
+        // Check if dust pool accumulated dust
+        uint256 dustPoolAfter = proverRewards.dustPool();
 
         // Calculate expected dust manually using the corrected method
         uint256 commission = (rewardAmount * COMMISSION_RATE) / 10000; // 10% commission
         uint256 stakersReward = rewardAmount - commission;
 
         // Get total raw shares (prover + staker)
-        (uint256 totalRawShares,,,) = proverStaking.getProverInternals(prover1);
+        (uint256 totalRawShares,,) = proverStaking.getProverInternals(prover1);
 
         // Use the corrected dust calculation (in token units, not scaled units)
         uint256 deltaAcc = (stakersReward * 1e18) / totalRawShares;
@@ -1298,9 +1291,9 @@ contract StakingAdvancedTest is Test {
         uint256 expectedDust = stakersReward - distributed; // tokens
 
         if (expectedDust > 0) {
-            assertEq(treasuryPoolAfter, expectedDust, "Treasury pool should contain expected dust");
+            assertEq(dustPoolAfter, expectedDust, "Dust pool should contain expected dust");
         } else {
-            assertEq(treasuryPoolAfter, 0, "No dust should be generated in this case");
+            assertEq(dustPoolAfter, 0, "No dust should be generated in this case");
         }
     }
 
@@ -1308,7 +1301,7 @@ contract StakingAdvancedTest is Test {
         _initializeProver(prover1);
         _stakeToProver(staker1, prover1, 777e18); // Odd number to encourage dust
 
-        uint256 initialTreasuryPool = proverStaking.getTreasuryPool();
+        uint256 initialDustPool = proverRewards.dustPool();
 
         // Add multiple small rewards to accumulate dust
         uint256 smallReward = 1e15; // 0.001 tokens
@@ -1316,17 +1309,17 @@ contract StakingAdvancedTest is Test {
         // Give owner tokens to add as rewards
         brevToken.mint(owner, smallReward * 10);
         vm.startPrank(owner);
-        brevToken.approve(address(proverStaking), smallReward * 10);
+        brevToken.approve(address(proverRewards), smallReward * 10);
 
         for (uint256 i = 0; i < 10; i++) {
-            proverStaking.addRewards(prover1, smallReward);
+            proverRewards.addRewards(prover1, smallReward);
         }
         vm.stopPrank();
 
-        uint256 finalTreasuryPool = proverStaking.getTreasuryPool();
+        uint256 finalDustPool = proverRewards.dustPool();
 
-        // Treasury pool should have accumulated some dust
-        assertGt(finalTreasuryPool, initialTreasuryPool, "Treasury pool should accumulate dust from multiple rewards");
+        // Dust pool should have accumulated some dust
+        assertGt(finalDustPool, initialDustPool, "Dust pool should accumulate dust from multiple rewards");
     }
 
     function test_DustAccumulation_CombinedWithSlashing() public {
@@ -1336,8 +1329,8 @@ contract StakingAdvancedTest is Test {
         // Add rewards to generate some dust
         brevToken.mint(owner, 1e18);
         vm.startPrank(owner);
-        brevToken.approve(address(proverStaking), 1e18);
-        proverStaking.addRewards(prover1, 1e18);
+        brevToken.approve(address(proverRewards), 1e18);
+        proverRewards.addRewards(prover1, 1e18);
 
         uint256 treasuryAfterRewards = proverStaking.getTreasuryPool();
 
