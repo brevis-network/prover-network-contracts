@@ -115,8 +115,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         // === REWARD DISTRIBUTION ===
         uint256 accRewardPerRawShare; // Accumulated rewards per raw share (scaled by SCALE_FACTOR)
         uint256 pendingCommission; // Unclaimed commission rewards for the prover
-        // === STREAMING EMISSION TRACKING ===
-        uint256 rewardDebtEff; // Effective stake × globalAccPerEff at last settlement (prevents double-claiming)
         // === MIN SELF STAKE UPDATE ===
         PendingMinSelfStakeUpdate pendingMinSelfStakeUpdate; // Pending minSelfStake decrease (empty if no pending update)
         // === STAKER DATA ===
@@ -131,7 +129,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     struct StakeInfo {
         uint256 rawShares; // Raw shares owned (before applying scale factor)
         uint256 rewardDebt; // Tracks already-accounted rewards to prevent double-claiming
-        uint256 pendingRewards; // Accumulated but unclaimed rewards (both proof and streaming)
+        uint256 pendingRewards; // Accumulated but unclaimed proof rewards
         // === UNSTAKING DATA ===
         PendingUnstake[] pendingUnstakes; // Array of pending unstake requests
     }
@@ -176,13 +174,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     address[] public proverList; // Enumerable list of all registered provers
     EnumerableSet.AddressSet activeProvers; // Set of currently active provers
 
-    // === GLOBAL STREAMING REWARDS ===
-    uint256 public globalRatePerSec; // Tokens per second distributed globally based on effective stake
-    uint256 public globalEmissionBudget; // Total tokens available for streaming distribution
-    uint256 public globalAccPerEff; // Global accumulator: total rewards distributed per unit of effective stake (scaled)
-    uint256 public lastGlobalTime; // Timestamp of last global streaming update
-    uint256 public totalEffectiveActive; // Total effective stake across all active provers (cached)
-
     // =========================================================================
     // EVENTS
     // =========================================================================
@@ -214,12 +205,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     event UnstakeDelayUpdated(uint256 oldDelay, uint256 newDelay);
     event MinSelfStakeDecreaseDelayUpdated(uint256 oldDelay, uint256 newDelay);
     event GlobalMinSelfStakeUpdated(uint256 oldMinStake, uint256 newMinStake);
-
-    // Emission events
-    event StreamingRewardsSettled(address indexed prover, uint256 totalOwed, uint256 commission, uint256 distributed);
-    event StreamingRewardsWithdrawn(address indexed staker, address indexed prover, uint256 amount);
-    event StreamingRateUpdated(uint256 oldRate, uint256 newRate);
-    event StreamingBudgetAdded(uint256 amount, uint256 newTotal);
 
     // =========================================================================
     // CONSTRUCTOR & INITIALIZATION
@@ -259,7 +244,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         if (_globalMinSelfStake == 0) revert GlobalMinSelfStakeZero();
         brevToken = _token;
         globalMinSelfStake = _globalMinSelfStake;
-        lastGlobalTime = block.timestamp;
+        // Initialize core parameters
     }
 
     // =========================================================================
@@ -331,13 +316,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         // Transfer tokens from staker to contract (fail early if insufficient balance/allowance)
         IERC20(brevToken).safeTransferFrom(msg.sender, address(this), _amount);
 
-        // Calculate old effective stake for update tracking
-        uint256 oldEffectiveStake = _getTotalEffectiveStake(_prover);
-
-        // Update global streaming and settle prover before changing stake (piggyback principle)
-        _updateGlobalStreaming();
-        _settleProverStreaming(_prover);
-
         // Convert amount to raw shares at current scale
         // This ensures fair share allocation regardless of slashing history
         uint256 newRawShares = _rawSharesFromAmount(_prover, _amount);
@@ -357,9 +335,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
         // Update reward debt based on new raw shares to prevent double-claiming
         stakeInfo.rewardDebt = (stakeInfo.rawShares * accRewardPerRawShare) / SCALE_FACTOR;
-
-        // Effective stake delta epilogue (streaming + active total update)
-        _afterEffectiveStakeChange(_prover, oldEffectiveStake);
 
         emit Staked(msg.sender, _prover, _amount, newRawShares);
     }
@@ -395,15 +370,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         if (stakeInfo.rawShares < rawSharesToUnstake) revert InsufficientStake();
         if (stakeInfo.pendingUnstakes.length >= MAX_PENDING_UNSTAKES) revert TooManyPendingUnstakes();
 
-        // Calculate old effective stake for update tracking
-        uint256 oldEffectiveStake = _getTotalEffectiveStake(_prover);
-
-        // Update global streaming rewards before changing stake (piggyback principle)
-        if (globalRatePerSec > 0) {
-            _updateGlobalStreaming();
-            _settleProverStreaming(_prover);
-        }
-
         // === PROVER SELF-STAKE VALIDATION ===
         // For prover's self stake, ensure minimum self stake is maintained
         // EXCEPTION: Allow going to zero (complete exit) even if below minimum
@@ -437,9 +403,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
         // Update reward debt based on new raw shares
         stakeInfo.rewardDebt = (stakeInfo.rawShares * accRewardPerRawShare) / SCALE_FACTOR;
-
-        // Effective stake delta epilogue (streaming + active total update)
-        _afterEffectiveStakeChange(_prover, oldEffectiveStake);
 
         emit UnstakeRequested(msg.sender, _prover, _amount, rawSharesToUnstake);
     }
@@ -605,12 +568,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     function withdrawRewards(address _prover) external nonReentrant {
         if (provers[_prover].state == ProverState.Null) revert ProverNotRegistered();
 
-        // Update global streaming rewards before withdrawal (piggyback principle)
-        if (globalRatePerSec > 0) {
-            _updateGlobalStreaming();
-            _settleProverStreaming(_prover);
-        }
-
         ProverInfo storage prover = provers[_prover];
         StakeInfo storage stakeInfo = prover.stakes[msg.sender];
 
@@ -677,13 +634,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
         ProverInfo storage prover = provers[_prover];
 
-        // === STREAMING SETTLEMENT ===
-        // Update global streaming and settle prover before changing effective stake
-        if (globalRatePerSec > 0) {
-            _updateGlobalStreaming();
-            _settleProverStreaming(_prover);
-        }
-
         // Calculate total effective stake before slashing (for event emission)
         uint256 totalEffectiveBefore = _getTotalEffectiveStake(_prover);
 
@@ -711,8 +661,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             activeProvers.remove(_prover);
             emit ProverDeactivated(_prover);
         }
-        // Effective stake delta epilogue (streaming + active total update)
-        _afterEffectiveStakeChange(_prover, totalEffectiveBefore);
 
         emit ProverSlashed(_prover, _percentage, totalSlashed);
     }
@@ -754,21 +702,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         // Reset slashing scale for fresh start
         prover.scale = SCALE_FACTOR;
 
-        // Update total effective active stake (add this prover back)
-        uint256 newEffectiveStake = _getTotalEffectiveStake(msg.sender);
-
-        // === STREAMING DEBT RESET ===
-        // Initialize streaming debt for newly active prover
-        if (newEffectiveStake > 0) {
-            // Update global streaming before setting baseline
-            if (globalRatePerSec > 0) {
-                _updateGlobalStreaming();
-                _settleProverStreaming(msg.sender);
-            }
-            prover.rewardDebtEff = (newEffectiveStake * globalAccPerEff) / SCALE_FACTOR;
-        }
-
-        _updateTotalEffectiveActive(msg.sender, 0, newEffectiveStake);
+        // Recompute effective stake (not stored inline since unused post-reset)
+        _getTotalEffectiveStake(msg.sender);
 
         // Unretire as active prover
         prover.state = ProverState.Active;
@@ -853,40 +788,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         emit CommissionRateUpdated(msg.sender, oldCommissionRate, _newCommissionRate);
     }
 
-    /**
-     * @notice Public function to manually update global streaming (keeper function)
-     * @dev Optional - system works via lazy updates during normal operations
-     */
-    function updateGlobalStreaming() external {
-        _updateGlobalStreaming();
-    }
-
-    /**
-     * @notice Manually settle streaming rewards for a specific prover
-     * @dev Public function for manual settlement without other state changes
-     * @param _prover Address of the prover to settle
-     */
-    function settleProverStreaming(address _prover) external {
-        _updateGlobalStreaming();
-        _settleProverStreaming(_prover);
-    }
-
-    /**
-     * @notice Add tokens to the global streaming budget
-     * @dev Tokens are transferred from caller to contract - anyone can fund the budget
-     * @param _amount Amount of tokens to add to the streaming budget
-     */
-    function addStreamingBudget(uint256 _amount) external {
-        if (_amount == 0) revert ZeroAmount();
-
-        // Transfer tokens from caller to contract
-        IERC20(brevToken).safeTransferFrom(msg.sender, address(this), _amount);
-
-        globalEmissionBudget += _amount;
-
-        emit StreamingBudgetAdded(_amount, globalEmissionBudget);
-    }
-
     // =========================================================================
     // EXTERNAL FUNCTIONS (ADMIN ONLY)
     // =========================================================================
@@ -933,16 +834,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     function deactivateProver(address _prover) external onlyOwner {
         if (provers[_prover].state != ProverState.Active) revert InvalidProverState();
 
-        // Finalize streaming to 'now' and settle this prover before leaving Active
-        _updateGlobalStreaming();
-        _settleProverStreaming(_prover);
-
-        // Calculate current effective stake before deactivation
-        uint256 currentEffectiveStake = _getTotalEffectiveStake(_prover);
-
-        // Update total effective active stake (remove this prover) BEFORE changing state
-        totalEffectiveActive -= currentEffectiveStake;
-
         provers[_prover].state = ProverState.Deactivated;
         activeProvers.remove(_prover);
 
@@ -959,9 +850,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
         ProverInfo storage prover = provers[_prover];
 
-        // Bring global index current
-        _updateGlobalStreaming();
-
         // Check if prover still meets minimum self-stake requirements
         uint256 selfEffective = _effectiveAmount(_prover, _selfRawShares(_prover));
         if (selfEffective < prover.minSelfStake) revert MinSelfStakeNotMet();
@@ -969,21 +857,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
         prover.state = ProverState.Active;
         activeProvers.add(_prover);
-
-        // Update total effective active stake (add this prover back)
-        uint256 currentEffectiveStake = _getTotalEffectiveStake(_prover);
-
-        // === CLOSE INTERVAL BEFORE DENOMINATOR CHANGE ===
-        // Update global streaming again before changing totalEffectiveActive denominator
-        if (globalRatePerSec > 0) {
-            _updateGlobalStreaming();
-        }
-
-        // Baseline future accrual to current global index
-        prover.rewardDebtEff = (currentEffectiveStake * globalAccPerEff) / SCALE_FACTOR;
-
-        // Add this prover's stake back to active total
-        totalEffectiveActive += currentEffectiveStake;
 
         emit ProverReactivated(_prover);
     }
@@ -1008,36 +881,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         IERC20(brevToken).safeTransfer(_to, _amount);
 
         emit TreasuryPoolWithdrawn(_to, _amount);
-    }
-
-    /**
-     * @notice Set the global streaming rate for all active provers
-     * @dev Only callable by owner to control token distribution
-     * @param _newRatePerSec New streaming rate in tokens per second
-     */
-    function setGlobalRatePerSec(uint256 _newRatePerSec) external onlyOwner {
-        // Update global accumulator before changing rate
-        if (globalRatePerSec > 0) {
-            _updateGlobalStreaming();
-        }
-
-        uint256 oldRate = globalRatePerSec;
-        globalRatePerSec = _newRatePerSec;
-
-        emit StreamingRateUpdated(oldRate, _newRatePerSec);
-    }
-
-    /**
-     * @notice Emergency function to pause streaming by setting rate to zero
-     * @dev Can be called by owner in emergency situations
-     */
-    function pauseStreaming() external onlyOwner {
-        if (globalRatePerSec > 0) {
-            _updateGlobalStreaming(); // Final update before pause
-            uint256 oldRate = globalRatePerSec;
-            globalRatePerSec = 0;
-            emit StreamingRateUpdated(oldRate, 0);
-        }
     }
 
     // =========================================================================
@@ -1085,13 +928,13 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
     /**
      * @notice Get comprehensive stake information for a specific staker with a prover
-     * @dev Calculates real-time pending rewards including live reward accumulation (proof + emission)
+     * @dev Calculates real-time pending rewards including live proof reward accumulation
      * @param _prover Address of the prover
      * @param _staker Address of the staker to query
      * @return amount Current effective stake amount (post-slashing)
      * @return totalPendingUnstake Total effective amount currently in unstaking process (post-slashing)
      * @return pendingUnstakeCount Number of pending unstake requests
-     * @return pendingRewards Total pending rewards (proof + streaming rewards + commission if prover)
+     * @return pendingRewards Total pending rewards (proof rewards + commission if prover)
      */
     function getStakeInfo(address _prover, address _staker)
         external
@@ -1118,7 +961,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @notice Calculate total pending rewards for a staker (internal helper to avoid stack too deep)
      * @param _prover Address of the prover
      * @param _staker Address of the staker
-     * @return Total pending rewards including proof rewards, streaming rewards, and commission
+     * @return Total pending rewards including proof rewards and commission
      */
     function _calculateTotalPendingRewards(address _prover, address _staker) internal view returns (uint256) {
         ProverInfo storage prover = provers[_prover];
@@ -1132,9 +975,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             if (accrued >= stakeInfo.rewardDebt) {
                 totalRewards += (accrued - stakeInfo.rewardDebt);
             }
-
-            // Note: Streaming rewards are now settled directly to pendingRewards
-            // via _settleProverStreaming, so no need for live calculation here
         }
 
         // Add any pending commission if this is the prover
@@ -1324,191 +1164,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         return treasuryPool;
     }
 
-    /**
-     * @notice Get global streaming system information
-     * @dev Returns current streaming configuration and state
-     * @return ratePerSec Current global streaming rate (tokens per second)
-     * @return budgetBalance Available tokens in streaming budget
-     * @return globalAccumulatorPerEff Current global accumulator per effective stake
-     * @return totalEffStake Total effective stake across all active provers
-     * @return lastUpdate Timestamp of last global streaming update
-     */
-    function getStreamingInfo()
-        external
-        view
-        returns (
-            uint256 ratePerSec,
-            uint256 budgetBalance,
-            uint256 globalAccumulatorPerEff,
-            uint256 totalEffStake,
-            uint256 lastUpdate
-        )
-    {
-        return (globalRatePerSec, globalEmissionBudget, globalAccPerEff, totalEffectiveActive, lastGlobalTime);
-    }
-
-    /**
-     * @notice Get pending streaming rewards for a prover (without settling)
-     * @dev View function that calculates what would be owed if settled now
-     *      Only Active provers earn streaming rewards - inactive provers return zero
-     * @param _prover Address of the prover to query
-     * @return pendingTotal Total pending streaming rewards for this prover
-     * @return pendingCommission Commission portion of pending rewards
-     * @return pendingStakers Staker portion of pending rewards
-     */
-    function getPendingStreamingRewards(address _prover)
-        external
-        view
-        returns (uint256 pendingTotal, uint256 pendingCommission, uint256 pendingStakers)
-    {
-        // Only Active provers earn streaming rewards (matches _settleProverStreaming behavior)
-        ProverInfo storage prover = provers[_prover];
-        if (prover.state != ProverState.Active) {
-            return (0, 0, 0);
-        }
-
-        if (globalRatePerSec == 0 || totalEffectiveActive == 0) {
-            return (0, 0, 0);
-        }
-
-        uint256 effectiveStake = _getTotalEffectiveStake(_prover);
-        if (effectiveStake == 0) {
-            return (0, 0, 0);
-        }
-
-        // Calculate what global accumulator would be after update
-        uint256 timeElapsed = block.timestamp - lastGlobalTime;
-        uint256 totalRewards = globalRatePerSec * timeElapsed;
-        if (totalRewards > globalEmissionBudget) {
-            totalRewards = globalEmissionBudget;
-        }
-
-        uint256 projectedGlobalAcc = globalAccPerEff;
-        if (totalRewards > 0) {
-            projectedGlobalAcc += (totalRewards * SCALE_FACTOR) / totalEffectiveActive;
-        }
-
-        // Calculate what would be owed to this prover
-        uint256 totalOwed = (effectiveStake * projectedGlobalAcc) / SCALE_FACTOR;
-        pendingTotal = totalOwed - prover.rewardDebtEff;
-
-        if (pendingTotal > 0) {
-            pendingCommission = (pendingTotal * prover.commissionRate) / COMMISSION_RATE_DENOMINATOR;
-            pendingStakers = pendingTotal - pendingCommission;
-        }
-    }
-
-    // =========================================================================
-    // INTERNAL FUNCTIONS (STREAMING SYSTEM)
-    // =========================================================================
-
-    /**
-     * @notice Update global streaming accumulator based on elapsed time
-     * @dev O(1) operation - updates single global state regardless of number of provers
-     *      Implements lazy accrual - only updates when system is "touched"
-     */
-    function _updateGlobalStreaming() internal {
-        if (globalRatePerSec == 0 || totalEffectiveActive == 0) {
-            lastGlobalTime = block.timestamp;
-            return;
-        }
-
-        uint256 timeElapsed = block.timestamp - lastGlobalTime;
-        if (timeElapsed == 0) return; // Already updated this block
-
-        // Calculate total rewards to distribute based on time elapsed
-        uint256 totalRewards = globalRatePerSec * timeElapsed;
-
-        // Cap by available budget
-        if (totalRewards > globalEmissionBudget) {
-            totalRewards = globalEmissionBudget;
-        }
-
-        if (totalRewards > 0) {
-            // Update global accumulator: rewards per unit of effective stake
-            // Scale by SCALE_FACTOR for precision
-            globalAccPerEff += (totalRewards * SCALE_FACTOR) / totalEffectiveActive;
-
-            // Deduct from budget
-            globalEmissionBudget -= totalRewards;
-        }
-
-        lastGlobalTime = block.timestamp;
-    }
-
-    /**
-     * @notice Settle streaming rewards for a specific prover (internal)
-     * @dev Calculates owed rewards and distributes them via commission structure
-     *      Uses the global accumulator approach for O(1) efficiency
-     * @param _prover Address of the prover to settle
-     */
-    function _settleProverStreaming(address _prover) internal {
-        ProverInfo storage prover = provers[_prover];
-        if (prover.state != ProverState.Active) return;
-
-        uint256 effectiveStake = _getTotalEffectiveStake(_prover);
-        if (effectiveStake == 0) return;
-
-        // Calculate total owed based on global accumulator
-        uint256 totalOwed = (effectiveStake * globalAccPerEff) / SCALE_FACTOR;
-
-        // Prevent underflow - only proceed if there are new rewards
-        if (totalOwed <= prover.rewardDebtEff) return;
-
-        uint256 newDebt = totalOwed - prover.rewardDebtEff;
-
-        if (newDebt == 0) return;
-
-        // Split into commission and staker rewards
-        uint256 commission = (newDebt * prover.commissionRate) / COMMISSION_RATE_DENOMINATOR;
-        uint256 stakersReward = newDebt - commission;
-
-        // Commission is always direct to prover
-        prover.pendingCommission += commission;
-
-        // **O(1) staker distribution** via accumulator (identical to addRewards path)
-        if (prover.totalRawShares == 0) {
-            // No stakers: route staker portion to commission (policy matches addRewards)
-            prover.pendingCommission += stakersReward;
-        } else {
-            prover.accRewardPerRawShare += (stakersReward * SCALE_FACTOR) / prover.totalRawShares;
-        }
-
-        // Update reward debt to current baseline
-        prover.rewardDebtEff = totalOwed;
-
-        emit StreamingRewardsSettled(_prover, newDebt, commission, stakersReward);
-    }
-
-    /// @dev Unified epilogue after effective stake mutation in stake / requestUnstake.
-    function _afterEffectiveStakeChange(address _prover, uint256 oldEffectiveStake) internal {
-        ProverInfo storage prover = provers[_prover];
-        uint256 newEffectiveStake = _getTotalEffectiveStake(_prover);
-        if (prover.state == ProverState.Active && newEffectiveStake > 0) {
-            prover.rewardDebtEff = (newEffectiveStake * globalAccPerEff) / SCALE_FACTOR;
-        }
-        _updateTotalEffectiveActive(_prover, oldEffectiveStake, newEffectiveStake);
-    }
-
-    /**
-     * @notice Update total effective active stake when prover states change
-     * @dev Maintains cached total for O(1) global streaming calculations
-     * @param _prover Address of the prover whose stake changed
-     * @param _oldEffective Previous effective stake amount
-     * @param _newEffective New effective stake amount
-     */
-    function _updateTotalEffectiveActive(address _prover, uint256 _oldEffective, uint256 _newEffective) internal {
-        ProverInfo storage prover = provers[_prover];
-
-        if (prover.state == ProverState.Active) {
-            // Active prover - update total
-            totalEffectiveActive = totalEffectiveActive - _oldEffective + _newEffective;
-        } else {
-            // Inactive prover - their stake is not part of totalEffectiveActive
-            // No update needed as they don't contribute to the active total
-        }
-    }
-
     /// @dev Settle proof rewards for a stake before mutating rawShares; returns current accRewardPerRawShare.
     function _settleProofRewards(ProverInfo storage prover, StakeInfo storage stakeInfo)
         internal
@@ -1548,16 +1203,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         }
         if (prover.totalRawShares != 0) revert ActiveStakesRemain();
         if (prover.pendingCommission != 0) revert CommissionRemain();
-
-        // === CLOSE INTERVAL BEFORE DENOMINATOR CHANGE ===
-        // Update global streaming before changing totalEffectiveActive (even if zero)
-        if (globalRatePerSec > 0) {
-            _updateGlobalStreaming();
-        }
-
-        // Update total effective active stake (remove this prover)
-        uint256 currentEffectiveStake = _getTotalEffectiveStake(_prover);
-        _updateTotalEffectiveActive(_prover, currentEffectiveStake, 0);
 
         prover.state = ProverState.Retired;
         activeProvers.remove(_prover);

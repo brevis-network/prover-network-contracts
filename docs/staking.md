@@ -7,7 +7,7 @@ The `ProverStaking` contract implements a delegation-based staking system with O
 1. **O(1) Stake / Unstake** – Share mint/burn proportional math without looping over stakers
 2. **O(1) Proof Reward Distribution** – Single accumulator update amortizes distribution
 3. **O(1) Slashing** – Multiplicative scale adjustment affects all stakes implicitly
-4. **O(1) Streaming Rewards** – Global time accumulator weighted by total effective stake
+4. **(Removed Feature Slot)**
 
 
 ## Table of Contents
@@ -18,8 +18,7 @@ The `ProverStaking` contract implements a delegation-based staking system with O
     - [Raw Shares System](#1-raw-shares-system)
     - [Staking & Unstaking](#2-staking--unstaking)
     - [Proof Reward Distribution](#3-proof-reward-distribution)
-    - [Streaming Rewards System](#4-streaming-rewards-system)
-    - [Slashing](#5-slashing)
+    - [Slashing](#4-slashing)
 - [Key Invariants](#key-invariants)
 - [Edge Cases (Core Mechanics)](#edge-cases-core-mechanics)
 
@@ -45,8 +44,7 @@ struct ProverInfo {
     uint256 accRewardPerRawShare;     // Accumulated proof rewards per raw share
     uint256 pendingCommission;        // Unclaimed prover commission (aggregated)
     
-    // === STREAMING REWARDS ===
-    uint256 rewardDebtEff;            // Streaming reward debt (based on effective stake)
+    // (Streaming rewards removed)
     
     // === MIN SELF STAKE UPDATE ===
     PendingMinSelfStakeUpdate pendingMinSelfStakeUpdate; // Pending minSelfStake decrease
@@ -232,82 +230,7 @@ Where:
 - commissionRate: 0-10000 (0% to 100%)
 ```
 
-### 4. Streaming Rewards System
-
-The streaming rewards system provides continuous time-based reward distribution to all active provers. Unlike proof rewards which are tied to specific work completion, streaming rewards are distributed proportionally based on effective stakes over time.
-
-#### Key Components
-
-1. **Global Accumulator**: `globalAccPerEff` tracks streaming rewards earned per unit of effective stake
-2. **Time-Based Distribution**: `globalRatePerSec` defines tokens distributed per second across all active provers
-3. **Effective Stake Weighting**: Uses total effective stake amounts for proportional distribution
-4. **Separate Accounting**: Streaming rewards use dedicated debt tracking (`rewardDebtEff`) independent of proof rewards
-5. **Public Budget Addition**: Anyone can add funds to the streaming budget via `addStreamingBudget`
-
-#### Streaming Reward Algorithm
-
-```solidity
-function _updateGlobalStreaming() internal {
-    if (totalEffectiveActive == 0) return; // No active provers
-    
-    uint256 timeElapsed = block.timestamp - lastGlobalTime;
-    uint256 totalRewards = globalRatePerSec * timeElapsed;
-    
-    // Cap by available budget
-    if (totalRewards > globalEmissionBudget) {
-        totalRewards = globalEmissionBudget;
-    }
-    
-    if (totalRewards > 0) {
-        globalAccPerEff += (totalRewards * SCALE_FACTOR) / totalEffectiveActive;
-        globalEmissionBudget -= totalRewards;
-    }
-    
-    lastGlobalTime = block.timestamp;
-}
-
-// Streaming rewards calculated for active provers only
-streamingRewards = (effectiveStake * globalAccPerEff / SCALE_FACTOR) - rewardDebtEff
-```
-
-#### State Consideration
-Only actively participating provers earn streaming rewards; inactive states simply freeze accrual until reactivation. Settlement is performed before state changes to ensure interval completeness.
-
-#### Streaming Reward Formulas
-
-```
-Time Elapsed = block.timestamp - lastGlobalTime
-Total Rewards = min(timeElapsed × globalRatePerSec, globalEmissionBudget)
-
-If totalEffectiveActive > 0 AND Total Rewards > 0:
-    globalAccPerEff += (Total Rewards × SCALE_FACTOR) ÷ totalEffectiveActive
-    globalEmissionBudget -= Total Rewards
-    lastGlobalTime = block.timestamp
-
-Streaming Rewards (for active prover only):
-AccruedStreamingRewards = (effectiveStake × globalAccPerEff) ÷ SCALE_FACTOR
-PendingStreamingRewards = AccruedStreamingRewards - rewardDebtEff
-
-Commission Distribution:
-StreamingCommission = PendingStreamingRewards × commissionRate ÷ COMMISSION_RATE_DENOMINATOR
-StakersStreamingReward = PendingStreamingRewards - StreamingCommission
-
-Where:
-- globalRatePerSec: ERC20 tokens per second distributed globally
-- effectiveStake: total effective stake for the prover (post-slashing)
-- totalEffectiveActive: sum of effective stakes for all active provers only
-```
-
-#### Mathematical Properties
-
-1. **Conservation**: Total streaming rewards distributed ≤ `globalRatePerSec × timeElapsed`, capped by budget
-2. **Proportionality**: Each active prover receives `(effectiveStake / totalEffectiveActive) × totalStreamingRewards`
-3. **State Isolation**: Inactive periods do not accrue rewards, ensuring proper isolation
-4. **Precision**: Uses `SCALE_FACTOR` (1e18) to maintain precision in division operations
-5. **Dust Handling**: Corrected dust calculations in token units rather than scaled units
-
-
-### 5. Slashing
+### 4. Slashing
 
 Slashing applies a proportional penalty to *all* stake associated with a prover by scaling down a single variable `scale` (O(1)). No per‑staker writes are required; effective balances update implicitly when read.
 
@@ -336,11 +259,10 @@ Treasury accounting (aggregate): totalSlashed = totalEffectiveBefore - totalEffe
 
 | Invariant | Description |
 |-----------|-------------|
-| Accumulators Monotonic | `accRewardPerRawShare` & `globalAccPerEff` never decrease |
+| Accumulators Monotonic | `accRewardPerRawShare` never decreases |
 | Share Conservation | Sum of individual `rawShares` equals `totalRawShares` for a prover |
 | Effective Definition | `effective = rawShares * scale / SCALE_FACTOR` (sole source of slashing impact) |
 | Linear Slash | Every slash scales all effective balances by the same multiplicative factor |
-| Streaming Neutrality | Partitioning time into more updates does not change totals (ignoring truncation dust) |
 
 ### Edge Cases (Core Mechanics)
 
@@ -348,5 +270,5 @@ Treasury accounting (aggregate): totalSlashed = totalEffectiveBefore - totalEffe
 - Very small rewards: per‑raw-share delta may truncate to zero; undistributed dust is negligible and bounded by `totalRawShares` precision.
 - Commission applies only to rewards accrued after a rate change; previously accrued pending rewards unaffected.
 - If total raw shares is zero when a reward arrives, all is credited as commission (no distribution iteration required).
-- Streaming distribution short-circuits when `totalEffectiveActive == 0` (no division by zero, no accumulator drift).
+
 
