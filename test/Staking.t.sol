@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
+import {TestErrors} from "./utils/TestErrors.sol";
 import {TestProverStaking} from "./TestProverStaking.sol";
 import {ProverStaking} from "../src/ProverStaking.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
@@ -67,6 +68,8 @@ contract StakingTest is Test {
             uint256 minSelfStake,
             uint64 commissionRate,
             uint256 totalStaked,
+            ,
+            ,
             uint256 stakersCount
         ) = proverStaking.getProverInfo(prover1);
 
@@ -103,7 +106,7 @@ contract StakingTest is Test {
         vm.prank(prover1);
         brevToken.approve(address(proverStaking), MIN_SELF_STAKE);
 
-        vm.expectRevert("Prover already initialized");
+        vm.expectRevert(TestErrors.InvalidProverState.selector);
         vm.prank(prover1);
         proverStaking.initProver(MIN_SELF_STAKE, COMMISSION_RATE);
     }
@@ -112,7 +115,7 @@ contract StakingTest is Test {
         vm.prank(prover1);
         brevToken.approve(address(proverStaking), MIN_SELF_STAKE);
 
-        vm.expectRevert("Invalid commission rate");
+        vm.expectRevert(TestErrors.InvalidCommission.selector);
         vm.prank(prover1);
         proverStaking.initProver(MIN_SELF_STAKE, 10001); // > 100%
     }
@@ -135,7 +138,7 @@ contract StakingTest is Test {
         assertEq(amount, stakeAmount);
 
         // Verify total stake increased
-        (,,, uint256 totalStaked,) = proverStaking.getProverInfo(prover1);
+        (,,, uint256 totalStaked,,,) = proverStaking.getProverInfo(prover1);
         assertEq(totalStaked, MIN_SELF_STAKE + stakeAmount);
     }
 
@@ -145,7 +148,7 @@ contract StakingTest is Test {
         vm.prank(staker1);
         brevToken.approve(address(proverStaking), 1000e18);
 
-        vm.expectRevert("Unknown prover");
+        vm.expectRevert(TestErrors.ProverNotRegistered.selector);
         vm.prank(staker1);
         proverStaking.stake(inactiveProver, 1000e18);
     }
@@ -163,7 +166,7 @@ contract StakingTest is Test {
         vm.prank(staker1);
         brevToken.approve(address(proverStaking), 1000e18);
 
-        vm.expectRevert("Prover below min self-stake");
+        vm.expectRevert(TestErrors.MinSelfStakeNotMet.selector);
         vm.prank(staker1);
         proverStaking.stake(prover1, 1000e18);
     }
@@ -200,7 +203,7 @@ contract StakingTest is Test {
         proverStaking.requestUnstake(prover1, unstakeAmount);
 
         // Try to complete before delay
-        vm.expectRevert("No unstakes ready for completion");
+        vm.expectRevert(TestErrors.NoReadyUnstakes.selector);
         vm.prank(staker1);
         proverStaking.completeUnstake(prover1);
 
@@ -224,7 +227,7 @@ contract StakingTest is Test {
         _initializeProver(prover1);
         _stakeToProver(staker1, prover1, 1000e18);
 
-        vm.expectRevert("Insufficient stake");
+        vm.expectRevert(TestErrors.InsufficientStake.selector);
         vm.prank(staker1);
         proverStaking.requestUnstake(prover1, 2000e18); // Try to unstake more than staked
     }
@@ -263,7 +266,7 @@ contract StakingTest is Test {
         assertEq(pendingUnstakeCount, 10, "Should have 10 pending unstake requests");
 
         // Try to create an 11th request - should fail
-        vm.expectRevert("Too many pending unstakes");
+        vm.expectRevert(TestErrors.TooManyPendingUnstakes.selector);
         vm.prank(staker1);
         proverStaking.requestUnstake(prover1, 1000e18);
     }
@@ -365,7 +368,7 @@ contract StakingTest is Test {
         vm.prank(owner);
         proverStaking.slash(prover1, slashPercentage);
 
-        (,,, uint256 totalStakeAfter,) = proverStaking.getProverInfo(prover1);
+        (,,, uint256 totalStakeAfter,,,) = proverStaking.getProverInfo(prover1);
         uint256 expectedStakeAfter = (totalStakeBefore * 80) / 100; // 80% remaining = 15200e18
 
         assertEq(totalStakeAfter, expectedStakeAfter);
@@ -384,7 +387,7 @@ contract StakingTest is Test {
         vm.prank(owner);
         proverStaking.slash(prover1, 100000); // 10%
 
-        (,,, uint256 stakeAfter,) = proverStaking.getProverInfo(prover1);
+        (,,, uint256 stakeAfter,,,) = proverStaking.getProverInfo(prover1);
         assertEq(stakeAfter, (stakeBefore * 90) / 100);
     }
 
@@ -411,12 +414,13 @@ contract StakingTest is Test {
         assertEq(balanceAfter - balanceBefore, 400e18);
     }
 
-    function test_CannotSlash100Percent() public {
+    function test_CannotSlashAboveMax() public {
         _initializeProver(prover1);
 
-        vm.expectRevert("Cannot slash 100%");
+        // 100% slash now falls under generic SlashTooHigh (exceeds MAX_SLASH_PERCENTAGE = 50%)
+        vm.expectRevert(TestErrors.SlashTooHigh.selector);
         vm.prank(owner);
-        proverStaking.slash(prover1, 1000000); // 100%
+        proverStaking.slash(prover1, 1_000_000); // 100%
     }
 
     // ========== HELPER FUNCTIONS ==========
@@ -439,7 +443,7 @@ contract StakingTest is Test {
         assertEq(stakers[0], prover1, "Prover should be in stakers list");
 
         // Check staker count from getProverInfo
-        (,,,, uint256 stakerCount) = proverStaking.getProverInfo(prover1);
+        (,,,,,, uint256 stakerCount) = proverStaking.getProverInfo(prover1);
         assertEq(stakerCount, 1, "Staker count should be 1");
 
         // Add another staker
@@ -460,7 +464,7 @@ contract StakingTest is Test {
         assertTrue(foundStaker, "Staker should be in stakers list");
 
         // Check staker count
-        (,,,, stakerCount) = proverStaking.getProverInfo(prover1);
+        (,,,,,, stakerCount) = proverStaking.getProverInfo(prover1);
         assertEq(stakerCount, 2, "Staker count should be 2");
 
         // Fully unstake one staker
@@ -473,7 +477,7 @@ contract StakingTest is Test {
         assertEq(stakers[0], prover1, "Only prover should remain in stakers list");
 
         // Check staker count
-        (,,,, stakerCount) = proverStaking.getProverInfo(prover1);
+        (,,,,,, stakerCount) = proverStaking.getProverInfo(prover1);
         assertEq(stakerCount, 1, "Staker count should be 1 after unstaking");
     }
 
@@ -513,7 +517,7 @@ contract StakingTest is Test {
         uint256 tooLongDelay = 31 days;
 
         vm.prank(owner);
-        vm.expectRevert("MinSelfStake decrease delay too long");
+        vm.expectRevert(TestErrors.InvalidArg.selector);
         proverStaking.setMinSelfStakeDecreaseDelay(tooLongDelay);
     }
 
@@ -532,7 +536,7 @@ contract StakingTest is Test {
     }
 
     function test_CannotSetZeroGlobalMinSelfStake() public {
-        vm.expectRevert("Global min self stake must be positive");
+        vm.expectRevert(TestErrors.GlobalMinSelfStakeZero.selector);
         vm.prank(owner);
         proverStaking.setGlobalMinSelfStake(0);
     }
@@ -550,7 +554,7 @@ contract StakingTest is Test {
 
         vm.stopPrank();
 
-        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover2);
+        (ProverStaking.ProverState state,,,,,,) = proverStaking.getProverInfo(prover2);
         assertTrue(state == ProverStaking.ProverState.Active);
     }
 
@@ -563,7 +567,7 @@ contract StakingTest is Test {
         brevToken.approve(address(proverStaking), minSelfStake);
 
         // Should fail
-        vm.expectRevert("Below global minimum self stake");
+        vm.expectRevert(TestErrors.GlobalMinSelfStakeNotMet.selector);
         proverStaking.initProver(minSelfStake, COMMISSION_RATE);
 
         vm.stopPrank();
@@ -577,7 +581,7 @@ contract StakingTest is Test {
         proverStaking.initProver(MIN_SELF_STAKE, COMMISSION_RATE);
 
         // Verify prover1 is active
-        (ProverStaking.ProverState initialState,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState initialState,,,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(initialState == ProverStaking.ProverState.Active);
 
         // Increase global minimum above prover1's current requirement
@@ -585,7 +589,7 @@ contract StakingTest is Test {
         proverStaking.setGlobalMinSelfStake(20000e18);
 
         // prover1 should still be active (not retroactive)
-        (ProverStaking.ProverState state1,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state1,,,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state1 == ProverStaking.ProverState.Active);
 
         // But new provers must meet the new requirement
@@ -595,7 +599,7 @@ contract StakingTest is Test {
         vm.startPrank(prover2);
         brevToken.approve(address(proverStaking), lowMinSelfStake);
 
-        vm.expectRevert("Below global minimum self stake");
+        vm.expectRevert(TestErrors.GlobalMinSelfStakeNotMet.selector);
         proverStaking.initProver(lowMinSelfStake, COMMISSION_RATE);
 
         vm.stopPrank();
@@ -763,7 +767,7 @@ contract StakingTest is Test {
         _initializeProver(prover1);
 
         // Verify prover is active
-        (ProverStaking.ProverState state1,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state1,,,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state1 == ProverStaking.ProverState.Active, "Prover should be active");
 
         // Deactivate prover (admin action)
@@ -773,7 +777,7 @@ contract StakingTest is Test {
         proverStaking.deactivateProver(prover1);
 
         // Verify prover is deactivated after deactivation
-        (ProverStaking.ProverState state2,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state2,,,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state2 == ProverStaking.ProverState.Deactivated, "Prover should be deactivated");
     }
 
@@ -793,7 +797,7 @@ contract StakingTest is Test {
         proverStaking.deactivateProver(prover1);
 
         // Try to deactivate again
-        vm.expectRevert("Prover already inactive");
+        vm.expectRevert(TestErrors.InvalidProverState.selector);
         vm.prank(owner);
         proverStaking.deactivateProver(prover1);
     }
@@ -806,7 +810,7 @@ contract StakingTest is Test {
         proverStaking.initProver(GLOBAL_MIN_SELF_STAKE, COMMISSION_RATE);
 
         // Admin cannot retire with active stakes
-        vm.expectRevert("Active stakes remaining");
+        vm.expectRevert(TestErrors.ActiveStakesRemain.selector);
         vm.prank(owner);
         proverStaking.retireProver(prover1);
 
@@ -826,7 +830,7 @@ contract StakingTest is Test {
         proverStaking.retireProver(prover1);
 
         // Verify prover is retired
-        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state,,,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state == ProverStaking.ProverState.Retired, "Prover should be retired");
     }
 
@@ -846,7 +850,7 @@ contract StakingTest is Test {
         proverStaking.retireProver(prover1);
 
         // Verify prover is retired
-        (ProverStaking.ProverState state1,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state1,,,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state1 == ProverStaking.ProverState.Retired, "Prover should be retired");
 
         // Self-stake while retired to meet minimum requirements
@@ -862,7 +866,7 @@ contract StakingTest is Test {
         proverStaking.unretireProver();
 
         // Verify prover is active again
-        (ProverStaking.ProverState state2,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state2,,,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state2 == ProverStaking.ProverState.Active, "Prover should be active after unretiring");
 
         // Verify stake was applied
@@ -879,7 +883,7 @@ contract StakingTest is Test {
         proverStaking.deactivateProver(prover1);
 
         // Verify prover is deactivated
-        (ProverStaking.ProverState state1,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state1,,,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state1 == ProverStaking.ProverState.Deactivated, "Prover should be deactivated");
 
         // Admin reactivates prover
@@ -889,7 +893,7 @@ contract StakingTest is Test {
         proverStaking.reactivateProver(prover1);
 
         // Verify prover is active again
-        (ProverStaking.ProverState state2,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state2,,,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state2 == ProverStaking.ProverState.Active, "Prover should be active after admin reactivation");
     }
 
@@ -897,7 +901,7 @@ contract StakingTest is Test {
         _initializeProver(prover1);
 
         // Try to unretire active prover
-        vm.expectRevert("Prover not retired");
+        vm.expectRevert(TestErrors.InvalidProverState.selector);
         vm.prank(prover1);
         proverStaking.unretireProver();
     }
@@ -915,7 +919,7 @@ contract StakingTest is Test {
         proverStaking.retireProver(prover1);
 
         // Try to unretire without self-staking first
-        vm.expectRevert("Must meet min self-stake before unretiring");
+        vm.expectRevert(TestErrors.MinSelfStakeNotMet.selector);
         vm.prank(prover1);
         proverStaking.unretireProver();
     }
@@ -933,7 +937,7 @@ contract StakingTest is Test {
         proverStaking.retireProver(prover1);
 
         // Admin cannot reactivate retired prover (only deactivated)
-        vm.expectRevert("Prover not deactivated");
+        vm.expectRevert(TestErrors.InvalidProverState.selector);
         vm.prank(owner);
         proverStaking.reactivateProver(prover1);
     }
@@ -965,7 +969,7 @@ contract StakingTest is Test {
 
         // Try to unstake all when staker has no stake
         vm.startPrank(staker1);
-        vm.expectRevert("No active stake to unstake");
+        vm.expectRevert(TestErrors.NoStake.selector);
         proverStaking.requestUnstakeAll(prover1);
         vm.stopPrank();
     }
@@ -974,7 +978,7 @@ contract StakingTest is Test {
         address unknownProver = makeAddr("unknownProver");
 
         vm.startPrank(staker1);
-        vm.expectRevert("Unknown prover");
+        vm.expectRevert(TestErrors.ProverNotRegistered.selector);
         proverStaking.requestUnstakeAll(unknownProver);
         vm.stopPrank();
     }

@@ -9,6 +9,46 @@ import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 import "./access/AccessControl.sol";
 
+// =============================================================
+// Custom Errors (grouped by functional domain)
+// =============================================================
+
+// --- Global / Admin Configuration ---
+error GlobalMinSelfStakeZero(); // Setting global min self stake to zero
+error GlobalMinSelfStakeNotMet(); // Provided value below global min requirement
+error InvalidArg(); // Generic invalid admin/user argument (delay too long, zero addr, etc.)
+error InvalidScale(); // Invalid scale related parameter (generic guard)
+
+// --- Prover Lifecycle & State ---
+error ProverNotRegistered(); // Prover struct not initialized
+error InvalidProverState(); // Prover in unexpected state for operation
+error MinSelfStakeNotMet(); // Prover's self effective stake < required min
+error ActiveStakesRemain(); // Attempting lifecycle action while stakes remain
+error CommissionRemain(); // Attempting lifecycle action while commission pending
+
+// --- Staking / Unstaking Operations ---
+error ZeroAmount(); // Amount parameter is zero
+error InsufficientStake(); // Not enough stake/shares to perform action
+error SelfStakeUnderflow(); // Prover trying to unstake more than self stake
+error TooManyPendingUnstakes(); // Exceeded per-staker pending unstake requests
+error NoStake(); // No active stake for operation
+error NoPendingUnstakes(); // No pending unstake entries exist
+error NoReadyUnstakes(); // Pending unstakes exist but none matured
+
+// --- Reward / Commission Accounting ---
+error InvalidCommission(); // Commission rate > denominator
+error NoRewards(); // Nothing to withdraw
+
+// --- Min Self-Stake Update Workflow ---
+error NoMinStakeChange(); // New min self-stake equals current
+error NoPendingMinStakeUpdate(); // No pending decrease request
+error MinStakeDelay(); // Decrease delay not yet elapsed
+
+// --- Slashing / Treasury ---
+error SlashTooHigh(); // Slash percentage > MAX_SLASH_PERCENTAGE
+error ScaleTooLow(); // Resulting scale would breach hard floor
+error TreasuryInsufficient(); // Treasury pool balance too low for withdrawal
+
 /**
  * @title ProverStaking
  * @notice A staking contract that manages proof nodes and their delegated stakes
@@ -216,7 +256,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _globalMinSelfStake Global minimum self-stake requirement for all provers
      */
     function _init(address _token, uint256 _globalMinSelfStake) private {
-        require(_globalMinSelfStake > 0, "Global min self stake must be positive");
+        if (_globalMinSelfStake == 0) revert GlobalMinSelfStakeZero();
         brevToken = _token;
         globalMinSelfStake = _globalMinSelfStake;
         lastGlobalTime = block.timestamp;
@@ -232,9 +272,9 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _commissionRate Commission percentage in basis points (0-10000)
      */
     function initProver(uint256 _minSelfStake, uint64 _commissionRate) external {
-        require(provers[msg.sender].state == ProverState.Null, "Prover already initialized");
-        require(_commissionRate <= COMMISSION_RATE_DENOMINATOR, "Invalid commission rate");
-        require(_minSelfStake >= globalMinSelfStake, "Below global minimum self stake");
+        if (provers[msg.sender].state != ProverState.Null) revert InvalidProverState();
+        if (_commissionRate > COMMISSION_RATE_DENOMINATOR) revert InvalidCommission();
+        if (_minSelfStake < globalMinSelfStake) revert GlobalMinSelfStakeNotMet();
 
         ProverInfo storage prover = provers[msg.sender];
         prover.state = ProverState.Active;
@@ -271,8 +311,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _amount Amount of tokens to delegate
      */
     function stake(address _prover, uint256 _amount) public nonReentrant {
-        require(_amount > 0, "Amount must be positive");
-        require(provers[_prover].state != ProverState.Null, "Unknown prover");
+        if (_amount == 0) revert ZeroAmount();
+        if (provers[_prover].state == ProverState.Null) revert ProverNotRegistered();
 
         ProverInfo storage prover = provers[_prover];
         StakeInfo storage stakeInfo = prover.stakes[msg.sender];
@@ -280,12 +320,12 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         // Delegation-specific validations (only apply to external delegations, not self-staking)
         if (msg.sender != _prover) {
             // Only allow delegation to active provers, but always allow self-staking
-            require(prover.state == ProverState.Active, "Prover not active");
+            if (prover.state != ProverState.Active) revert InvalidProverState();
 
             // Gate delegations when prover is below min self-stake
             // This ensures prover has skin in the game before accepting external delegations
             uint256 selfEffective = _effectiveAmount(_prover, _selfRawShares(_prover));
-            require(selfEffective >= prover.minSelfStake, "Prover below min self-stake");
+            if (selfEffective < prover.minSelfStake) revert MinSelfStakeNotMet();
         }
 
         // Transfer tokens from staker to contract (fail early if insufficient balance/allowance)
@@ -361,16 +401,16 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _amount Amount of tokens to unstake (effective amount)
      */
     function requestUnstake(address _prover, uint256 _amount) public {
-        require(_amount > 0, "Amount must be positive");
-        require(provers[_prover].state != ProverState.Null, "Unknown prover");
+        if (_amount == 0) revert ZeroAmount();
+        if (provers[_prover].state == ProverState.Null) revert ProverNotRegistered();
 
         ProverInfo storage prover = provers[_prover];
         StakeInfo storage stakeInfo = prover.stakes[msg.sender];
 
         // Convert amount to raw shares for internal accounting
         uint256 rawSharesToUnstake = _rawSharesFromAmount(_prover, _amount);
-        require(stakeInfo.rawShares >= rawSharesToUnstake, "Insufficient stake");
-        require(stakeInfo.pendingUnstakes.length < MAX_PENDING_UNSTAKES, "Too many pending unstakes");
+        if (stakeInfo.rawShares < rawSharesToUnstake) revert InsufficientStake();
+        if (stakeInfo.pendingUnstakes.length >= MAX_PENDING_UNSTAKES) revert TooManyPendingUnstakes();
 
         // Calculate old effective stake for update tracking
         uint256 oldEffectiveStake = _getTotalEffectiveStake(_prover);
@@ -386,12 +426,12 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         // EXCEPTION: Allow going to zero (complete exit) even if below minimum
         if (msg.sender == _prover) {
             uint256 currentSelfRawShares = _selfRawShares(_prover);
-            require(currentSelfRawShares >= rawSharesToUnstake, "Self-stake underflow");
+            if (currentSelfRawShares < rawSharesToUnstake) revert SelfStakeUnderflow();
             uint256 remainingEffective = _effectiveAmount(_prover, currentSelfRawShares - rawSharesToUnstake);
 
             // Allow going below minSelfStake only if it results in zero self-stake (complete exit)
             if (remainingEffective > 0) {
-                require(remainingEffective >= prover.minSelfStake, "Below minimum self stake");
+                if (remainingEffective < prover.minSelfStake) revert MinSelfStakeNotMet();
             }
         }
 
@@ -445,12 +485,12 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _prover Address of the prover to unstake all tokens from
      */
     function requestUnstakeAll(address _prover) external {
-        require(provers[_prover].state != ProverState.Null, "Unknown prover");
+        if (provers[_prover].state == ProverState.Null) revert ProverNotRegistered();
 
         ProverInfo storage prover = provers[_prover];
         StakeInfo storage stakeInfo = prover.stakes[msg.sender];
 
-        require(stakeInfo.rawShares > 0, "No active stake to unstake");
+        if (stakeInfo.rawShares == 0) revert NoStake();
 
         // Calculate current effective amount for all raw shares
         uint256 effectiveAmount = _effectiveAmount(_prover, stakeInfo.rawShares);
@@ -479,7 +519,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     function completeUnstake(address _prover) external nonReentrant {
         StakeInfo storage stakeInfo = provers[_prover].stakes[msg.sender];
 
-        require(stakeInfo.pendingUnstakes.length > 0, "No pending unstakes");
+        if (stakeInfo.pendingUnstakes.length == 0) revert NoPendingUnstakes();
 
         uint256 totalEffectiveAmount = 0;
         uint256 completedCount = 0;
@@ -513,7 +553,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             }
         }
 
-        require(completedCount > 0, "No unstakes ready for completion");
+        if (completedCount == 0) revert NoReadyUnstakes();
 
         if (totalEffectiveAmount > 0) {
             IERC20(brevToken).safeTransfer(msg.sender, totalEffectiveAmount);
@@ -541,7 +581,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _amount Total amount of tokens to distribute as rewards
      */
     function addRewards(address _prover, uint256 _amount) external nonReentrant {
-        require(provers[_prover].state != ProverState.Null, "Unknown prover");
+        if (provers[_prover].state == ProverState.Null) revert ProverNotRegistered();
         if (_amount == 0) return;
 
         // Transfer tokens from sender to this contract
@@ -597,7 +637,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _prover The address of the prover to withdraw rewards from
      */
     function withdrawRewards(address _prover) external nonReentrant {
-        require(provers[_prover].state != ProverState.Null, "Unknown prover");
+        if (provers[_prover].state == ProverState.Null) revert ProverNotRegistered();
 
         // Update global streaming rewards before withdrawal (piggyback principle)
         if (globalRatePerSec > 0) {
@@ -640,7 +680,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             }
         }
 
-        require(payout > 0, "No rewards available");
+        if (payout == 0) revert NoRewards();
 
         // Transfer rewards to caller
         IERC20(brevToken).safeTransfer(msg.sender, payout);
@@ -666,9 +706,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _percentage The percentage of stake to slash (0 to MAX_SLASH_PERCENTAGE)
      */
     function slash(address _prover, uint256 _percentage) external onlyRole(SLASHER_ROLE) {
-        require(provers[_prover].state != ProverState.Null, "Unknown prover");
-        require(_percentage < SLASH_FACTOR_DENOMINATOR, "Cannot slash 100%");
-        require(_percentage <= MAX_SLASH_PERCENTAGE, "Slash percentage too high");
+        if (provers[_prover].state == ProverState.Null) revert ProverNotRegistered();
+        if (_percentage > MAX_SLASH_PERCENTAGE) revert SlashTooHigh();
 
         ProverInfo storage prover = provers[_prover];
 
@@ -688,7 +727,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         uint256 newScale = (prover.scale * remainingFactor) / SLASH_FACTOR_DENOMINATOR;
 
         // Hard stop: do not allow scale to reach or drop below MIN_SCALE_FLOOR.
-        require(newScale > MIN_SCALE_FLOOR, "Scale too low");
+        if (newScale <= MIN_SCALE_FLOOR) revert ScaleTooLow();
 
         // Apply new scale.
         prover.scale = newScale;
@@ -724,7 +763,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @dev Provers can retire themselves when they have no active stakes or pending rewards
      */
     function retireProver() external {
-        require(provers[msg.sender].state != ProverState.Null, "Not a prover");
+        if (provers[msg.sender].state == ProverState.Null) revert ProverNotRegistered();
         _retireProver(msg.sender);
     }
 
@@ -734,7 +773,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _prover The address of the prover to retire
      */
     function retireProver(address _prover) external onlyOwner {
-        require(provers[_prover].state != ProverState.Null, "Unknown prover");
+        if (provers[_prover].state == ProverState.Null) revert ProverNotRegistered();
         _retireProver(_prover);
     }
 
@@ -744,14 +783,14 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      *      The prover should self-stake while retired before calling this function
      */
     function unretireProver() external {
-        require(provers[msg.sender].state == ProverState.Retired, "Prover not retired");
+        if (provers[msg.sender].state != ProverState.Retired) revert InvalidProverState();
 
         ProverInfo storage prover = provers[msg.sender];
 
         // Verify prover meets minimum self-stake requirements before unretiring
         uint256 selfEffective = _effectiveAmount(msg.sender, _selfRawShares(msg.sender));
-        require(selfEffective >= prover.minSelfStake, "Must meet min self-stake before unretiring");
-        require(selfEffective >= globalMinSelfStake, "Must meet global min self-stake before unretiring");
+        if (selfEffective < prover.minSelfStake) revert MinSelfStakeNotMet();
+        if (selfEffective < globalMinSelfStake) revert GlobalMinSelfStakeNotMet();
 
         // Reset slashing scale for fresh start
         prover.scale = SCALE_FACTOR;
@@ -788,12 +827,12 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _newMinSelfStake New minimum self-stake amount in token units
      */
     function updateMinSelfStake(uint256 _newMinSelfStake) external {
-        require(provers[msg.sender].state != ProverState.Null, "Not a prover");
-        require(_newMinSelfStake >= globalMinSelfStake, "Below global minimum self stake");
+        if (provers[msg.sender].state == ProverState.Null) revert ProverNotRegistered();
+        if (_newMinSelfStake < globalMinSelfStake) revert GlobalMinSelfStakeNotMet();
 
         ProverInfo storage prover = provers[msg.sender];
         uint256 currentMinSelfStake = prover.minSelfStake;
-        require(_newMinSelfStake != currentMinSelfStake, "No change in minSelfStake");
+        if (_newMinSelfStake == currentMinSelfStake) revert NoMinStakeChange();
 
         if (_newMinSelfStake > currentMinSelfStake) {
             // === INCREASE: EFFECTIVE IMMEDIATELY ===
@@ -818,14 +857,14 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @dev Only callable by the prover after the delay period has passed
      */
     function completeMinSelfStakeUpdate() external {
-        require(provers[msg.sender].state != ProverState.Null, "Not a prover");
+        if (provers[msg.sender].state == ProverState.Null) revert ProverNotRegistered();
 
         ProverInfo storage prover = provers[msg.sender];
-        require(prover.pendingMinSelfStakeUpdate.newMinSelfStake > 0, "No pending minSelfStake update");
+        if (prover.pendingMinSelfStakeUpdate.newMinSelfStake == 0) revert NoPendingMinStakeUpdate();
 
         // Calculate effective time based on current delay setting
         uint256 effectiveTime = prover.pendingMinSelfStakeUpdate.requestedTime + minSelfStakeDecreaseDelay;
-        require(block.timestamp >= effectiveTime, "Update delay not yet passed");
+        if (block.timestamp < effectiveTime) revert MinStakeDelay();
 
         uint256 newMinSelfStake = prover.pendingMinSelfStakeUpdate.newMinSelfStake;
 
@@ -842,12 +881,11 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _newCommissionRate New commission rate in basis points (0-10000, where 10000 = 100%)
      */
     function updateCommissionRate(uint64 _newCommissionRate) external {
-        require(provers[msg.sender].state != ProverState.Null, "Not a prover");
-        require(_newCommissionRate <= COMMISSION_RATE_DENOMINATOR, "Invalid commission rate");
+        if (provers[msg.sender].state == ProverState.Null) revert ProverNotRegistered();
+        if (_newCommissionRate > COMMISSION_RATE_DENOMINATOR) revert InvalidCommission();
 
         ProverInfo storage prover = provers[msg.sender];
         uint64 oldCommissionRate = prover.commissionRate;
-        require(_newCommissionRate != oldCommissionRate, "No change in commission rate");
 
         // Update commission rate immediately
         prover.commissionRate = _newCommissionRate;
@@ -879,7 +917,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _amount Amount of tokens to add to the streaming budget
      */
     function addStreamingBudget(uint256 _amount) external {
-        require(_amount > 0, "Amount must be positive");
+        if (_amount == 0) revert ZeroAmount();
 
         // Transfer tokens from caller to contract
         IERC20(brevToken).safeTransferFrom(msg.sender, address(this), _amount);
@@ -898,7 +936,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _newDelay The new unstake delay in seconds
      */
     function setUnstakeDelay(uint256 _newDelay) external onlyOwner {
-        require(_newDelay <= 30 days, "Unstake delay too long");
+        if (_newDelay > 30 days) revert InvalidArg();
         uint256 oldDelay = unstakeDelay;
         unstakeDelay = _newDelay;
         emit UnstakeDelayUpdated(oldDelay, _newDelay);
@@ -909,7 +947,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _newDelay The new minSelfStake decrease delay in seconds
      */
     function setMinSelfStakeDecreaseDelay(uint256 _newDelay) external onlyOwner {
-        require(_newDelay <= 30 days, "MinSelfStake decrease delay too long");
+        if (_newDelay > 30 days) revert InvalidArg();
         uint256 oldDelay = minSelfStakeDecreaseDelay;
         minSelfStakeDecreaseDelay = _newDelay;
         emit MinSelfStakeDecreaseDelayUpdated(oldDelay, _newDelay);
@@ -920,7 +958,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _newGlobalMinSelfStake The new global minimum self-stake in token units
      */
     function setGlobalMinSelfStake(uint256 _newGlobalMinSelfStake) external onlyOwner {
-        require(_newGlobalMinSelfStake > 0, "Global min self stake must be positive");
+        if (_newGlobalMinSelfStake == 0) revert GlobalMinSelfStakeZero();
         uint256 oldMinStake = globalMinSelfStake;
         globalMinSelfStake = _newGlobalMinSelfStake;
         emit GlobalMinSelfStakeUpdated(oldMinStake, _newGlobalMinSelfStake);
@@ -933,7 +971,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _prover The address of the prover to deactivate
      */
     function deactivateProver(address _prover) external onlyOwner {
-        require(provers[_prover].state == ProverState.Active, "Prover already inactive");
+        if (provers[_prover].state != ProverState.Active) revert InvalidProverState();
 
         // Finalize streaming to 'now' and settle this prover before leaving Active
         _updateGlobalStreaming();
@@ -957,7 +995,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _prover The address of the prover to reactivate
      */
     function reactivateProver(address _prover) external onlyOwner {
-        require(provers[_prover].state == ProverState.Deactivated, "Prover not deactivated");
+        if (provers[_prover].state != ProverState.Deactivated) revert InvalidProverState();
 
         ProverInfo storage prover = provers[_prover];
 
@@ -966,8 +1004,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
         // Check if prover still meets minimum self-stake requirements
         uint256 selfEffective = _effectiveAmount(_prover, _selfRawShares(_prover));
-        require(selfEffective >= prover.minSelfStake, "Prover below min self-stake");
-        require(selfEffective >= globalMinSelfStake, "Prover below global min self-stake");
+        if (selfEffective < prover.minSelfStake) revert MinSelfStakeNotMet();
+        if (selfEffective < globalMinSelfStake) revert GlobalMinSelfStakeNotMet();
 
         prover.state = ProverState.Active;
         activeProvers.add(_prover);
@@ -999,9 +1037,9 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _amount The amount of tokens to withdraw from the treasury pool
      */
     function withdrawFromTreasuryPool(address _to, uint256 _amount) external onlyOwner {
-        require(_to != address(0), "Invalid recipient");
-        require(_amount > 0, "Amount must be positive");
-        require(_amount <= treasuryPool, "Insufficient treasury pool balance");
+        if (_to == address(0)) revert InvalidArg();
+        if (_amount == 0) revert ZeroAmount();
+        if (_amount > treasuryPool) revert TreasuryInsufficient();
 
         // Update treasury pool accounting
         treasuryPool -= _amount;
@@ -1047,31 +1085,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     // =========================================================================
 
     /**
-     * @notice Get basic prover information
-     * @param _prover Address of the prover to query
-     * @return state Current state of the prover (Null, Active, Retired)
-     * @return minSelfStake Minimum self-stake required for accepting delegations
-     * @return commissionRate Commission rate in basis points (0-10000)
-     * @return totalStaked Total effective stake amount (post-slashing)
-     * @return stakersCount Number of active stakers (excluding zero-balance stakers)
-     */
-    function getProverInfo(address _prover)
-        external
-        view
-        returns (
-            ProverState state,
-            uint256 minSelfStake,
-            uint64 commissionRate,
-            uint256 totalStaked,
-            uint256 stakersCount
-        )
-    {
-        ProverInfo storage prover = provers[_prover];
-        uint256 effectiveTotalStaked = _getTotalEffectiveStake(_prover);
-        return (prover.state, prover.minSelfStake, prover.commissionRate, effectiveTotalStaked, prover.stakers.length());
-    }
-
-    /**
      * @notice Get detailed prover information including self-stake and commission data
      * @param _prover Address of the prover to query
      * @return state Current state of the prover (Null, Active, Retired)
@@ -1082,7 +1095,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @return pendingCommission Unclaimed commission rewards for the prover
      * @return stakerCount Number of active stakers (excluding zero-balance stakers)
      */
-    function getProverDetails(address _prover)
+    function getProverInfo(address _prover)
         external
         view
         returns (
@@ -1190,7 +1203,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     {
         StakeInfo storage stakeInfo = provers[_prover].stakes[_staker];
 
-        require(_requestIndex < stakeInfo.pendingUnstakes.length, "Invalid request index");
+        if (_requestIndex >= stakeInfo.pendingUnstakes.length) revert InvalidArg();
 
         PendingUnstake storage unstakeRequest = stakeInfo.pendingUnstakes[_requestIndex];
         uint256 effectiveAmount = _effectiveAmount(_prover, unstakeRequest.rawShares);
@@ -1375,17 +1388,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     }
 
     /**
-     * @notice Get total pending rewards for a staker (including streaming rewards)
-     * @dev Helper function to calculate total pending rewards including live streaming accumulation
-     * @param _prover Address of the prover
-     * @param _staker Address of the staker
-     * @return Total pending rewards (proof + streaming + commission if applicable)
-     */
-    function getPendingRewards(address _prover, address _staker) external view returns (uint256) {
-        return _calculateTotalPendingRewards(_prover, _staker);
-    }
-
-    /**
      * @notice Get pending streaming rewards for a prover (without settling)
      * @dev View function that calculates what would be owed if settled now
      *      Only Active provers earn streaming rewards - inactive provers return zero
@@ -1554,12 +1556,11 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      */
     function _retireProver(address _prover) internal {
         ProverInfo storage prover = provers[_prover];
-        require(
-            prover.state == ProverState.Active || prover.state == ProverState.Deactivated,
-            "Cannot retire from current state"
-        );
-        require(prover.totalRawShares == 0, "Active stakes remaining");
-        require(prover.pendingCommission == 0, "Commission remaining");
+        if (!(prover.state == ProverState.Active || prover.state == ProverState.Deactivated)) {
+            revert InvalidProverState();
+        }
+        if (prover.totalRawShares != 0) revert ActiveStakesRemain();
+        if (prover.pendingCommission != 0) revert CommissionRemain();
 
         // === CLOSE INTERVAL BEFORE DENOMINATOR CHANGE ===
         // Update global streaming before changing totalEffectiveActive (even if zero)
@@ -1617,7 +1618,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      */
     function _rawSharesFromAmount(address _prover, uint256 _amount) internal view returns (uint256) {
         ProverInfo storage prover = provers[_prover];
-        require(prover.scale > 0, "Invalid scale");
+        if (prover.scale == 0) revert InvalidScale();
         return (_amount * SCALE_FACTOR) / prover.scale;
     }
 

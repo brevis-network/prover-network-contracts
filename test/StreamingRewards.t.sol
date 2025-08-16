@@ -5,6 +5,7 @@ import "forge-std/Test.sol";
 import {TestProverStaking} from "./TestProverStaking.sol";
 import {ProverStaking} from "../src/ProverStaking.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
+import {TestErrors} from "./utils/TestErrors.sol";
 
 /**
  * @title Streaming Rewards Test Suite
@@ -95,7 +96,7 @@ contract StreamingRewardsTest is Test {
     }
 
     function _getTotalEffectiveStake(address prover) internal view returns (uint256) {
-        (,,, uint256 totalStaked,) = proverStaking.getProverInfo(prover);
+        (,,, uint256 totalStaked,,,) = proverStaking.getProverInfo(prover);
         return totalStaked;
     }
 
@@ -170,7 +171,7 @@ contract StreamingRewardsTest is Test {
     }
 
     function test_RevertAddStreamingBudgetZero() public {
-        vm.expectRevert("Amount must be positive");
+        vm.expectRevert(TestErrors.ZeroAmount.selector);
         vm.prank(funder);
         proverStaking.addStreamingBudget(0);
     }
@@ -217,11 +218,11 @@ contract StreamingRewardsTest is Test {
         proverStaking.settleProverStreaming(prover1);
 
         // Check prover received commission (10% of 10 tokens = 1 token)
-        (,,,,, uint256 pendingCommission,) = proverStaking.getProverDetails(prover1);
+        (,,,,, uint256 pendingCommission,) = proverStaking.getProverInfo(prover1);
         assertEq(pendingCommission, 1e18);
 
         // Check staker rewards (90% of 10 tokens = 9 tokens)
-        uint256 pendingRewards = proverStaking.getPendingRewards(prover1, prover1);
+        (,,, uint256 pendingRewards) = proverStaking.getStakeInfo(prover1, prover1);
         assertEq(pendingRewards, 10e18); // 1 commission + 9 staker rewards (prover is also staker)
     }
 
@@ -246,12 +247,12 @@ contract StreamingRewardsTest is Test {
 
         // Prover 1: 10k stake * 1e15 = 10 tokens total
         // Commission (10%): 1 token, Stakers: 9 tokens
-        (,,,,, uint256 commission1,) = proverStaking.getProverDetails(prover1);
+        (,,,,, uint256 commission1,) = proverStaking.getProverInfo(prover1);
         assertEq(commission1, 1e18);
 
         // Prover 2: 20k stake * 1e15 = 20 tokens total
         // Commission (20%): 4 tokens, Stakers: 16 tokens
-        (,,,,, uint256 commission2,) = proverStaking.getProverDetails(prover2);
+        (,,,,, uint256 commission2,) = proverStaking.getProverInfo(prover2);
         assertEq(commission2, 4e18);
 
         // Verify budget deduction
@@ -278,19 +279,19 @@ contract StreamingRewardsTest is Test {
         // Commission (10%): 4 tokens to prover
         // Staker rewards (90%): 36 tokens distributed proportionally
 
-        (,,,,, uint256 commission,) = proverStaking.getProverDetails(prover1);
+        (,,,,, uint256 commission,) = proverStaking.getProverInfo(prover1);
         assertEq(commission, 4e18);
 
         // Prover as staker: 36 * 10k/40k = 9 tokens
-        uint256 proverStakeRewards = proverStaking.getPendingRewards(prover1, prover1);
+        (,,, uint256 proverStakeRewards) = proverStaking.getStakeInfo(prover1, prover1);
         assertEq(proverStakeRewards, 13e18); // 4 commission + 9 stake rewards
 
         // Staker1: 36 * 10k/40k = 9 tokens
-        uint256 staker1Rewards = proverStaking.getPendingRewards(prover1, staker1);
+        (,,, uint256 staker1Rewards) = proverStaking.getStakeInfo(prover1, staker1);
         assertEq(staker1Rewards, 9e18);
 
         // Staker2: 36 * 20k/40k = 18 tokens
-        uint256 staker2Rewards = proverStaking.getPendingRewards(prover1, staker2);
+        (,,, uint256 staker2Rewards) = proverStaking.getStakeInfo(prover1, staker2);
         assertEq(staker2Rewards, 18e18);
     }
 
@@ -391,7 +392,7 @@ contract StreamingRewardsTest is Test {
         proverStaking.completeUnstake(prover1);
 
         // Withdraw any pending rewards to clear commission (if any)
-        uint256 pendingRewards = proverStaking.getPendingRewards(prover1, prover1);
+        (,,, uint256 pendingRewards) = proverStaking.getStakeInfo(prover1, prover1);
         if (pendingRewards > 0) {
             vm.prank(prover1);
             proverStaking.withdrawRewards(prover1);
@@ -450,11 +451,11 @@ contract StreamingRewardsTest is Test {
         _stake(staker1, prover1, MIN_SELF_STAKE);
 
         // Verify previous rewards were settled
-        uint256 proverRewards = proverStaking.getPendingRewards(prover1, prover1);
+        (,,, uint256 proverRewards) = proverStaking.getStakeInfo(prover1, prover1);
         assertEq(proverRewards, 10e18); // All 10 tokens (1 commission + 9 stake)
 
         // New staker should start with 0 accumulated rewards
-        uint256 stakerRewards = proverStaking.getPendingRewards(prover1, staker1);
+        (,,, uint256 stakerRewards) = proverStaking.getStakeInfo(prover1, staker1);
         assertEq(stakerRewards, 0);
     }
 
@@ -473,7 +474,7 @@ contract StreamingRewardsTest is Test {
         proverStaking.requestUnstake(prover1, MIN_SELF_STAKE);
 
         // Staker should receive their share of accumulated rewards
-        uint256 stakerRewards = proverStaking.getPendingRewards(prover1, staker1);
+        (,,, uint256 stakerRewards) = proverStaking.getStakeInfo(prover1, staker1);
         assertEq(stakerRewards, 4.5e18); // 9 tokens * 10k/20k = 4.5 tokens
     }
 
@@ -492,7 +493,7 @@ contract StreamingRewardsTest is Test {
         proverStaking.settleProverStreaming(prover1);
 
         // Verify rewards were calculated on original stake
-        (,,,,, uint256 commission,) = proverStaking.getProverDetails(prover1);
+        (,,,,, uint256 commission,) = proverStaking.getProverInfo(prover1);
         assertEq(commission, 1e18); // 10% of 10 tokens
 
         // But effective stake is now reduced for future calculations
@@ -512,7 +513,7 @@ contract StreamingRewardsTest is Test {
         proverStaking.settleProverStreaming(prover1);
 
         // Should handle small amounts without losing precision
-        (,,,,, uint256 commission,) = proverStaking.getProverDetails(prover1);
+        (,,,,, uint256 commission,) = proverStaking.getProverInfo(prover1);
         assertGt(commission, 0); // Should receive some commission even with tiny amounts
     }
 
@@ -535,7 +536,7 @@ contract StreamingRewardsTest is Test {
         proverStaking.settleProverStreaming(prover1);
 
         // Should handle large amounts without overflow
-        (,,,,, uint256 commission,) = proverStaking.getProverDetails(prover1);
+        (,,,,, uint256 commission,) = proverStaking.getProverInfo(prover1);
         assertEq(commission, 1e23); // 10% of 1e24 tokens
     }
 
@@ -774,7 +775,7 @@ contract StreamingRewardsTest is Test {
         vm.warp(block.timestamp + 5);
         proverStaking.settleProverStreaming(prover1);
 
-        uint256 frequentSettlementRewards = proverStaking.getPendingRewards(prover1, prover1);
+        (,,, uint256 frequentSettlementRewards) = proverStaking.getStakeInfo(prover1, prover1);
 
         // Reset and test with single settlement
         vm.prank(prover1);
@@ -790,7 +791,7 @@ contract StreamingRewardsTest is Test {
         vm.warp(block.timestamp + 10);
         proverStaking.settleProverStreaming(prover1);
 
-        uint256 singleSettlementRewards = proverStaking.getPendingRewards(prover1, prover1);
+        (,,, uint256 singleSettlementRewards) = proverStaking.getStakeInfo(prover1, prover1);
 
         // Should be approximately equal (allowing for minor rounding differences)
         assertApproxEqRel(frequentSettlementRewards, singleSettlementRewards, 1e15, "Accrual neutrality violated"); // 0.1% tolerance
@@ -816,7 +817,7 @@ contract StreamingRewardsTest is Test {
         proverStaking.settleProverStreaming(prover1);
 
         uint256 commission1;
-        (,,,,, commission1,) = proverStaking.getProverDetails(prover1);
+        (,,,,, commission1,) = proverStaking.getProverInfo(prover1);
         console.log("Commission after 10s active:", commission1);
 
         // Phase 2: Deactivate prover
@@ -824,34 +825,25 @@ contract StreamingRewardsTest is Test {
         proverStaking.deactivateProver(prover1);
 
         uint256 commission2;
-        (,,,,, commission2,) = proverStaking.getProverDetails(prover1);
-        console.log("Commission after deactivation:", commission2);
-
-        // Phase 3: Wait 20 seconds while inactive
+        (,,,,, commission2,) = proverStaking.getProverInfo(prover1);
+        // Phase 3: Inactive for 20 seconds (should accrue zero commission)
         vm.warp(block.timestamp + 20);
 
         uint256 commission3;
-        (,,,,, commission3,) = proverStaking.getProverDetails(prover1);
-        console.log("Commission after 20s inactive:", commission3);
+        (,,,,, commission3,) = proverStaking.getProverInfo(prover1);
         assertEq(commission3, commission2, "Should not earn commission while inactive");
-
         // Phase 4: Reactivate prover
         vm.prank(owner);
         proverStaking.reactivateProver(prover1);
 
         uint256 commission4;
-        (,,,,, commission4,) = proverStaking.getProverDetails(prover1);
-        console.log("Commission after reactivation:", commission4);
-
-        // Phase 5: Active for 5 seconds
+        (,,,,, commission4,) = proverStaking.getProverInfo(prover1);
+        // Phase 5: Active again for 5 seconds after reactivation
         vm.warp(block.timestamp + 5);
         proverStaking.settleProverStreaming(prover1);
 
         uint256 commission5;
-        (,,,,, commission5,) = proverStaking.getProverDetails(prover1);
-        console.log("Commission after 5s more active:", commission5);
-
-        // Should have earned commission for 10 + 5 = 15 seconds total
+        (,,,,, commission5,) = proverStaking.getProverInfo(prover1);
         uint256 expectedTotalCommission = 15 * streamingRate * 1000 / 10000; // 15 seconds * rate * 10% commission
         console.log("Expected total commission:", expectedTotalCommission);
 
@@ -977,7 +969,7 @@ contract StreamingRewardsTest is Test {
 
         // Get rewards for 10 seconds with MIN_SELF_STAKE
         proverStaking.settleProverStreaming(prover1);
-        uint256 rewardsPhase1 = proverStaking.getPendingRewards(prover1, prover1);
+        (,,, uint256 rewardsPhase1) = proverStaking.getStakeInfo(prover1, prover1);
 
         // Expected: 10 seconds * 100 tokens/sec = 1000 tokens (all to prover since no other stakers)
         assertEq(rewardsPhase1, 1000e18, "Phase 1 rewards incorrect");
@@ -994,14 +986,14 @@ contract StreamingRewardsTest is Test {
 
         // Get rewards for 10 seconds with 2x stake
         proverStaking.settleProverStreaming(prover1);
-        uint256 rewardsPhase2 = proverStaking.getPendingRewards(prover1, prover1);
+        (,,, uint256 rewardsPhase2) = proverStaking.getStakeInfo(prover1, prover1);
 
         // Expected: 10 seconds * 100 tokens/sec = 1000 tokens total
         // Prover gets: commission (10% of 1000) + staking rewards (50% of 900) = 100 + 450 = 550
         assertEq(rewardsPhase2, 550e18, "Phase 2 rewards incorrect - possible drift bug!");
 
         // === CRITICAL TEST: Verify staker got correct rewards ===
-        uint256 stakerRewards = proverStaking.getPendingRewards(prover1, staker1);
+        (,,, uint256 stakerRewards) = proverStaking.getStakeInfo(prover1, staker1);
         // Staker should get: 50% of staking portion = 50% of 900 = 450
         assertEq(stakerRewards, 450e18, "Staker rewards incorrect - drift bug detected!");
     }
@@ -1022,8 +1014,8 @@ contract StreamingRewardsTest is Test {
         vm.warp(block.timestamp + 10);
 
         proverStaking.settleProverStreaming(prover1);
-        uint256 proverRewardsPhase1 = proverStaking.getPendingRewards(prover1, prover1);
-        uint256 stakerRewardsPhase1 = proverStaking.getPendingRewards(prover1, staker1);
+        (,,, uint256 proverRewardsPhase1) = proverStaking.getStakeInfo(prover1, prover1);
+        (,,, uint256 stakerRewardsPhase1) = proverStaking.getStakeInfo(prover1, staker1);
 
         // Expected: 1000 tokens total, 100 commission + 450 staking each
         assertEq(proverRewardsPhase1, 550e18, "Phase 1 prover rewards incorrect");
@@ -1042,8 +1034,8 @@ contract StreamingRewardsTest is Test {
         vm.warp(block.timestamp + 10); // Another 10 seconds
 
         proverStaking.settleProverStreaming(prover1);
-        uint256 proverRewardsPhase2 = proverStaking.getPendingRewards(prover1, prover1);
-        uint256 stakerRewardsPhase2 = proverStaking.getPendingRewards(prover1, staker1);
+        (,,, uint256 proverRewardsPhase2) = proverStaking.getStakeInfo(prover1, prover1);
+        (,,, uint256 stakerRewardsPhase2) = proverStaking.getStakeInfo(prover1, staker1);
 
         // Expected: 1000 tokens total, but now prover gets it all since staker unstaked
         // Commission: 10% of 1000 = 100, Staking: 90% of 1000 = 900 (all to prover)
@@ -1066,7 +1058,7 @@ contract StreamingRewardsTest is Test {
         vm.warp(block.timestamp + 10);
 
         proverStaking.settleProverStreaming(prover1);
-        uint256 rewardsPhase1 = proverStaking.getPendingRewards(prover1, prover1);
+        (,,, uint256 rewardsPhase1) = proverStaking.getStakeInfo(prover1, prover1);
 
         // Expected: 1000 tokens (all to prover)
         assertEq(rewardsPhase1, 1000e18, "Phase 1 rewards incorrect");
@@ -1081,7 +1073,7 @@ contract StreamingRewardsTest is Test {
         vm.warp(block.timestamp + 10); // Another 10 seconds
 
         proverStaking.settleProverStreaming(prover1);
-        uint256 rewardsPhase2 = proverStaking.getPendingRewards(prover1, prover1);
+        (,,, uint256 rewardsPhase2) = proverStaking.getStakeInfo(prover1, prover1);
 
         // Expected: Now only 5000e18 effective stake, so only 50% of streaming rate
         // 10 seconds * 100 tokens/sec * (5000e18 / 10000e18) = 500 tokens
@@ -1108,7 +1100,7 @@ contract StreamingRewardsTest is Test {
         // 5 seconds with small stake
         vm.warp(baseTime + 5);
         proverStaking.settleProverStreaming(prover1);
-        uint256 rewards5sec = proverStaking.getPendingRewards(prover1, prover1);
+        (,,, uint256 rewards5sec) = proverStaking.getStakeInfo(prover1, prover1);
         assertEq(rewards5sec, 5e18, "5 second rewards incorrect");
 
         // Add staker (double stake)
@@ -1121,14 +1113,14 @@ contract StreamingRewardsTest is Test {
         // Another 5 seconds with double stake
         vm.warp(baseTime + 10);
         proverStaking.settleProverStreaming(prover1);
-        uint256 rewardsNext5sec = proverStaking.getPendingRewards(prover1, prover1);
+        (,,, uint256 rewardsNext5sec) = proverStaking.getStakeInfo(prover1, prover1);
 
         // Should be: 1 token/sec * 5 sec = 5 tokens total
         // Prover gets: 10% commission + 50% of staking = 0.5 + 2.25 = 2.75 tokens
         assertEq(rewardsNext5sec, 2.75e18, "Next 5 second rewards incorrect - time drift detected!");
 
         // Verify staker got correct share
-        uint256 stakerShare = proverStaking.getPendingRewards(prover1, staker1);
+        (,,, uint256 stakerShare) = proverStaking.getStakeInfo(prover1, staker1);
         assertEq(stakerShare, 2.25e18, "Staker share incorrect - time drift detected!");
     }
 
@@ -1198,7 +1190,7 @@ contract StreamingRewardsTest is Test {
 
         // Before stake increase: rewards should be based on stake S only
         proverStaking.settleProverStreaming(prover1);
-        uint256 rewardsBeforeStakeIncrease = proverStaking.getPendingRewards(prover1, prover1);
+        (,,, uint256 rewardsBeforeStakeIncrease) = proverStaking.getStakeInfo(prover1, prover1);
         // Expected: 10 seconds * 1 token/sec = 10 tokens (all to prover, no other stakers)
         assertEq(rewardsBeforeStakeIncrease, 10e18, "Pre-stake-increase rewards incorrect");
 
@@ -1220,12 +1212,12 @@ contract StreamingRewardsTest is Test {
         // Expected with fix: Rewards in (t1, t2] use S+ΔS = 150 tokens
         // 5 seconds * 1 token/sec = 5 tokens total
         // Prover gets: commission (10% of 5) + staking portion (100/150 of 4.5) = 0.5 + 3 = 3.5 tokens
-        uint256 proverRewardsAfter = proverStaking.getPendingRewards(prover1, prover1);
+        (,,, uint256 proverRewardsAfter) = proverStaking.getStakeInfo(prover1, prover1);
         // Allow for small rounding errors (within 1000 wei)
         assertApproxEqAbs(proverRewardsAfter, 3.5e18, 1000, "Post-stake-increase prover rewards incorrect");
 
         // Staker should get: 50/150 of 4.5 = 1.5 tokens
-        uint256 stakerRewards = proverStaking.getPendingRewards(prover1, staker1);
+        (,,, uint256 stakerRewards) = proverStaking.getStakeInfo(prover1, staker1);
         assertApproxEqAbs(stakerRewards, 1.5e18, 1000, "Post-stake-increase staker rewards incorrect");
 
         // Critical: No overpayment due to new stake being counted for earlier time
@@ -1252,8 +1244,8 @@ contract StreamingRewardsTest is Test {
 
         // Before unstake: settle and capture rewards at higher stake level
         proverStaking.settleProverStreaming(prover1);
-        uint256 proverRewardsBefore = proverStaking.getPendingRewards(prover1, prover1);
-        uint256 stakerRewardsBefore = proverStaking.getPendingRewards(prover1, staker1);
+        (,,, uint256 proverRewardsBefore) = proverStaking.getStakeInfo(prover1, prover1);
+        (,,, uint256 stakerRewardsBefore) = proverStaking.getStakeInfo(prover1, staker1);
 
         // Expected: 8 seconds * 2 tokens/sec = 16 tokens total
         // Prover: commission (10% of 16) + staking (100/200 of 14.4) = 1.6 + 7.2 = 8.8 tokens
@@ -1281,11 +1273,11 @@ contract StreamingRewardsTest is Test {
         // Expected with fix: Rewards in (t1, t2] use reduced stake = 150 tokens
         // 6 seconds * 2 tokens/sec = 12 tokens total
         // Prover: commission (10% of 12) + staking (100/150 of 10.8) = 1.2 + 7.2 = 8.4 tokens
-        uint256 proverRewardsAfter = proverStaking.getPendingRewards(prover1, prover1);
+        (,,, uint256 proverRewardsAfter) = proverStaking.getStakeInfo(prover1, prover1);
         assertEq(proverRewardsAfter, 8.4e18, "Post-unstake prover rewards incorrect");
 
         // Remaining staker: 50/150 of 10.8 = 3.6 tokens
-        uint256 stakerRewardsAfter = proverStaking.getPendingRewards(prover1, staker1);
+        (,,, uint256 stakerRewardsAfter) = proverStaking.getStakeInfo(prover1, staker1);
         assertEq(stakerRewardsAfter, 3.6e18, "Post-unstake staker rewards incorrect");
 
         // Verify total matches expected
@@ -1319,7 +1311,7 @@ contract StreamingRewardsTest is Test {
         proverStaking.slash(prover1, slashPercentage);
 
         // Verify streaming rewards up to t1 were priced at pre-slash stake
-        uint256 proverRewardsAtSlash = proverStaking.getPendingRewards(prover1, prover1);
+        (,,, uint256 proverRewardsAtSlash) = proverStaking.getStakeInfo(prover1, prover1);
         // Expected: 4 seconds * 5 tokens/sec = 20 tokens (all to prover, no other stakers)
         assertEq(proverRewardsAtSlash, 20e18, "Rewards up to slash should use pre-slash stake");
 
@@ -1334,7 +1326,7 @@ contract StreamingRewardsTest is Test {
 
         // Check auto-deactivation if scale drops below MIN_SCALE_FACTOR
         // (In this case 50% remaining > MIN_SCALE_FACTOR typically, so should remain active)
-        (ProverStaking.ProverState state,,,,,,) = proverStaking.getProverDetails(prover1);
+        (ProverStaking.ProverState state,,,,,,) = proverStaking.getProverInfo(prover1);
         // Assuming MIN_SCALE_FACTOR is something like 10%, prover should still be active at 50%
         assertTrue(state == ProverStaking.ProverState.Active, "Prover should remain active after 50% slash");
 
@@ -1351,7 +1343,7 @@ contract StreamingRewardsTest is Test {
 
         // Expected with fix: Rewards in (t1, t2] use reduced stake
         // 3 seconds * 5 tokens/sec = 15 tokens total
-        uint256 proverRewardsPostSlash = proverStaking.getPendingRewards(prover1, prover1);
+        (,,, uint256 proverRewardsPostSlash) = proverStaking.getStakeInfo(prover1, prover1);
         assertEq(proverRewardsPostSlash, 15e18, "Post-slash rewards should use reduced stake");
 
         // Verify effective stake is correctly reduced for ongoing calculations
@@ -1444,9 +1436,9 @@ contract StreamingRewardsTest is Test {
 
         // Get actual pending rewards (prover gets commission + staking rewards)
         uint256 commission = (1000e18 * 1000) / 10000; // 10% = 100 tokens
-        uint256 actualProverReward = proverStaking.getPendingRewards(prover, prover1);
-        uint256 actualStaker1Reward = proverStaking.getPendingRewards(prover, staker1);
-        uint256 actualStaker2Reward = proverStaking.getPendingRewards(prover, staker2);
+        (,,, uint256 actualProverReward) = proverStaking.getStakeInfo(prover, prover1);
+        (,,, uint256 actualStaker1Reward) = proverStaking.getStakeInfo(prover, staker1);
+        (,,, uint256 actualStaker2Reward) = proverStaking.getStakeInfo(prover, staker2);
 
         // Verify rewards
         assertEq(actualProverReward, commission + proverShare, "Prover should get commission + staking share");
@@ -1466,15 +1458,13 @@ contract StreamingRewardsTest is Test {
         proverStaking.withdrawRewards(prover);
 
         // After withdrawals, pending rewards should be 0
-        assertEq(
-            proverStaking.getPendingRewards(prover, prover1), 0, "Prover pending rewards should be 0 after withdrawal"
-        );
-        assertEq(
-            proverStaking.getPendingRewards(prover, staker1), 0, "Staker1 pending rewards should be 0 after withdrawal"
-        );
-        assertEq(
-            proverStaking.getPendingRewards(prover, staker2), 0, "Staker2 pending rewards should be 0 after withdrawal"
-        );
+        uint256 _pending;
+        (,,, _pending) = proverStaking.getStakeInfo(prover, prover1);
+        assertEq(_pending, 0, "Prover pending rewards should be 0 after withdrawal");
+        (,,, _pending) = proverStaking.getStakeInfo(prover, staker1);
+        assertEq(_pending, 0, "Staker1 pending rewards should be 0 after withdrawal");
+        (,,, _pending) = proverStaking.getStakeInfo(prover, staker2);
+        assertEq(_pending, 0, "Staker2 pending rewards should be 0 after withdrawal");
     }
 
     function test_StreamingDenominatorIntegrity() public {
@@ -1501,7 +1491,7 @@ contract StreamingRewardsTest is Test {
 
         // Capture state before P2's large stake increase
         (,, uint256 globalAccBefore,,) = proverStaking.getStreamingInfo();
-        uint256 prover2Before = proverStaking.getPendingRewards(prover2, prover2);
+        (,,, uint256 prover2Before) = proverStaking.getStakeInfo(prover2, prover2);
 
         // Expected streaming rewards for elapsed time
         uint256 expectedRewards = rate * elapsedTime; // 100e18
@@ -1541,7 +1531,7 @@ contract StreamingRewardsTest is Test {
 
     function _verifyRewardDistribution(uint256 prover2Before, uint256 expectedRewards, uint256 initialTotal) internal {
         // Get rewards after stake operation - but P1 needs settlement to see streaming rewards
-        uint256 prover2After = proverStaking.getPendingRewards(prover2, prover2);
+        (,,, uint256 prover2After) = proverStaking.getStakeInfo(prover2, prover2);
 
         // Trigger settlement for P1 to get their streaming rewards
         vm.prank(prover1);
@@ -1574,7 +1564,7 @@ contract StreamingRewardsTest is Test {
         (,, uint256 globalAccBefore, uint256 totalEffectiveBefore,) = proverStaking.getStreamingInfo();
         assertEq(totalEffectiveBefore, 100e18, "Initial total effective should be 100");
 
-        uint256 pendingBefore = proverStaking.getPendingRewards(prover1, prover1);
+        (,,, uint256 pendingBefore) = proverStaking.getStakeInfo(prover1, prover1);
 
         // Deactivate prover - should settle streaming and adjust denominator
         vm.prank(owner);
@@ -1585,7 +1575,7 @@ contract StreamingRewardsTest is Test {
         assertTrue(globalAccAfter > globalAccBefore, "Global accumulator should increase on settlement");
         assertEq(totalEffectiveAfter, 0, "Total effective should be 0 after deactivation");
 
-        uint256 pendingAfter = proverStaking.getPendingRewards(prover1, prover1);
+        (,,, uint256 pendingAfter) = proverStaking.getStakeInfo(prover1, prover1);
         assertTrue(pendingAfter > pendingBefore, "Prover should have accrued streaming rewards");
 
         // Let more time pass while deactivated
@@ -1600,11 +1590,11 @@ contract StreamingRewardsTest is Test {
         assertEq(totalEffectiveReactivate, 100e18, "Total effective should be restored");
 
         // Get prover's reward debt by checking if additional streaming doesn't increase pending rewards
-        uint256 pendingAtReactivation = proverStaking.getPendingRewards(prover1, prover1);
+        (,,, uint256 pendingAtReactivation) = proverStaking.getStakeInfo(prover1, prover1);
 
         // Small time advancement should accrue rewards since rewardDebtEff baseline is working
         vm.warp(block.timestamp + 1);
-        uint256 pendingAfterSmallTime = proverStaking.getPendingRewards(prover1, prover1);
+        (,,, uint256 pendingAfterSmallTime) = proverStaking.getStakeInfo(prover1, prover1);
 
         // Should accrue approximately 1 token for 1 second (rate=1e18 per second, 100% of stake)
         // But pending rewards need manual settlement to be visible, so we expect same value
@@ -1636,7 +1626,7 @@ contract StreamingRewardsTest is Test {
 
         // Try to retire with active stakes - should fail
         vm.prank(prover1);
-        vm.expectRevert("Active stakes remaining");
+        vm.expectRevert(TestErrors.ActiveStakesRemain.selector);
         proverStaking.retireProver();
 
         // Try to retire with pending commission - first remove stakes
@@ -1657,7 +1647,7 @@ contract StreamingRewardsTest is Test {
 
         // Should still fail due to pending commission
         vm.prank(prover1);
-        vm.expectRevert("Commission remaining");
+        vm.expectRevert(TestErrors.CommissionRemain.selector);
         proverStaking.retireProver();
 
         // Withdraw commission first
@@ -1669,7 +1659,7 @@ contract StreamingRewardsTest is Test {
         proverStaking.retireProver();
 
         // Verify retirement state
-        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state,,,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state == ProverStaking.ProverState.Retired, "Prover should be retired");
 
         _testUnretirePolicy(prover1);
@@ -1704,7 +1694,7 @@ contract StreamingRewardsTest is Test {
         assertEq(effectiveStake, 100e18, "Effective stake should equal stake amount after scale reset");
 
         // Verify prover eligibility - should be active and meet requirements
-        (ProverStaking.ProverState stateAfter,,,,) = proverStaking.getProverInfo(prover);
+        (ProverStaking.ProverState stateAfter,,,,,,) = proverStaking.getProverInfo(prover);
         assertTrue(stateAfter == ProverStaking.ProverState.Active, "Prover should be active after unretire");
 
         // Verify eligibility computations
@@ -1713,7 +1703,7 @@ contract StreamingRewardsTest is Test {
 
         // Verify minimum stake requirements are met
         uint256 selfEffective = _getEffectiveAmount(prover, _getSelfRawShares(prover));
-        (, uint256 minSelfStake,,,) = proverStaking.getProverInfo(prover);
+        (, uint256 minSelfStake,,,,,) = proverStaking.getProverInfo(prover);
         uint256 globalMin = proverStaking.globalMinSelfStake();
         assertTrue(selfEffective >= minSelfStake, "Should meet prover min self-stake");
         assertTrue(selfEffective >= globalMin, "Should meet global min self-stake");

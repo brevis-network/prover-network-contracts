@@ -5,6 +5,7 @@ import "forge-std/Test.sol";
 import {TestProverStaking} from "./TestProverStaking.sol";
 import {ProverStaking} from "../src/ProverStaking.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
+import {TestErrors} from "./utils/TestErrors.sol";
 
 /**
  * @title Staking Advanced Test Suite
@@ -142,7 +143,7 @@ contract StakingAdvancedTest is Test {
 
         // Check commission is correctly calculated
         uint256 expectedCommission = (rewardAmount * 2000) / 10000; // 20%
-        (,,,,, uint256 actualCommission,) = proverStaking.getProverDetails(prover1);
+        (,,,,, uint256 actualCommission,) = proverStaking.getProverInfo(prover1);
         assertEq(actualCommission, expectedCommission, "Commission should be 20% of rewards");
     }
 
@@ -163,7 +164,7 @@ contract StakingAdvancedTest is Test {
         vm.prank(owner);
         proverStaking.slash(prover1, 500000); // 50%
 
-        (,,, uint256 totalStake,) = proverStaking.getProverInfo(prover1);
+        (,,, uint256 totalStake,,,) = proverStaking.getProverInfo(prover1);
         uint256 expectedRemaining = (MIN_SELF_STAKE + massiveStake) / 2; // 50%
         assertApproxEqRel(totalStake, expectedRemaining, 1e15);
     }
@@ -176,22 +177,22 @@ contract StakingAdvancedTest is Test {
         proverStaking.slash(prover1, 500000); // 50% slash - leaves 50%
 
         // Verify still active after first slash
-        (ProverStaking.ProverState state1,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state1,,,,,,) = proverStaking.getProverInfo(prover1);
         assertEq(uint256(state1), uint256(ProverStaking.ProverState.Active));
 
         proverStaking.slash(prover1, 500000); // 50% of remaining - leaves 25% total
 
         // Verify still active after second slash (still above 20% threshold)
-        (ProverStaking.ProverState state2,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state2,,,,,,) = proverStaking.getProverInfo(prover1);
         assertEq(uint256(state2), uint256(ProverStaking.ProverState.Active));
 
         proverStaking.slash(prover1, 500000); // 50% of remaining - leaves 12.5% total
 
         // NOW should be auto-deactivated (below 20% threshold)
-        (ProverStaking.ProverState finalState,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState finalState,,,,,,) = proverStaking.getProverInfo(prover1);
         assertEq(uint256(finalState), uint256(ProverStaking.ProverState.Deactivated));
 
-        (,,, uint256 finalStake,) = proverStaking.getProverInfo(prover1);
+        (,,, uint256 finalStake,,,) = proverStaking.getProverInfo(prover1);
         uint256 originalStake = MIN_SELF_STAKE + 4000e18; // 14000e18
         // After 3 slashes of 50% each: 14000 * (0.5)^3 = 14000 * 0.125 = 1750e18
         uint256 expectedFinalStake = originalStake / 8; // 12.5% remaining
@@ -626,7 +627,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.stake(prover1, 100e18);
 
         // Cannot retire with active stakes
-        vm.expectRevert("Active stakes remaining");
+        vm.expectRevert(TestErrors.ActiveStakesRemain.selector);
         vm.prank(prover1);
         proverStaking.retireProver();
 
@@ -651,7 +652,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.retireProver();
 
         // Verify prover is retired
-        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state,,,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state == ProverStaking.ProverState.Retired, "Prover should be retired");
     }
 
@@ -678,7 +679,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.retireProver(prover1);
 
         // Try to retire again
-        vm.expectRevert("Cannot retire from current state");
+        vm.expectRevert(TestErrors.InvalidProverState.selector);
         vm.prank(owner);
         proverStaking.retireProver(prover1);
     }
@@ -756,7 +757,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.unretireProver();
 
         // Verify configuration is preserved
-        (, uint256 minSelfStake, uint64 commissionRate,,) = proverStaking.getProverInfo(prover1);
+        (, uint256 minSelfStake, uint64 commissionRate,,,,) = proverStaking.getProverInfo(prover1);
         assertEq(minSelfStake, customMinSelfStake, "Min self-stake should be preserved");
         assertEq(commissionRate, customCommissionRate, "Commission rate should be preserved");
 
@@ -821,11 +822,10 @@ contract StakingAdvancedTest is Test {
         vm.prank(prover1);
         proverStaking.updateMinSelfStake(newMinStake);
 
-        // Should be applied immediately
-        (, uint256 currentMin,,,) = proverStaking.getProverInfo(prover1);
+        // Should be applied immediately (no pending update created for increases)
+        (, uint256 currentMin,,,,,) = proverStaking.getProverInfo(prover1);
         assertEq(currentMin, newMinStake, "Increase should be applied immediately");
 
-        // Should have no pending update
         (bool hasPending,,,) = proverStaking.getPendingMinSelfStakeUpdate(prover1);
         assertFalse(hasPending, "Should have no pending update after immediate increase");
     }
@@ -850,7 +850,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.updateMinSelfStake(newMinStake);
 
         // Should be applied immediately for retired prover
-        (, uint256 currentMin,,,) = proverStaking.getProverInfo(prover1);
+        (, uint256 currentMin,,,,,) = proverStaking.getProverInfo(prover1);
         assertEq(currentMin, newMinStake, "Decrease should be applied immediately for retired prover");
 
         // Should have no pending update
@@ -868,7 +868,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.updateMinSelfStake(newMinStake);
 
         // Should not be applied immediately
-        (, uint256 currentMin,,,) = proverStaking.getProverInfo(prover1);
+        (, uint256 currentMin,,,,,) = proverStaking.getProverInfo(prover1);
         assertEq(currentMin, MIN_SELF_STAKE, "Decrease should not be applied immediately for active prover");
 
         // Should have pending update
@@ -884,7 +884,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.completeMinSelfStakeUpdate();
 
         // Should be applied now
-        (, currentMin,,,) = proverStaking.getProverInfo(prover1);
+        (, currentMin,,,,,) = proverStaking.getProverInfo(prover1);
         assertEq(currentMin, newMinStake, "Decrease should be applied after delay");
 
         // Should have no pending update
@@ -905,7 +905,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.updateMinSelfStake(newMinStake);
 
         // Should not be applied immediately
-        (, uint256 currentMin,,,) = proverStaking.getProverInfo(prover1);
+        (, uint256 currentMin,,,,,) = proverStaking.getProverInfo(prover1);
         assertEq(currentMin, MIN_SELF_STAKE, "Decrease should not be applied immediately for deactivated prover");
 
         // Should have pending update
@@ -930,7 +930,7 @@ contract StakingAdvancedTest is Test {
 
         // Try to update below global minimum
         vm.prank(prover1);
-        vm.expectRevert("Below global minimum self stake");
+        vm.expectRevert(TestErrors.GlobalMinSelfStakeNotMet.selector);
         proverStaking.updateMinSelfStake(50 ether);
     }
 
@@ -944,7 +944,7 @@ contract StakingAdvancedTest is Test {
 
         // Try to complete before delay
         vm.prank(prover1);
-        vm.expectRevert("Update delay not yet passed");
+        vm.expectRevert(TestErrors.MinStakeDelay.selector);
         proverStaking.completeMinSelfStakeUpdate();
     }
 
@@ -954,7 +954,7 @@ contract StakingAdvancedTest is Test {
 
         // Try to complete without pending update
         vm.prank(prover1);
-        vm.expectRevert("No pending minSelfStake update");
+        vm.expectRevert(TestErrors.NoPendingMinStakeUpdate.selector);
         proverStaking.completeMinSelfStakeUpdate();
     }
 
@@ -988,7 +988,7 @@ contract StakingAdvancedTest is Test {
 
         // Try to update from different address
         vm.prank(user);
-        vm.expectRevert("Not a prover");
+        vm.expectRevert(TestErrors.ProverNotRegistered.selector);
         proverStaking.updateMinSelfStake(15_000e18);
 
         // Try to complete from different address
@@ -997,7 +997,7 @@ contract StakingAdvancedTest is Test {
 
         vm.warp(block.timestamp + 7 days + 1);
         vm.prank(user);
-        vm.expectRevert("Not a prover");
+        vm.expectRevert(TestErrors.ProverNotRegistered.selector);
         proverStaking.completeMinSelfStakeUpdate();
     }
 
@@ -1023,7 +1023,7 @@ contract StakingAdvancedTest is Test {
         // Try to complete before new delay period
         vm.warp(block.timestamp + 7 days + 1);
         vm.prank(prover1);
-        vm.expectRevert("Update delay not yet passed");
+        vm.expectRevert(TestErrors.MinStakeDelay.selector);
         proverStaking.completeMinSelfStakeUpdate();
 
         // Should work after new delay period
@@ -1032,7 +1032,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.completeMinSelfStakeUpdate();
 
         // Should be applied now
-        (, uint256 currentMin,,,) = proverStaking.getProverInfo(prover1);
+        (, uint256 currentMin,,,,,) = proverStaking.getProverInfo(prover1);
         assertEq(currentMin, 5_000e18, "Decrease should be applied after new delay");
     }
 
@@ -1074,7 +1074,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.completeMinSelfStakeUpdate();
 
         // Should be applied
-        (, uint256 currentMin,,,) = proverStaking.getProverInfo(prover1);
+        (, uint256 currentMin,,,,,) = proverStaking.getProverInfo(prover1);
         assertEq(currentMin, 5_000e18, "Decrease should be applied");
     }
 
@@ -1083,7 +1083,7 @@ contract StakingAdvancedTest is Test {
         _initializeProver(prover1);
 
         // Verify initial commission rate
-        (,, uint64 initialRate,,) = proverStaking.getProverInfo(prover1);
+        (,, uint64 initialRate,,,,) = proverStaking.getProverInfo(prover1);
         assertEq(initialRate, COMMISSION_RATE, "Initial commission rate should match");
 
         // Update commission rate to a new value
@@ -1094,7 +1094,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.updateCommissionRate(newCommissionRate);
 
         // Verify commission rate was updated
-        (,, uint64 updatedRate,,) = proverStaking.getProverInfo(prover1);
+        (,, uint64 updatedRate,,,,) = proverStaking.getProverInfo(prover1);
         assertEq(updatedRate, newCommissionRate, "Commission rate should be updated");
     }
 
@@ -1104,25 +1104,31 @@ contract StakingAdvancedTest is Test {
 
         // Try to set commission rate above 100%
         vm.prank(prover1);
-        vm.expectRevert("Invalid commission rate");
+        vm.expectRevert(TestErrors.InvalidCommission.selector);
         proverStaking.updateCommissionRate(10001); // 100.01%
     }
 
     function test_CannotUpdateCommissionRateNotProver() public {
         // Try to update commission rate without being a prover
         vm.prank(user);
-        vm.expectRevert("Not a prover");
+        vm.expectRevert(TestErrors.ProverNotRegistered.selector);
         proverStaking.updateCommissionRate(1000);
     }
 
-    function test_CannotUpdateCommissionRateNoChange() public {
+    function test_UpdateCommissionRateSameValueNoRevert() public {
         // Initialize prover
         _initializeProver(prover1);
 
-        // Try to set same commission rate
+        // Capture current rate
+        (,, uint64 beforeRate,,,,) = proverStaking.getProverInfo(prover1);
+        assertEq(beforeRate, COMMISSION_RATE, "Precondition");
+
+        // Update with same value should not revert and rate stays same
         vm.prank(prover1);
-        vm.expectRevert("No change in commission rate");
         proverStaking.updateCommissionRate(COMMISSION_RATE);
+
+        (,, uint64 afterRate,,,,) = proverStaking.getProverInfo(prover1);
+        assertEq(afterRate, beforeRate, "Rate should remain unchanged");
     }
 
     function test_CommissionRateUpdateAffectsFutureRewards() public {
@@ -1131,7 +1137,7 @@ contract StakingAdvancedTest is Test {
         _stakeToProver(staker1, prover1, 1000e18);
 
         // Check initial commission rate
-        (,, uint64 initialRate,,) = proverStaking.getProverInfo(prover1);
+        (,, uint64 initialRate,,,,) = proverStaking.getProverInfo(prover1);
         assertEq(initialRate, COMMISSION_RATE, "Initial rate should be 10%");
 
         // Update commission rate to 20%
@@ -1139,7 +1145,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.updateCommissionRate(2000);
 
         // Verify commission rate was updated
-        (,, uint64 newRate,,) = proverStaking.getProverInfo(prover1);
+        (,, uint64 newRate,,,,) = proverStaking.getProverInfo(prover1);
         assertEq(newRate, 2000, "Commission rate should be updated to 20%");
 
         // Add rewards after rate change - this should use the new rate
@@ -1161,14 +1167,14 @@ contract StakingAdvancedTest is Test {
         _stakeToProver(staker1, prover1, 1000e18);
 
         // Try to slash more than 50% - should revert
-        vm.expectRevert("Slash percentage too high");
+        vm.expectRevert(TestErrors.SlashTooHigh.selector);
         proverStaking.slash(prover1, 500001); // 50.0001%
 
         // Slash exactly 50% - should work
         proverStaking.slash(prover1, 500000); // 50%
 
         // Verify prover is still active after 50% slash
-        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state,,,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state == ProverStaking.ProverState.Active, "Prover should still be active after 50% slash");
     }
 
@@ -1187,11 +1193,11 @@ contract StakingAdvancedTest is Test {
         // After 3 slashes: 1e18 * (0.5)^3 = 1.25e17 (12.5%) - below 20% threshold
 
         proverStaking.slash(prover1, 500000); // 1st slash - 50%
-        (ProverStaking.ProverState state1,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state1,,,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state1 == ProverStaking.ProverState.Active, "Prover should still be active after 1st slash");
 
         proverStaking.slash(prover1, 500000); // 2nd slash - 25% remaining
-        (ProverStaking.ProverState state2,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state2,,,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state2 == ProverStaking.ProverState.Active, "Prover should still be active after 2nd slash");
 
         // Check scale after 2 slashes
@@ -1202,7 +1208,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.slash(prover1, 500000); // 3rd slash
 
         // Verify prover is now deactivated
-        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state,,,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(
             state == ProverStaking.ProverState.Deactivated,
             "Prover should be auto-deactivated after scale drops below 20%"
