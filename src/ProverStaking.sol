@@ -347,17 +347,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             prover.stakers.add(msg.sender);
         }
 
-        // === REWARD ACCOUNTING ===
-        // Update pending rewards before changing stake to ensure accurate reward calculation
-        uint256 accRewardPerRawShare = prover.accRewardPerRawShare;
-        if (stakeInfo.rawShares > 0) {
-            // Calculate accrued proof rewards since last update
-            uint256 accrued = (stakeInfo.rawShares * accRewardPerRawShare) / SCALE_FACTOR;
-            uint256 delta = accrued - stakeInfo.rewardDebt;
-            if (delta > 0) {
-                stakeInfo.pendingRewards += delta;
-            }
-        }
+        // === REWARD ACCOUNTING === (pre-share-change accrual)
+        uint256 accRewardPerRawShare = _settleProofRewards(prover, stakeInfo);
 
         // === SHARE MINTING ===
         // Update stake amount (in raw shares) - follows CEI (Checks-Effects-Interactions) pattern
@@ -435,17 +426,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             }
         }
 
-        // === REWARD ACCOUNTING ===
-        // Update pending rewards before changing stake
-        uint256 accRewardPerRawShare = prover.accRewardPerRawShare;
-        if (stakeInfo.rawShares > 0) {
-            // Update proof rewards
-            uint256 accrued = (stakeInfo.rawShares * accRewardPerRawShare) / SCALE_FACTOR;
-            uint256 delta = accrued - stakeInfo.rewardDebt;
-            if (delta > 0) {
-                stakeInfo.pendingRewards += delta;
-            }
-        }
+        // === REWARD ACCOUNTING === (pre-share-change accrual)
+        uint256 accRewardPerRawShare = _settleProofRewards(prover, stakeInfo);
 
         // === SHARE BURNING ===
         // Update stake amount (in raw shares) - CEI ordering
@@ -804,6 +786,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             // Update global streaming before setting baseline
             if (globalRatePerSec > 0) {
                 _updateGlobalStreaming();
+                _settleProverStreaming(msg.sender);
             }
             prover.rewardDebtEff = (newEffectiveStake * globalAccPerEff) / SCALE_FACTOR;
         }
@@ -1537,6 +1520,23 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             // Inactive prover - their stake is not part of totalEffectiveActive
             // No update needed as they don't contribute to the active total
         }
+    }
+
+    /// @dev Settle proof rewards for a stake before mutating rawShares; returns current accRewardPerRawShare.
+    function _settleProofRewards(ProverInfo storage prover, StakeInfo storage stakeInfo)
+        internal
+        returns (uint256 accRewardPerRawShare)
+    {
+        accRewardPerRawShare = prover.accRewardPerRawShare;
+        uint256 rawShares = stakeInfo.rawShares;
+        if (rawShares == 0) return accRewardPerRawShare;
+        uint256 accrued = (rawShares * accRewardPerRawShare) / SCALE_FACTOR;
+        uint256 prevDebt = stakeInfo.rewardDebt;
+        if (accrued > prevDebt) {
+            stakeInfo.pendingRewards += (accrued - prevDebt);
+        }
+        // rewardDebt updated by caller after rawShares mutation
+        return accRewardPerRawShare;
     }
 
     // =========================================================================
