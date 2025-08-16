@@ -358,16 +358,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         // Update reward debt based on new raw shares to prevent double-claiming
         stakeInfo.rewardDebt = (stakeInfo.rawShares * accRewardPerRawShare) / SCALE_FACTOR;
 
-        // Update total effective active stake for streaming calculations
-        uint256 newEffectiveStake = _getTotalEffectiveStake(_prover);
-
-        // === STREAMING DEBT RESET ===
-        // Reset streaming debt to prevent accounting drift with new effective stake
-        if (prover.state == ProverState.Active && newEffectiveStake > 0) {
-            prover.rewardDebtEff = (newEffectiveStake * globalAccPerEff) / SCALE_FACTOR;
-        }
-
-        _updateTotalEffectiveActive(_prover, oldEffectiveStake, newEffectiveStake);
+        // Effective stake delta epilogue (streaming + active total update)
+        _afterEffectiveStakeChange(_prover, oldEffectiveStake);
 
         emit Staked(msg.sender, _prover, _amount, newRawShares);
     }
@@ -446,16 +438,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         // Update reward debt based on new raw shares
         stakeInfo.rewardDebt = (stakeInfo.rawShares * accRewardPerRawShare) / SCALE_FACTOR;
 
-        // Update total effective active stake for streaming calculations
-        uint256 newEffectiveStake = _getTotalEffectiveStake(_prover);
-
-        // === STREAMING DEBT RESET ===
-        // Reset streaming debt to prevent accounting drift with new effective stake
-        if (prover.state == ProverState.Active && newEffectiveStake > 0) {
-            prover.rewardDebtEff = (newEffectiveStake * globalAccPerEff) / SCALE_FACTOR;
-        }
-
-        _updateTotalEffectiveActive(_prover, oldEffectiveStake, newEffectiveStake);
+        // Effective stake delta epilogue (streaming + active total update)
+        _afterEffectiveStakeChange(_prover, oldEffectiveStake);
 
         emit UnstakeRequested(msg.sender, _prover, _amount, rawSharesToUnstake);
     }
@@ -720,12 +704,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         uint256 totalSlashed = totalEffectiveBefore - totalEffectiveAfter;
         treasuryPool += totalSlashed;
 
-        // === STREAMING DEBT RESET ===
-        // Reset streaming debt to prevent accounting drift with new effective stake
-        if (prover.state == ProverState.Active && totalEffectiveAfter > 0) {
-            prover.rewardDebtEff = (totalEffectiveAfter * globalAccPerEff) / SCALE_FACTOR;
-        }
-
         // === AUTO-DEACTIVATION CHECK ===
         // If scale at or below DEACTIVATION_SCALE, deactivate (but allow future slashes until hard floor).
         if (prover.scale <= DEACTIVATION_SCALE && prover.state == ProverState.Active) {
@@ -733,9 +711,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             activeProvers.remove(_prover);
             emit ProverDeactivated(_prover);
         }
-
-        // Update total effective active stake for streaming calculations
-        _updateTotalEffectiveActive(_prover, totalEffectiveBefore, totalEffectiveAfter);
+        // Effective stake delta epilogue (streaming + active total update)
+        _afterEffectiveStakeChange(_prover, totalEffectiveBefore);
 
         emit ProverSlashed(_prover, _percentage, totalSlashed);
     }
@@ -1501,6 +1478,16 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         prover.rewardDebtEff = totalOwed;
 
         emit StreamingRewardsSettled(_prover, newDebt, commission, stakersReward);
+    }
+
+    /// @dev Unified epilogue after effective stake mutation in stake / requestUnstake.
+    function _afterEffectiveStakeChange(address _prover, uint256 oldEffectiveStake) internal {
+        ProverInfo storage prover = provers[_prover];
+        uint256 newEffectiveStake = _getTotalEffectiveStake(_prover);
+        if (prover.state == ProverState.Active && newEffectiveStake > 0) {
+            prover.rewardDebtEff = (newEffectiveStake * globalAccPerEff) / SCALE_FACTOR;
+        }
+        _updateTotalEffectiveActive(_prover, oldEffectiveStake, newEffectiveStake);
     }
 
     /**
