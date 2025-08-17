@@ -74,6 +74,7 @@ contract StakingTest is Test {
         assertTrue(state == ProverStaking.ProverState.Active);
         assertEq(minSelfStake, MIN_SELF_STAKE);
         assertEq(totalStaked, MIN_SELF_STAKE);
+        assertEq(selfEffectiveStake, MIN_SELF_STAKE);
         assertEq(stakersCount, 1); // Prover counts as one staker
 
         // Verify prover's stake
@@ -419,7 +420,7 @@ contract StakingTest is Test {
 
         vm.prank(owner);
         vm.expectEmit(false, false, false, true);
-        emit GlobalMinSelfStakeUpdated(GLOBAL_MIN_SELF_STAKE, newGlobalMin);
+        emit GlobalMinSelfStakeUpdated(newGlobalMin);
         proverStaking.setGlobalMinSelfStake(newGlobalMin);
 
         assertEq(proverStaking.globalMinSelfStake(), newGlobalMin, "Global min self stake should be updated");
@@ -430,7 +431,7 @@ contract StakingTest is Test {
 
         vm.prank(owner);
         vm.expectEmit(false, false, false, true);
-        emit MinSelfStakeDecreaseDelayUpdated(7 days, newDelay);
+        emit MinSelfStakeDecreaseDelayUpdated(newDelay);
         proverStaking.setMinSelfStakeDecreaseDelay(newDelay);
 
         assertEq(proverStaking.minSelfStakeDecreaseDelay(), newDelay, "MinSelfStake decrease delay should be updated");
@@ -887,8 +888,8 @@ contract StakingTest is Test {
     // ========== HELPER FUNCTIONS ==========
 
     // Add the event declarations
-    event GlobalMinSelfStakeUpdated(uint256 oldMinStake, uint256 newMinStake);
-    event MinSelfStakeDecreaseDelayUpdated(uint256 oldDelay, uint256 newDelay);
+    event GlobalMinSelfStakeUpdated(uint256 newMinStake);
+    event MinSelfStakeDecreaseDelayUpdated(uint256 newDelay);
     event ProverDeactivated(address indexed prover);
     event ProverRetired(address indexed prover);
     event ProverUnretired(address indexed prover);

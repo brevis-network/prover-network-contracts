@@ -205,7 +205,7 @@ function addRewards(address _prover, uint256 _totalRewards) {
         // Handle dust from integer division
         uint256 distributed = (deltaAcc * totalRawShares) / SCALE_FACTOR;
         uint256 dust = stakersReward - distributed;
-        dustPool += dust; // Bounded dust accumulation
+        treasuryPool += dust; // Bounded dust accumulation
     } else {
         // No stakers exist - all rewards go to prover as commission
         proverRewards[_prover].pendingCommission += stakersReward;

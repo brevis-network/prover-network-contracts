@@ -45,11 +45,11 @@ contract ProverRewards is ReentrancyGuard, AccessControl {
     // =========================================================================
 
     // External contracts
-    IProverStaking public immutable proverStaking;
-    address public immutable rewardToken;
+    IProverStaking public proverStaking;
+    address public rewardToken;
 
     // Global pool of reward dust from rounding errors
-    uint256 public dustPool;
+    uint256 public treasuryPool;
 
     // Prover-specific reward data
     mapping(address => ProverRewardInfo) internal proverRewards;
@@ -81,7 +81,7 @@ contract ProverRewards is ReentrancyGuard, AccessControl {
     event CommissionRateUpdated(address indexed prover, uint64 oldCommissionRate, uint64 newCommissionRate);
     event RewardsAdded(address indexed prover, uint256 amount, uint256 commission, uint256 distributed);
     event RewardsWithdrawn(address indexed staker, address indexed prover, uint256 amount);
-    event DustPoolWithdrawn(address indexed to, uint256 amount);
+    event TreasuryPoolWithdrawn(address indexed to, uint256 amount);
 
     // =========================================================================
     // CONSTRUCTOR
@@ -93,8 +93,7 @@ contract ProverRewards is ReentrancyGuard, AccessControl {
      * @param _rewardToken Address of the reward token (can be same as staking token)
      */
     constructor(address _proverStaking, address _rewardToken) {
-        proverStaking = IProverStaking(_proverStaking);
-        rewardToken = _rewardToken;
+        _init(_proverStaking, _rewardToken);
     }
 
     /**
@@ -103,8 +102,13 @@ contract ProverRewards is ReentrancyGuard, AccessControl {
      * @param _rewardToken Address of the reward token
      */
     function init(address _proverStaking, address _rewardToken) external {
-        // Implementation for upgradeable version if needed
+        _init(_proverStaking, _rewardToken);
         initOwner();
+    }
+
+    function _init(address _proverStaking, address _rewardToken) private {
+        proverStaking = IProverStaking(_proverStaking);
+        rewardToken = _rewardToken;
     }
 
     // =========================================================================
@@ -193,7 +197,7 @@ contract ProverRewards is ReentrancyGuard, AccessControl {
 
             // Add dust from rounding errors to dust pool (in token units)
             if (dust > 0) {
-                dustPool += dust;
+                treasuryPool += dust;
             }
 
             emit RewardsAdded(_prover, _amount, commission, stakersReward);
@@ -311,18 +315,18 @@ contract ProverRewards is ReentrancyGuard, AccessControl {
      * @param _to The address to send the dust to
      * @param _amount The amount of dust to withdraw
      */
-    function withdrawFromDustPool(address _to, uint256 _amount) external onlyOwner {
+    function withdrawFromTreasuryPool(address _to, uint256 _amount) external onlyOwner {
         require(_to != address(0), "Invalid address");
         if (_amount == 0) revert RewardsZeroAmount();
-        require(_amount <= dustPool, "Insufficient dust pool");
+        require(_amount <= treasuryPool, "Insufficient dust pool");
 
         // Update dust pool accounting
-        dustPool -= _amount;
+        treasuryPool -= _amount;
 
         // Transfer tokens to recipient
         IERC20(rewardToken).safeTransfer(_to, _amount);
 
-        emit DustPoolWithdrawn(_to, _amount);
+        emit TreasuryPoolWithdrawn(_to, _amount);
     }
 
     // =========================================================================
@@ -392,13 +396,5 @@ contract ProverRewards is ReentrancyGuard, AccessControl {
         }
 
         return pendingRewards;
-    }
-
-    /**
-     * @notice Get dust pool balance
-     * @return Current dust pool balance
-     */
-    function getDustPool() external view returns (uint256) {
-        return dustPool;
     }
 }

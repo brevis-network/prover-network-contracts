@@ -1217,7 +1217,7 @@ contract StakingAdvancedTest is Test {
         _stakeToProver(staker1, prover1, 1000e18);
 
         // Check initial treasury pool is empty
-        uint256 initialTreasuryPool = proverStaking.getTreasuryPool();
+        uint256 initialTreasuryPool = proverStaking.treasuryPool();
         assertEq(initialTreasuryPool, 0, "Initial treasury pool should be empty");
 
         // Slash 50% - should move 50% of effective stake to treasury pool
@@ -1225,7 +1225,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.slash(prover1, 500000); // 50%
 
         // Check treasury pool received the slashed amount
-        uint256 treasuryPoolAfter1 = proverStaking.getTreasuryPool();
+        uint256 treasuryPoolAfter1 = proverStaking.treasuryPool();
         uint256 expectedSlashed1 = effectiveStakeBefore / 2; // 50% slashed
         assertEq(treasuryPoolAfter1, expectedSlashed1, "Treasury pool should contain 50% of original stake");
 
@@ -1234,7 +1234,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.slash(prover1, 500000); // 50% of remaining
 
         // Check treasury pool accumulated more slashed tokens
-        uint256 treasuryPoolAfter2 = proverStaking.getTreasuryPool();
+        uint256 treasuryPoolAfter2 = proverStaking.treasuryPool();
         uint256 expectedSlashed2 = expectedSlashed1 + (effectiveStakeAfter1 / 2); // Previous + 25% more
         assertEq(treasuryPoolAfter2, expectedSlashed2, "Treasury pool should accumulate slashed tokens");
 
@@ -1246,7 +1246,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.withdrawFromTreasuryPool(treasury, withdrawAmount);
 
         // Check treasury pool decreased and treasury received tokens
-        uint256 treasuryPoolAfterWithdraw = proverStaking.getTreasuryPool();
+        uint256 treasuryPoolAfterWithdraw = proverStaking.treasuryPool();
         assertEq(
             treasuryPoolAfterWithdraw,
             expectedSlashed2 - withdrawAmount,
@@ -1262,8 +1262,8 @@ contract StakingAdvancedTest is Test {
         // Stake amount that doesn't divide evenly when multiplied by SCALE_FACTOR
         _stakeToProver(staker1, prover1, 333e18); // 333 * 1e18 tokens
 
-        uint256 initialDustPool = proverRewards.dustPool();
-        assertEq(initialDustPool, 0, "Dust pool should start empty");
+        uint256 initialTreasuryPool = proverRewards.treasuryPool();
+        assertEq(initialTreasuryPool, 0, "Dust pool should start empty");
 
         // Add rewards that will create dust
         uint256 rewardAmount = 1e18; // 1 token reward
@@ -1276,7 +1276,7 @@ contract StakingAdvancedTest is Test {
         vm.stopPrank();
 
         // Check if dust pool accumulated dust
-        uint256 dustPoolAfter = proverRewards.dustPool();
+        uint256 treasuryPoolAfter = proverRewards.treasuryPool();
 
         // Calculate expected dust manually using the corrected method
         uint256 commission = (rewardAmount * COMMISSION_RATE) / 10000; // 10% commission
@@ -1291,9 +1291,9 @@ contract StakingAdvancedTest is Test {
         uint256 expectedDust = stakersReward - distributed; // tokens
 
         if (expectedDust > 0) {
-            assertEq(dustPoolAfter, expectedDust, "Dust pool should contain expected dust");
+            assertEq(treasuryPoolAfter, expectedDust, "Dust pool should contain expected dust");
         } else {
-            assertEq(dustPoolAfter, 0, "No dust should be generated in this case");
+            assertEq(treasuryPoolAfter, 0, "No dust should be generated in this case");
         }
     }
 
@@ -1301,7 +1301,7 @@ contract StakingAdvancedTest is Test {
         _initializeProver(prover1);
         _stakeToProver(staker1, prover1, 777e18); // Odd number to encourage dust
 
-        uint256 initialDustPool = proverRewards.dustPool();
+        uint256 initialTreasuryPool = proverRewards.treasuryPool();
 
         // Add multiple small rewards to accumulate dust
         uint256 smallReward = 1e15; // 0.001 tokens
@@ -1316,10 +1316,10 @@ contract StakingAdvancedTest is Test {
         }
         vm.stopPrank();
 
-        uint256 finalDustPool = proverRewards.dustPool();
+        uint256 finalTreasuryPool = proverRewards.treasuryPool();
 
         // Dust pool should have accumulated some dust
-        assertGt(finalDustPool, initialDustPool, "Dust pool should accumulate dust from multiple rewards");
+        assertGt(finalTreasuryPool, initialTreasuryPool, "Dust pool should accumulate dust from multiple rewards");
     }
 
     function test_DustAccumulation_CombinedWithSlashing() public {
@@ -1332,14 +1332,14 @@ contract StakingAdvancedTest is Test {
         brevToken.approve(address(proverRewards), 1e18);
         proverRewards.addRewards(prover1, 1e18);
 
-        uint256 treasuryAfterRewards = proverStaking.getTreasuryPool();
+        uint256 treasuryAfterRewards = proverStaking.treasuryPool();
 
         // Now slash the prover - this should add slashed tokens to treasury pool
         // (owner already has SLASHER_ROLE from setUp)
         proverStaking.slash(prover1, 100000); // 10% slash
         vm.stopPrank();
 
-        uint256 treasuryAfterSlash = proverStaking.getTreasuryPool();
+        uint256 treasuryAfterSlash = proverStaking.treasuryPool();
 
         // Treasury pool should contain both dust from rewards AND slashed tokens
         assertGt(treasuryAfterSlash, treasuryAfterRewards, "Treasury pool should increase from slashing");

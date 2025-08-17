@@ -104,15 +104,22 @@ contract IntegrationTest is Test {
         uint256 expectedStakerReward = (rewardAmount * 9000 / 10000) * stakeAmount / (MIN_SELF_STAKE + stakeAmount); // 90% of rewards, proportional to stake
         uint256 expectedProverReward = rewardAmount - expectedStakerReward; // Commission + proportional stake reward
 
+        // Record balances before withdrawal
+        uint256 staker1BalanceBefore = rewardToken.balanceOf(staker1);
+        uint256 prover1BalanceBefore = rewardToken.balanceOf(prover1);
+
         vm.prank(staker1);
         proverRewards.withdrawRewards(prover1);
 
         vm.prank(prover1);
         proverRewards.withdrawRewards(prover1);
 
-        // Verify reward token balances
-        assertTrue(rewardToken.balanceOf(staker1) > 0);
-        assertTrue(rewardToken.balanceOf(prover1) > 0);
+        // Verify exact reward amounts were distributed
+        uint256 staker1ActualReward = rewardToken.balanceOf(staker1) - staker1BalanceBefore;
+        uint256 prover1ActualReward = rewardToken.balanceOf(prover1) - prover1BalanceBefore;
+
+        assertEq(staker1ActualReward, expectedStakerReward, "Staker should receive expected reward");
+        assertEq(prover1ActualReward, expectedProverReward, "Prover should receive expected reward");
     }
 
     function test_SecurityIsolation() public {

@@ -187,7 +187,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     // Prover configuration events
     event MinSelfStakeUpdateRequested(address indexed prover, uint256 newMinSelfStake, uint256 requestTime);
     event MinSelfStakeUpdated(address indexed prover, uint256 newMinSelfStake);
-    event ProverRewardsContractUpdated(address indexed oldContract, address indexed newContract);
+    event ProverRewardsContractUpdated(address indexed newContract);
 
     // Staking lifecycle events
     event Staked(address indexed staker, address indexed prover, uint256 amount, uint256 mintedShares);
@@ -199,9 +199,9 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     event TreasuryPoolWithdrawn(address indexed to, uint256 amount);
 
     // Administrative events
-    event UnstakeDelayUpdated(uint256 oldDelay, uint256 newDelay);
-    event MinSelfStakeDecreaseDelayUpdated(uint256 oldDelay, uint256 newDelay);
-    event GlobalMinSelfStakeUpdated(uint256 oldMinStake, uint256 newMinStake);
+    event UnstakeDelayUpdated(uint256 newDelay);
+    event MinSelfStakeDecreaseDelayUpdated(uint256 newDelay);
+    event GlobalMinSelfStakeUpdated(uint256 newMinStake);
 
     // =========================================================================
     // CONSTRUCTOR & INITIALIZATION
@@ -232,8 +232,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
     /**
      * @notice Initialize the staking contract for upgradeable deployment
-     * /**
-     * @notice Internal initialization logic shared by constructor and init function
+     *         Internal initialization logic shared by constructor and init function
      * @param _stakingToken ERC20 token address for staking
      * @param _globalMinSelfStake Global minimum self-stake requirement for all provers
      */
@@ -241,7 +240,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         if (_globalMinSelfStake == 0) revert GlobalMinSelfStakeZero();
         stakingToken = _stakingToken;
         globalMinSelfStake = _globalMinSelfStake;
-        // Initialize core parameters
     }
 
     // =========================================================================
@@ -658,10 +656,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
     // =========================================================================
     // EXTERNAL FUNCTIONS (ADMIN ONLY)
-    // ========================================================================="
-
-    // =========================================================================
-    // EXTERNAL FUNCTIONS (ADMIN ONLY)
     // =========================================================================
 
     /**
@@ -669,9 +663,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _proverRewards Address of the ProverRewards contract
      */
     function setProverRewardsContract(address _proverRewards) external onlyOwner {
-        address oldContract = address(proverRewards);
         proverRewards = IProverRewards(_proverRewards);
-        emit ProverRewardsContractUpdated(oldContract, _proverRewards);
+        emit ProverRewardsContractUpdated(_proverRewards);
     }
 
     /**
@@ -680,9 +673,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      */
     function setUnstakeDelay(uint256 _newDelay) external onlyOwner {
         if (_newDelay > 30 days) revert InvalidArg();
-        uint256 oldDelay = unstakeDelay;
         unstakeDelay = _newDelay;
-        emit UnstakeDelayUpdated(oldDelay, _newDelay);
+        emit UnstakeDelayUpdated(_newDelay);
     }
 
     /**
@@ -691,9 +683,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      */
     function setMinSelfStakeDecreaseDelay(uint256 _newDelay) external onlyOwner {
         if (_newDelay > 30 days) revert InvalidArg();
-        uint256 oldDelay = minSelfStakeDecreaseDelay;
         minSelfStakeDecreaseDelay = _newDelay;
-        emit MinSelfStakeDecreaseDelayUpdated(oldDelay, _newDelay);
+        emit MinSelfStakeDecreaseDelayUpdated(_newDelay);
     }
 
     /**
@@ -702,9 +693,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      */
     function setGlobalMinSelfStake(uint256 _newGlobalMinSelfStake) external onlyOwner {
         if (_newGlobalMinSelfStake == 0) revert GlobalMinSelfStakeZero();
-        uint256 oldMinStake = globalMinSelfStake;
         globalMinSelfStake = _newGlobalMinSelfStake;
-        emit GlobalMinSelfStakeUpdated(oldMinStake, _newGlobalMinSelfStake);
+        emit GlobalMinSelfStakeUpdated(_newGlobalMinSelfStake);
     }
 
     /**
@@ -1032,15 +1022,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         }
 
         return (hasPendingUpdate, pendingMinSelfStake, effectiveTime, isReady);
-    }
-
-    /**
-     * @notice Get treasury pool information
-     * @dev Returns the total amount of slashed tokens and reward dust available for withdrawal by treasury
-     * @return treasuryPoolBalance Amount of slashed tokens and accumulated reward dust in the treasury pool
-     */
-    function getTreasuryPool() external view returns (uint256 treasuryPoolBalance) {
-        return treasuryPool;
     }
 
     /**
