@@ -5,6 +5,7 @@ import "forge-std/Test.sol";
 import {TestErrors} from "./utils/TestErrors.sol";
 import {TestProverStaking} from "./TestProverStaking.sol";
 import {ProverStaking} from "../src/ProverStaking.sol";
+import {ProverRewards} from "../src/ProverRewards.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 
 /**
@@ -14,6 +15,7 @@ import {MockERC20} from "./mocks/MockERC20.sol";
  */
 contract StakingTest is Test {
     TestProverStaking public proverStaking;
+    ProverRewards public proverRewards;
     MockERC20 public brevToken;
 
     address public owner = makeAddr("owner");
@@ -35,6 +37,12 @@ contract StakingTest is Test {
         // Deploy staked provers contract with direct deployment pattern
         vm.startPrank(owner);
         proverStaking = new TestProverStaking(address(brevToken), GLOBAL_MIN_SELF_STAKE);
+
+        // Deploy prover rewards contract
+        proverRewards = new ProverRewards(address(proverStaking), address(brevToken));
+
+        // Link the contracts
+        proverStaking.setProverRewardsContract(address(proverRewards));
 
         // Grant slasher role to both this test contract and owner for testing
         proverStaking.grantRole(proverStaking.SLASHER_ROLE(), address(this));

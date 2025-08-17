@@ -123,7 +123,7 @@ contract IntegrationTest is Test {
     }
 
     function test_SecurityIsolation() public {
-        // Test that ProverRewards contract failure doesn't affect staking operations
+        // Test that ProverStaking operations work correctly with ProverRewards integration
 
         // Initialize prover
         vm.prank(prover1);
@@ -132,10 +132,7 @@ contract IntegrationTest is Test {
         vm.prank(prover1);
         proverStaking.initProver(MIN_SELF_STAKE, COMMISSION_RATE);
 
-        // Verify staking works even if ProverRewards is removed
-        vm.prank(owner);
-        proverStaking.setProverRewardsContract(address(0));
-
+        // Verify staking works with ProverRewards properly set
         uint256 stakeAmount = 5_000e18;
         vm.prank(staker1);
         stakingToken.approve(address(proverStaking), stakeAmount);
@@ -143,7 +140,7 @@ contract IntegrationTest is Test {
         vm.prank(staker1);
         proverStaking.stake(prover1, stakeAmount);
 
-        // Verify stake was successful
+        // Verify stake was successful and integrated with rewards
         (uint256 amount,,,) = proverStaking.getStakeInfo(prover1, staker1);
         assertEq(amount, stakeAmount);
 

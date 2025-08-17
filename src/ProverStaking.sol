@@ -134,13 +134,12 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     // Unified global parameters mapping
     mapping(ParamName => uint256) public globalParams;
 
-    address public stakingToken; // ERC20 token used for staking (renamed from brevToken)
+    // External contracts
+    address public stakingToken; // ERC20 token used for staking
+    IProverRewards public proverRewards; // ProverRewards contract for reward distribution
 
     // Global pool of slashed tokens available for treasury withdrawal
     uint256 public treasuryPool;
-
-    // ProverRewards contract for reward distribution
-    IProverRewards public proverRewards;
 
     mapping(address => ProverInfo) internal provers; // Prover address -> ProverInfo
     address[] public proverList; // Enumerable list of all registered provers
@@ -238,10 +237,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         proverList.push(msg.sender);
         activeProvers.add(msg.sender);
 
-        // Initialize prover rewards if rewards contract is set
-        if (address(proverRewards) != address(0)) {
-            proverRewards.initProverRewards(msg.sender, _commissionRate);
-        }
+        // Initialize prover rewards
+        proverRewards.initProverRewards(msg.sender, _commissionRate);
 
         // Prover must stake at least the minimum self stake to accept delegations
         stake(msg.sender, _minSelfStake);
@@ -293,20 +290,16 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             prover.stakers.add(msg.sender);
         }
 
-        // === REWARD ACCOUNTING === (via ProverRewards contract if set)
-        if (address(proverRewards) != address(0)) {
-            proverRewards.settleStakerRewards(_prover, msg.sender, stakeInfo.rawShares);
-        }
+        // === REWARD ACCOUNTING === (via ProverRewards contract)
+        proverRewards.settleStakerRewards(_prover, msg.sender, stakeInfo.rawShares);
 
         // === SHARE MINTING ===
         // Update stake amount (in raw shares) - follows CEI (Checks-Effects-Interactions) pattern
         stakeInfo.rawShares += newRawShares;
         prover.totalRawShares += newRawShares;
 
-        // === UPDATE REWARD DEBT === (via ProverRewards contract if set)
-        if (address(proverRewards) != address(0)) {
-            proverRewards.updateStakerRewardDebt(_prover, msg.sender, stakeInfo.rawShares);
-        }
+        // === UPDATE REWARD DEBT === (via ProverRewards contract)
+        proverRewards.updateStakerRewardDebt(_prover, msg.sender, stakeInfo.rawShares);
 
         emit Staked(msg.sender, _prover, _amount, newRawShares);
     }
@@ -362,10 +355,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             }
         }
 
-        // === REWARD ACCOUNTING === (via ProverRewards contract if set)
-        if (address(proverRewards) != address(0)) {
-            proverRewards.settleStakerRewards(_prover, msg.sender, stakeInfo.rawShares);
-        }
+        // === REWARD ACCOUNTING === (via ProverRewards contract)
+        proverRewards.settleStakerRewards(_prover, msg.sender, stakeInfo.rawShares);
 
         // === SHARE BURNING ===
         // Update stake amount (in raw shares) - CEI ordering
@@ -381,10 +372,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         // Add new pending unstake request
         stakeInfo.pendingUnstakes.push(PendingUnstake({rawShares: rawSharesToUnstake, unstakeTime: block.timestamp}));
 
-        // === UPDATE REWARD DEBT === (via ProverRewards contract if set)
-        if (address(proverRewards) != address(0)) {
-            proverRewards.updateStakerRewardDebt(_prover, msg.sender, stakeInfo.rawShares);
-        }
+        // === UPDATE REWARD DEBT === (via ProverRewards contract)
+        proverRewards.updateStakerRewardDebt(_prover, msg.sender, stakeInfo.rawShares);
 
         emit UnstakeRequested(msg.sender, _prover, _amount, rawSharesToUnstake);
     }
@@ -543,11 +532,9 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         }
         if (prover.totalRawShares != 0) revert ActiveStakesRemain();
 
-        // Check for pending commission in ProverRewards contract if set
-        if (address(proverRewards) != address(0)) {
-            (, uint256 pendingCommission,) = proverRewards.getProverRewardInfo(_prover);
-            if (pendingCommission != 0) revert CommissionRemain();
-        }
+        // Check for pending commission in ProverRewards contract
+        (, uint256 pendingCommission,) = proverRewards.getProverRewardInfo(_prover);
+        if (pendingCommission != 0) revert CommissionRemain();
 
         prover.state = ProverState.Retired;
         activeProvers.remove(_prover);
@@ -733,12 +720,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         }
         pendingUnstakeCount = stakeInfo.pendingUnstakes.length;
 
-        // Calculate pending rewards via ProverRewards contract if available
-        if (address(proverRewards) != address(0)) {
-            pendingRewards = proverRewards.calculateTotalPendingRewards(_prover, _staker);
-        } else {
-            pendingRewards = 0;
-        }
+        // Calculate pending rewards via ProverRewards contract
+        pendingRewards = proverRewards.calculateTotalPendingRewards(_prover, _staker);
     }
 
     /**

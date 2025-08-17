@@ -45,8 +45,8 @@ contract ProverRewards is ReentrancyGuard, AccessControl {
     // =========================================================================
 
     // External contracts
-    IProverStaking public proverStaking;
     address public rewardToken;
+    IProverStaking public proverStaking;
 
     // Global pool of reward dust from rounding errors
     uint256 public treasuryPool;
