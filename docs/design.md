@@ -401,5 +401,3 @@ The system includes comprehensive tests across all domains:
 - **Security Tests**: Access control and token isolation
 - **Performance Tests**: Gas efficiency of O(1) operations
 - **Edge Case Tests**: Slashing during unstaking, zero staker scenarios, dust accumulation
-
-See `test/` directory for complete test suite with 98+ test cases covering all functionality.

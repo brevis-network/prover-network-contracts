@@ -929,6 +929,73 @@ contract StakingTest is Test {
         vm.stopPrank();
     }
 
+    function test_CannotUnretireSlashedProver() public {
+        // Initialize prover
+        _initializeProver(prover1);
+
+        // Slash prover by maximum allowed (50% slash - brings scale to 0.5 which is above DEACTIVATION_SCALE of 0.2)
+        // Need to slash prover multiple times to get below deactivation threshold
+        vm.prank(owner);
+        proverStaking.slash(prover1, 500000); // 50% slash -> scale becomes 0.5
+
+        vm.prank(owner);
+        proverStaking.slash(prover1, 500000); // Another 50% of remaining -> scale becomes 0.25
+
+        vm.prank(owner);
+        proverStaking.slash(prover1, 400000); // 40% of remaining -> scale becomes 0.15 (below 0.2 threshold)
+
+        // Prover should be auto-deactivated due to slashing
+        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover1);
+        assertTrue(state == ProverStaking.ProverState.Deactivated, "Prover should be deactivated after heavy slash");
+
+        // Unstake remaining and retire
+        (uint256 remainingStake,,,) = proverStaking.getStakeInfo(prover1, prover1);
+        vm.prank(prover1);
+        proverStaking.requestUnstake(prover1, remainingStake);
+        vm.warp(block.timestamp + 7 days + 1);
+        vm.prank(prover1);
+        proverStaking.completeUnstake(prover1);
+
+        // Retire the prover
+        vm.prank(owner);
+        proverStaking.retireProver(prover1);
+
+        // Try to stake while retired to meet minimum requirements
+        vm.prank(prover1);
+        brevToken.approve(address(proverStaking), MIN_SELF_STAKE);
+        vm.prank(prover1);
+        proverStaking.stake(prover1, MIN_SELF_STAKE);
+
+        // Cannot unretire due to low scale (InvalidScale error)
+        vm.expectRevert(TestErrors.InvalidScale.selector);
+        vm.prank(prover1);
+        proverStaking.unretireProver();
+    }
+
+    function test_CannotReactivateSlashedProver() public {
+        // Initialize prover
+        _initializeProver(prover1);
+
+        // Slash prover by maximum allowed multiple times to get below deactivation threshold
+        vm.prank(owner);
+        proverStaking.slash(prover1, 500000); // 50% slash -> scale becomes 0.5
+
+        vm.prank(owner);
+        proverStaking.slash(prover1, 500000); // Another 50% of remaining -> scale becomes 0.25
+
+        vm.prank(owner);
+        proverStaking.slash(prover1, 400000); // 40% of remaining -> scale becomes 0.15 (below 0.2 threshold)
+
+        // Prover should be auto-deactivated due to slashing
+        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover1);
+        assertTrue(state == ProverStaking.ProverState.Deactivated, "Prover should be deactivated after heavy slash");
+
+        // Admin cannot reactivate due to low scale (InvalidScale error)
+        vm.expectRevert(TestErrors.InvalidScale.selector);
+        vm.prank(owner);
+        proverStaking.reactivateProver(prover1);
+    }
+
     // ========== HELPER FUNCTIONS ==========
 
     // Add the event declarations

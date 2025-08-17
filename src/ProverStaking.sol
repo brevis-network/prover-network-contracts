@@ -14,7 +14,7 @@ import "./interfaces/IProverRewards.sol";
 // Custom Errors (grouped by functional domain)
 // =============================================================
 
-// --- Global / Admin Configuration ---
+// --- Global ---
 error GlobalMinSelfStakeNotMet(); // Provided value below global min requirement
 error InvalidArg(); // Generic invalid admin/user argument (delay too long, zero addr, etc.)
 
@@ -35,7 +35,7 @@ error TooManyPendingUnstakes(); // Exceeded per-staker pending unstake requests
 error NoReadyUnstakes(); // No matured pending unstakes exist
 
 // --- Slashing / Treasury ---
-error SlashTooHigh(); // Slash percentage > MAX_SLASH_PERCENTAGE
+error SlashTooHigh(); // Slash percentage > MaxSlashPercentage
 error ScaleTooLow(); // Resulting scale would breach hard floor
 error TreasuryInsufficient(); // Treasury pool balance too low for withdrawal
 
@@ -564,6 +564,9 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
         ProverInfo storage prover = provers[msg.sender];
 
+        // Prevent unretiring if prover has been severely slashed (scale below deactivation threshold)
+        if (prover.scale <= DEACTIVATION_SCALE) revert InvalidScale();
+
         // Verify prover meets minimum self-stake requirements before unretiring
         uint256 selfEffective = _effectiveAmount(msg.sender, _selfRawShares(msg.sender));
         if (selfEffective < prover.minSelfStake) revert MinSelfStakeNotMet();
@@ -636,6 +639,9 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         if (provers[_prover].state != ProverState.Deactivated) revert InvalidProverState();
 
         ProverInfo storage prover = provers[_prover];
+
+        // Prevent reactivation if prover has been severely slashed (scale below deactivation threshold)
+        if (prover.scale <= DEACTIVATION_SCALE) revert InvalidScale();
 
         // Check if prover still meets minimum self-stake requirements
         uint256 selfEffective = _effectiveAmount(_prover, _selfRawShares(_prover));
