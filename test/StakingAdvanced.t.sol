@@ -788,7 +788,7 @@ contract StakingAdvancedTest is Test {
         vm.prank(owner);
         proverStaking.retireProver(prover1);
 
-        // Self-stake while retired - slashing history should not affect new stakes
+        // Self-stake while retired - slashing history will be preserved on unretire
         vm.prank(prover1);
         brevToken.approve(address(proverStaking), MIN_SELF_STAKE);
         vm.prank(prover1);
@@ -798,13 +798,13 @@ contract StakingAdvancedTest is Test {
         vm.prank(prover1);
         proverStaking.unretireProver();
 
-        // Verify new stake is worth more than original due to scale reset (shares bought at discount)
+        // Verify stake retains slashing history - no scale reset on unretire
         (uint256 totalStaked2,,,) = proverStaking.getStakeInfo(prover1, prover1);
-        assertTrue(totalStaked2 > MIN_SELF_STAKE, "Stake should be worth more after scale reset");
+        assertEq(totalStaked2, MIN_SELF_STAKE, "Stake should equal amount staked (no bonus from scale reset)");
 
-        // Verify prover scale is reset to 1.0
+        // Verify prover scale retains slashing history (0.5 from 50% slash)
         (, uint256 scale,) = proverStaking.getProverInternals(prover1);
-        assertEq(scale, 1e18, "Scale should be reset to 1.0 for new prover session");
+        assertEq(scale, 0.5e18, "Scale should retain slashing history (0.5 from 50% slash)");
     }
 
     function test_UpdateMinSelfStakeIncrease() public {

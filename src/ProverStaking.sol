@@ -549,13 +549,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         if (selfEffective < prover.minSelfStake) revert MinSelfStakeNotMet();
         if (selfEffective < _globalMinSelfStake()) revert GlobalMinSelfStakeNotMet();
 
-        // Reset slashing scale for fresh start
-        prover.scale = SCALE_FACTOR;
-
-        // Recompute effective stake (not stored inline since unused post-reset)
-        _getTotalEffectiveStake(msg.sender);
-
-        // Unretire as active prover
+        // Unretire as active prover (keeping historical scale/slashing record)
         prover.state = ProverState.Active;
         activeProvers.add(msg.sender);
 
