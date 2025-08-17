@@ -34,10 +34,6 @@ error SelfStakeUnderflow(); // Prover trying to unstake more than self stake
 error TooManyPendingUnstakes(); // Exceeded per-staker pending unstake requests
 error NoReadyUnstakes(); // No matured pending unstakes exist
 
-// --- Min Self-Stake Update Workflow ---
-error NoPendingMinStakeUpdate(); // No pending decrease request
-error MinStakeDelay(); // Decrease delay not yet elapsed
-
 // --- Slashing / Treasury ---
 error SlashTooHigh(); // Slash percentage > MAX_SLASH_PERCENTAGE
 error ScaleTooLow(); // Resulting scale would breach hard floor
@@ -70,7 +66,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
     enum ParamName {
         UnstakeDelay,
-        MinSelfStakeDecreaseDelay,
         GlobalMinSelfStake,
         MaxSlashPercentage
     }
@@ -107,12 +102,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     struct ProverInfo {
         ProverState state; // Current state of the prover (Null, Active, Retired, Deactivated)
         uint256 minSelfStake; // Minimum self-stake required to accept delegations
-        // === SHARE TRACKING ===
         uint256 totalRawShares; // Total raw shares across all stakers (invariant to slashing)
         uint256 scale; // Global scale factor for this prover (decreases with slashing)
-        // === MIN SELF STAKE UPDATE ===
-        PendingMinSelfStakeUpdate pendingMinSelfStakeUpdate; // Pending minSelfStake decrease (empty if no pending update)
-        // === STAKER DATA ===
         mapping(address => StakeInfo) stakes; // Individual stake information per staker
         EnumerableSet.AddressSet stakers; // Set of all stakers for this prover
     }
@@ -124,7 +115,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      */
     struct StakeInfo {
         uint256 rawShares; // Raw shares owned (before applying scale factor)
-        // === UNSTAKING DATA ===
         PendingUnstake[] pendingUnstakes; // Array of pending unstake requests
     }
 
@@ -135,15 +125,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     struct PendingUnstake {
         uint256 rawShares; // Raw shares in this unstake request
         uint256 unstakeTime; // Timestamp when this unstake was initiated
-    }
-
-    /**
-     * @notice Pending minSelfStake update information
-     * @dev Tracks a pending decrease request with its details and timing
-     */
-    struct PendingMinSelfStakeUpdate {
-        uint256 newMinSelfStake; // The new minSelfStake value being requested
-        uint256 requestedTime; // Timestamp when the update was requested
     }
 
     // =========================================================================
@@ -158,7 +139,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     // Global pool of slashed tokens available for treasury withdrawal
     uint256 public treasuryPool;
 
-    // Optional ProverRewards contract for reward distribution
+    // ProverRewards contract for reward distribution
     IProverRewards public proverRewards;
 
     mapping(address => ProverInfo) internal provers; // Prover address -> ProverInfo
@@ -177,7 +158,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     event ProverReactivated(address indexed prover);
 
     // Prover configuration events
-    event MinSelfStakeUpdateRequested(address indexed prover, uint256 newMinSelfStake, uint256 requestTime);
     event MinSelfStakeUpdated(address indexed prover, uint256 newMinSelfStake);
     event ProverRewardsContractUpdated(address indexed newContract);
 
@@ -231,7 +211,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
         // Initialize global parameters with default values
         globalParams[ParamName.UnstakeDelay] = 7 days;
-        globalParams[ParamName.MinSelfStakeDecreaseDelay] = 7 days;
         globalParams[ParamName.GlobalMinSelfStake] = _globalMinSelfStakeAmount;
         globalParams[ParamName.MaxSlashPercentage] = 500000; // 50% (500,000 parts per million)
     }
@@ -585,60 +564,15 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
     /**
      * @notice Update minimum self-stake requirement for a prover
-     * @dev Rules:
-     *      1. Must meet global minimum self-stake requirement
-     *      2. Increases are effective immediately (strengthens requirements)
-     *      3. Updates in retired state are effective immediately (not accepting delegations)
-     *      4. Decreases in active/deactivated states require delay (security protection)
+     * @dev All updates are now effective immediately since provers can exit anytime via unstaking
      * @param _newMinSelfStake New minimum self-stake amount in token units
      */
     function updateMinSelfStake(uint256 _newMinSelfStake) external {
         if (provers[msg.sender].state == ProverState.Null) revert ProverNotRegistered();
         if (_newMinSelfStake < _globalMinSelfStake()) revert GlobalMinSelfStakeNotMet();
 
-        ProverInfo storage prover = provers[msg.sender];
-        uint256 currentMinSelfStake = prover.minSelfStake;
-
-        if (_newMinSelfStake >= currentMinSelfStake) {
-            // === INCREASE: EFFECTIVE IMMEDIATELY ===
-            // Increases strengthen requirements, so they're safe to apply immediately
-            _applyMinSelfStakeUpdate(msg.sender, _newMinSelfStake);
-        } else if (prover.state == ProverState.Retired) {
-            // === RETIRED STATE: EFFECTIVE IMMEDIATELY ===
-            // Retired provers aren't accepting new delegations, so decreases are safe
-            _applyMinSelfStakeUpdate(msg.sender, _newMinSelfStake);
-        } else {
-            // === DECREASE IN ACTIVE/DEACTIVATED: DELAYED ===
-            // Decreases could enable rapid exit, so require delay for security
-            prover.pendingMinSelfStakeUpdate.newMinSelfStake = _newMinSelfStake;
-            prover.pendingMinSelfStakeUpdate.requestedTime = block.timestamp;
-
-            emit MinSelfStakeUpdateRequested(msg.sender, _newMinSelfStake, block.timestamp);
-        }
-    }
-
-    /**
-     * @notice Complete a pending minSelfStake decrease after the delay period
-     * @dev Only callable by the prover after the delay period has passed
-     */
-    function completeMinSelfStakeUpdate() external {
-        if (provers[msg.sender].state == ProverState.Null) revert ProverNotRegistered();
-
-        ProverInfo storage prover = provers[msg.sender];
-        if (prover.pendingMinSelfStakeUpdate.newMinSelfStake == 0) revert NoPendingMinStakeUpdate();
-
-        // Calculate effective time based on current delay setting
-        uint256 effectiveTime = prover.pendingMinSelfStakeUpdate.requestedTime + _minSelfStakeDecreaseDelay();
-        if (block.timestamp < effectiveTime) revert MinStakeDelay();
-
-        uint256 newMinSelfStake = prover.pendingMinSelfStakeUpdate.newMinSelfStake;
-
-        // Clear pending update
-        prover.pendingMinSelfStakeUpdate.newMinSelfStake = 0;
-        prover.pendingMinSelfStakeUpdate.requestedTime = 0;
-
-        // Apply the update
-        _applyMinSelfStakeUpdate(msg.sender, newMinSelfStake);
+        // Apply the update immediately - no delay needed
+        _applyMinSelfStakeUpdate(msg.sender, _newMinSelfStake);
     }
 
     // =========================================================================
@@ -961,37 +895,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     }
 
     /**
-     * @notice Get pending minSelfStake update information for a prover
-     * @dev Returns information about any pending minSelfStake decrease
-     * @param _prover Address of the prover to query
-     * @return hasPendingUpdate Whether there is a pending minSelfStake update
-     * @return pendingMinSelfStake The pending new minSelfStake value (0 if no pending update)
-     * @return effectiveTime When the pending update can be completed (calculated with current delay)
-     * @return isReady Whether the pending update can be completed now
-     */
-    function getPendingMinSelfStakeUpdate(address _prover)
-        external
-        view
-        returns (bool hasPendingUpdate, uint256 pendingMinSelfStake, uint256 effectiveTime, bool isReady)
-    {
-        ProverInfo storage prover = provers[_prover];
-
-        hasPendingUpdate = prover.pendingMinSelfStakeUpdate.newMinSelfStake > 0;
-        pendingMinSelfStake = prover.pendingMinSelfStakeUpdate.newMinSelfStake;
-
-        if (hasPendingUpdate) {
-            // Calculate effective time based on current delay setting
-            effectiveTime = prover.pendingMinSelfStakeUpdate.requestedTime + _minSelfStakeDecreaseDelay();
-            isReady = block.timestamp >= effectiveTime;
-        } else {
-            effectiveTime = 0;
-            isReady = false;
-        }
-
-        return (hasPendingUpdate, pendingMinSelfStake, effectiveTime, isReady);
-    }
-
-    /**
      * @notice Gets the prover's self-stake in raw shares
      * @param _prover Prover address
      * @return Raw shares owned by the prover themselves
@@ -1099,14 +1002,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      */
     function _unstakeDelay() internal view returns (uint256) {
         return globalParams[ParamName.UnstakeDelay];
-    }
-
-    /**
-     * @notice Get current min self stake decrease delay
-     * @return Current delay in seconds
-     */
-    function _minSelfStakeDecreaseDelay() internal view returns (uint256) {
-        return globalParams[ParamName.MinSelfStakeDecreaseDelay];
     }
 
     /**

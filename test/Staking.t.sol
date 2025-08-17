@@ -430,35 +430,6 @@ contract StakingTest is Test {
         );
     }
 
-    function test_SetMinSelfStakeDecreaseDelay() public {
-        uint256 newDelay = 14 days;
-
-        vm.prank(owner);
-        vm.expectEmit(true, false, false, true);
-        emit GlobalParamUpdated(ProverStaking.ParamName.MinSelfStakeDecreaseDelay, newDelay);
-        proverStaking.setGlobalParam(ProverStaking.ParamName.MinSelfStakeDecreaseDelay, newDelay);
-
-        assertEq(
-            proverStaking.globalParams(ProverStaking.ParamName.MinSelfStakeDecreaseDelay),
-            newDelay,
-            "MinSelfStake decrease delay should be updated"
-        );
-    }
-
-    function test_OnlyOwnerCanSetMinSelfStakeDecreaseDelay() public {
-        uint256 newDelay = 14 days;
-
-        vm.prank(user);
-        vm.expectRevert();
-        proverStaking.setGlobalParam(ProverStaking.ParamName.MinSelfStakeDecreaseDelay, newDelay);
-    }
-
-    function test_OnlyOwnerCanSetGlobalMinSelfStake() public {
-        vm.expectRevert();
-        vm.prank(user);
-        proverStaking.setGlobalParam(ProverStaking.ParamName.GlobalMinSelfStake, 2000e18);
-    }
-
     function test_SetMaxSlashPercentage() public {
         uint256 newMaxSlash = 300000; // 30% (300,000 parts per million)
 
@@ -472,6 +443,12 @@ contract StakingTest is Test {
             newMaxSlash,
             "Max slash percentage should be updated"
         );
+    }
+
+    function test_OnlyOwnerCanSetGlobalMinSelfStake() public {
+        vm.expectRevert();
+        vm.prank(user);
+        proverStaking.setGlobalParam(ProverStaking.ParamName.GlobalMinSelfStake, 2000e18);
     }
 
     function test_InitProverMeetsGlobalMinimum() public {
@@ -898,7 +875,7 @@ contract StakingTest is Test {
 
     // Add the event declarations
     event GlobalParamUpdated(ProverStaking.ParamName indexed param, uint256 newValue);
-    event MinSelfStakeDecreaseDelayUpdated(uint256 newDelay);
+
     event ProverDeactivated(address indexed prover);
     event ProverRetired(address indexed prover);
     event ProverUnretired(address indexed prover);

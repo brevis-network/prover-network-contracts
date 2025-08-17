@@ -819,9 +819,6 @@ contract StakingAdvancedTest is Test {
         // Should be applied immediately (no pending update created for increases)
         (, uint256 currentMin,,,) = proverStaking.getProverInfo(prover1);
         assertEq(currentMin, newMinStake, "Increase should be applied immediately");
-
-        (bool hasPending,,,) = proverStaking.getPendingMinSelfStakeUpdate(prover1);
-        assertFalse(hasPending, "Should have no pending update after immediate increase");
     }
 
     function test_UpdateMinSelfStakeDecreaseRetired() public {
@@ -846,68 +843,37 @@ contract StakingAdvancedTest is Test {
         // Should be applied immediately for retired prover
         (, uint256 currentMin,,,) = proverStaking.getProverInfo(prover1);
         assertEq(currentMin, newMinStake, "Decrease should be applied immediately for retired prover");
-
-        // Should have no pending update
-        (bool hasPending,,,) = proverStaking.getPendingMinSelfStakeUpdate(prover1);
-        assertFalse(hasPending, "Should have no pending update after immediate decrease for retired prover");
     }
 
-    function test_UpdateMinSelfStakeDecreaseActiveDelayed() public {
+    function test_UpdateMinSelfStakeDecreaseActiveImmediate() public {
         // Initialize prover
         _initializeProver(prover1);
 
-        // Test delayed decrease for active prover
+        // Test immediate decrease for active prover (new behavior)
         uint256 newMinStake = 5_000e18; // Decrease from 10_000e18
         vm.prank(prover1);
         proverStaking.updateMinSelfStake(newMinStake);
 
-        // Should not be applied immediately
+        // Should be applied immediately (new behavior - no delay needed)
         (, uint256 currentMin,,,) = proverStaking.getProverInfo(prover1);
-        assertEq(currentMin, MIN_SELF_STAKE, "Decrease should not be applied immediately for active prover");
-
-        // Should have pending update
-        (bool hasPending, uint256 pendingAmount, uint256 updateTime,) =
-            proverStaking.getPendingMinSelfStakeUpdate(prover1);
-        assertTrue(hasPending, "Should have pending update for delayed decrease");
-        assertEq(pendingAmount, newMinStake, "Pending amount should match requested amount");
-        assertEq(updateTime, block.timestamp + 7 days, "Update time should be 7 days from now");
-
-        // Complete the update after delay
-        vm.warp(block.timestamp + 7 days + 1);
-        vm.prank(prover1);
-        proverStaking.completeMinSelfStakeUpdate();
-
-        // Should be applied now
-        (, currentMin,,,) = proverStaking.getProverInfo(prover1);
-        assertEq(currentMin, newMinStake, "Decrease should be applied after delay");
-
-        // Should have no pending update
-        (hasPending,,,) = proverStaking.getPendingMinSelfStakeUpdate(prover1);
-        assertFalse(hasPending, "Should have no pending update after completion");
+        assertEq(currentMin, newMinStake, "Decrease should be applied immediately for active prover");
     }
 
-    function test_UpdateMinSelfStakeDecreaseDeactivatedDelayed() public {
+    function test_UpdateMinSelfStakeDecreaseDeactivatedImmediate() public {
         // Initialize prover and deactivate
         _initializeProver(prover1);
 
         vm.prank(owner);
         proverStaking.deactivateProver(prover1);
 
-        // Test delayed decrease for deactivated prover
+        // Test immediate decrease for deactivated prover (new behavior)
         uint256 newMinStake = 5_000e18; // Decrease from 10_000e18
         vm.prank(prover1);
         proverStaking.updateMinSelfStake(newMinStake);
 
-        // Should not be applied immediately
+        // Should be applied immediately (new behavior)
         (, uint256 currentMin,,,) = proverStaking.getProverInfo(prover1);
-        assertEq(currentMin, MIN_SELF_STAKE, "Decrease should not be applied immediately for deactivated prover");
-
-        // Should have pending update
-        (bool hasPending, uint256 pendingAmount, uint256 updateTime,) =
-            proverStaking.getPendingMinSelfStakeUpdate(prover1);
-        assertTrue(hasPending, "Should have pending update for delayed decrease");
-        assertEq(pendingAmount, newMinStake, "Pending amount should match requested amount");
-        assertEq(updateTime, block.timestamp + 7 days, "Update time should be 7 days from now");
+        assertEq(currentMin, newMinStake, "Decrease should be applied immediately for deactivated prover");
     }
 
     function test_CannotUpdateMinSelfStakeBelowGlobal() public {
@@ -928,30 +894,6 @@ contract StakingAdvancedTest is Test {
         proverStaking.updateMinSelfStake(50 ether);
     }
 
-    function test_CannotCompleteMinSelfStakeUpdateTooEarly() public {
-        // Initialize prover
-        _initializeProver(prover1);
-
-        // Request decrease
-        vm.prank(prover1);
-        proverStaking.updateMinSelfStake(5_000e18);
-
-        // Try to complete before delay
-        vm.prank(prover1);
-        vm.expectRevert(TestErrors.MinStakeDelay.selector);
-        proverStaking.completeMinSelfStakeUpdate();
-    }
-
-    function test_CannotCompleteMinSelfStakeUpdateWithoutPending() public {
-        // Initialize prover
-        _initializeProver(prover1);
-
-        // Try to complete without pending update
-        vm.prank(prover1);
-        vm.expectRevert(TestErrors.NoPendingMinStakeUpdate.selector);
-        proverStaking.completeMinSelfStakeUpdate();
-    }
-
     function test_MinSelfStakeUpdateEvents() public {
         // Initialize prover
         _initializeProver(prover1);
@@ -962,18 +904,11 @@ contract StakingAdvancedTest is Test {
         emit MinSelfStakeUpdated(prover1, 15_000e18);
         proverStaking.updateMinSelfStake(15_000e18);
 
-        // Test decrease (delayed)
-        vm.prank(prover1);
-        vm.expectEmit(true, false, false, true);
-        emit MinSelfStakeUpdateRequested(prover1, 5_000e18, block.timestamp);
-        proverStaking.updateMinSelfStake(5_000e18);
-
-        // Complete the decrease
-        vm.warp(block.timestamp + 7 days + 1);
+        // Test decrease (now also immediate)
         vm.prank(prover1);
         vm.expectEmit(true, false, false, true);
         emit MinSelfStakeUpdated(prover1, 5_000e18);
-        proverStaking.completeMinSelfStakeUpdate();
+        proverStaking.updateMinSelfStake(5_000e18);
     }
 
     function test_OnlyProverCanUpdateMinSelfStake() public {
@@ -984,92 +919,6 @@ contract StakingAdvancedTest is Test {
         vm.prank(user);
         vm.expectRevert(TestErrors.ProverNotRegistered.selector);
         proverStaking.updateMinSelfStake(15_000e18);
-
-        // Try to complete from different address
-        vm.prank(prover1);
-        proverStaking.updateMinSelfStake(5_000e18);
-
-        vm.warp(block.timestamp + 7 days + 1);
-        vm.prank(user);
-        vm.expectRevert(TestErrors.ProverNotRegistered.selector);
-        proverStaking.completeMinSelfStakeUpdate();
-    }
-
-    function test_MinSelfStakeDecreaseDelayConfigurable() public {
-        // Initialize prover
-        _initializeProver(prover1);
-
-        // Change the delay to 14 days
-        vm.prank(owner);
-        proverStaking.setGlobalParam(ProverStaking.ParamName.MinSelfStakeDecreaseDelay, 14 days);
-
-        // Request decrease
-        vm.prank(prover1);
-        proverStaking.updateMinSelfStake(5_000e18);
-
-        // Should have pending update with new delay
-        (bool hasPending, uint256 pendingAmount, uint256 updateTime,) =
-            proverStaking.getPendingMinSelfStakeUpdate(prover1);
-        assertTrue(hasPending, "Should have pending update");
-        assertEq(pendingAmount, 5_000e18, "Pending amount should match");
-        assertEq(updateTime, block.timestamp + 14 days, "Update time should use new delay");
-
-        // Try to complete before new delay period
-        vm.warp(block.timestamp + 7 days + 1);
-        vm.prank(prover1);
-        vm.expectRevert(TestErrors.MinStakeDelay.selector);
-        proverStaking.completeMinSelfStakeUpdate();
-
-        // Should work after new delay period
-        vm.warp(block.timestamp + 7 days + 1); // Total 14 days + 1
-        vm.prank(prover1);
-        proverStaking.completeMinSelfStakeUpdate();
-
-        // Should be applied now
-        (, uint256 currentMin,,,) = proverStaking.getProverInfo(prover1);
-        assertEq(currentMin, 5_000e18, "Decrease should be applied after new delay");
-    }
-
-    function test_PendingMinSelfStakeUpdateAffectedByDelayChange() public {
-        // Initialize prover
-        _initializeProver(prover1);
-
-        // Request decrease with 7-day delay
-        vm.prank(prover1);
-        proverStaking.updateMinSelfStake(5_000e18);
-
-        // Verify initial effective time (7 days from request)
-        (bool hasPending1, uint256 pendingAmount1, uint256 updateTime1,) =
-            proverStaking.getPendingMinSelfStakeUpdate(prover1);
-        assertTrue(hasPending1, "Should have pending update");
-        assertEq(pendingAmount1, 5_000e18, "Pending amount should match");
-        assertEq(updateTime1, block.timestamp + 7 days, "Initial update time should be 7 days");
-
-        // Admin changes delay to 3 days
-        vm.prank(owner);
-        proverStaking.setGlobalParam(ProverStaking.ParamName.MinSelfStakeDecreaseDelay, 3 days);
-
-        // Verify effective time changed (3 days from request time, not current time)
-        (bool hasPending2, uint256 pendingAmount2, uint256 updateTime2, bool isReady2) =
-            proverStaking.getPendingMinSelfStakeUpdate(prover1);
-        assertTrue(hasPending2, "Should still have pending update");
-        assertEq(pendingAmount2, 5_000e18, "Pending amount should not change");
-        assertEq(updateTime2, block.timestamp + 3 days, "Update time should reflect new delay");
-        assertFalse(isReady2, "Should not be ready yet");
-
-        // Fast forward 3 days + 1 second
-        vm.warp(block.timestamp + 3 days + 1);
-
-        // Should now be ready and completable
-        (,,, bool isReady3) = proverStaking.getPendingMinSelfStakeUpdate(prover1);
-        assertTrue(isReady3, "Should be ready after new delay");
-
-        vm.prank(prover1);
-        proverStaking.completeMinSelfStakeUpdate();
-
-        // Should be applied
-        (, uint256 currentMin,,,) = proverStaking.getProverInfo(prover1);
-        assertEq(currentMin, 5_000e18, "Decrease should be applied");
     }
 
     function test_UpdateCommissionRate() public {
