@@ -419,22 +419,30 @@ contract StakingTest is Test {
         uint256 newGlobalMin = 75e18;
 
         vm.prank(owner);
-        vm.expectEmit(false, false, false, true);
-        emit GlobalMinSelfStakeUpdated(newGlobalMin);
-        proverStaking.setGlobalMinSelfStake(newGlobalMin);
+        vm.expectEmit(true, false, false, true);
+        emit GlobalParamUpdated(ProverStaking.ParamName.GlobalMinSelfStake, newGlobalMin);
+        proverStaking.setGlobalParam(ProverStaking.ParamName.GlobalMinSelfStake, newGlobalMin);
 
-        assertEq(proverStaking.globalMinSelfStake(), newGlobalMin, "Global min self stake should be updated");
+        assertEq(
+            proverStaking.globalParams(ProverStaking.ParamName.GlobalMinSelfStake),
+            newGlobalMin,
+            "Global min self stake should be updated"
+        );
     }
 
     function test_SetMinSelfStakeDecreaseDelay() public {
         uint256 newDelay = 14 days;
 
         vm.prank(owner);
-        vm.expectEmit(false, false, false, true);
-        emit MinSelfStakeDecreaseDelayUpdated(newDelay);
-        proverStaking.setMinSelfStakeDecreaseDelay(newDelay);
+        vm.expectEmit(true, false, false, true);
+        emit GlobalParamUpdated(ProverStaking.ParamName.MinSelfStakeDecreaseDelay, newDelay);
+        proverStaking.setGlobalParam(ProverStaking.ParamName.MinSelfStakeDecreaseDelay, newDelay);
 
-        assertEq(proverStaking.minSelfStakeDecreaseDelay(), newDelay, "MinSelfStake decrease delay should be updated");
+        assertEq(
+            proverStaking.globalParams(ProverStaking.ParamName.MinSelfStakeDecreaseDelay),
+            newDelay,
+            "MinSelfStake decrease delay should be updated"
+        );
     }
 
     function test_OnlyOwnerCanSetMinSelfStakeDecreaseDelay() public {
@@ -442,13 +450,28 @@ contract StakingTest is Test {
 
         vm.prank(user);
         vm.expectRevert();
-        proverStaking.setMinSelfStakeDecreaseDelay(newDelay);
+        proverStaking.setGlobalParam(ProverStaking.ParamName.MinSelfStakeDecreaseDelay, newDelay);
     }
 
     function test_OnlyOwnerCanSetGlobalMinSelfStake() public {
         vm.expectRevert();
         vm.prank(user);
-        proverStaking.setGlobalMinSelfStake(2000e18);
+        proverStaking.setGlobalParam(ProverStaking.ParamName.GlobalMinSelfStake, 2000e18);
+    }
+
+    function test_SetMaxSlashPercentage() public {
+        uint256 newMaxSlash = 300000; // 30% (300,000 parts per million)
+
+        vm.prank(owner);
+        vm.expectEmit(true, false, false, true);
+        emit GlobalParamUpdated(ProverStaking.ParamName.MaxSlashPercentage, newMaxSlash);
+        proverStaking.setGlobalParam(ProverStaking.ParamName.MaxSlashPercentage, newMaxSlash);
+
+        assertEq(
+            proverStaking.globalParams(ProverStaking.ParamName.MaxSlashPercentage),
+            newMaxSlash,
+            "Max slash percentage should be updated"
+        );
     }
 
     function test_InitProverMeetsGlobalMinimum() public {
@@ -496,7 +519,7 @@ contract StakingTest is Test {
 
         // Increase global minimum above prover1's current requirement
         vm.prank(owner);
-        proverStaking.setGlobalMinSelfStake(20000e18);
+        proverStaking.setGlobalParam(ProverStaking.ParamName.GlobalMinSelfStake, 20000e18);
 
         // prover1 should still be active (not retroactive)
         (ProverStaking.ProverState state1,,,,) = proverStaking.getProverInfo(prover1);
@@ -559,7 +582,7 @@ contract StakingTest is Test {
 
         // Increase global minimum
         vm.prank(owner);
-        proverStaking.setGlobalMinSelfStake(100e18);
+        proverStaking.setGlobalParam(ProverStaking.ParamName.GlobalMinSelfStake, 100e18);
 
         (eligible, totalStake) = proverStaking.isProverEligible(prover3, 25e18);
         assertFalse(eligible, "Prover below new global minimum should not be eligible");
@@ -874,7 +897,7 @@ contract StakingTest is Test {
     // ========== HELPER FUNCTIONS ==========
 
     // Add the event declarations
-    event GlobalMinSelfStakeUpdated(uint256 newMinStake);
+    event GlobalParamUpdated(ProverStaking.ParamName indexed param, uint256 newValue);
     event MinSelfStakeDecreaseDelayUpdated(uint256 newDelay);
     event ProverDeactivated(address indexed prover);
     event ProverRetired(address indexed prover);

@@ -913,7 +913,7 @@ contract StakingAdvancedTest is Test {
     function test_CannotUpdateMinSelfStakeBelowGlobal() public {
         // Set global min to 75 ether
         vm.prank(owner);
-        proverStaking.setGlobalMinSelfStake(75 ether);
+        proverStaking.setGlobalParam(ProverStaking.ParamName.GlobalMinSelfStake, 75 ether);
 
         // Initialize prover
         brevToken.mint(prover1, 100 ether);
@@ -1001,7 +1001,7 @@ contract StakingAdvancedTest is Test {
 
         // Change the delay to 14 days
         vm.prank(owner);
-        proverStaking.setMinSelfStakeDecreaseDelay(14 days);
+        proverStaking.setGlobalParam(ProverStaking.ParamName.MinSelfStakeDecreaseDelay, 14 days);
 
         // Request decrease
         vm.prank(prover1);
@@ -1047,7 +1047,7 @@ contract StakingAdvancedTest is Test {
 
         // Admin changes delay to 3 days
         vm.prank(owner);
-        proverStaking.setMinSelfStakeDecreaseDelay(3 days);
+        proverStaking.setGlobalParam(ProverStaking.ParamName.MinSelfStakeDecreaseDelay, 3 days);
 
         // Verify effective time changed (3 days from request time, not current time)
         (bool hasPending2, uint256 pendingAmount2, uint256 updateTime2, bool isReady2) =
