@@ -871,6 +871,37 @@ contract StakingTest is Test {
         assertEq(staker1Count, staker2Count, "Pending counts should be identical");
     }
 
+    function test_AutoDeactivationOnCompleteUnstake() public {
+        _initializeProver(prover1);
+        _stakeToProver(staker1, prover1, 1000e18);
+
+        // Verify prover is initially active
+        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover1);
+        assertTrue(state == ProverStaking.ProverState.Active, "Prover should be active initially");
+
+        // Prover unstakes all - should trigger auto-deactivation
+        vm.startPrank(prover1);
+        vm.expectEmit(true, false, false, false);
+        emit ProverDeactivated(prover1);
+        proverStaking.requestUnstakeAll(prover1);
+        vm.stopPrank();
+
+        // Verify prover is now deactivated
+        (state,,,,) = proverStaking.getProverInfo(prover1);
+        assertTrue(state == ProverStaking.ProverState.Deactivated, "Prover should be auto-deactivated");
+
+        // Verify existing delegator can still unstake from deactivated prover
+        vm.startPrank(staker1);
+        proverStaking.requestUnstakeAll(prover1);
+        vm.stopPrank();
+
+        // New delegations should be rejected
+        vm.startPrank(staker2);
+        vm.expectRevert(TestErrors.InvalidProverState.selector);
+        proverStaking.stake(prover1, 500e18);
+        vm.stopPrank();
+    }
+
     // ========== HELPER FUNCTIONS ==========
 
     // Add the event declarations

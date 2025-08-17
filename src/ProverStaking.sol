@@ -353,6 +353,12 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             // Allow going below minSelfStake only if it results in zero self-stake (complete exit)
             if (remainingEffective > 0) {
                 if (remainingEffective < prover.minSelfStake) revert MinSelfStakeNotMet();
+            } else if (prover.state == ProverState.Active) {
+                // === AUTO-DEACTIVATION ON COMPLETE EXIT ===
+                // Prover is exiting completely (remainingEffective == 0), deactivate them immediately
+                prover.state = ProverState.Deactivated;
+                activeProvers.remove(_prover);
+                emit ProverDeactivated(_prover);
             }
         }
 
