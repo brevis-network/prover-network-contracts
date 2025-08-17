@@ -15,10 +15,8 @@ import "./interfaces/IProverRewards.sol";
 // =============================================================
 
 // --- Global / Admin Configuration ---
-error GlobalMinSelfStakeZero(); // Setting global min self stake to zero
 error GlobalMinSelfStakeNotMet(); // Provided value below global min requirement
 error InvalidArg(); // Generic invalid admin/user argument (delay too long, zero addr, etc.)
-error InvalidScale(); // Invalid scale related parameter (generic guard)
 
 // --- Prover Lifecycle & State ---
 error ProverNotRegistered(); // Prover struct not initialized
@@ -26,21 +24,17 @@ error InvalidProverState(); // Prover in unexpected state for operation
 error MinSelfStakeNotMet(); // Prover's self effective stake < required min
 error ActiveStakesRemain(); // Attempting lifecycle action while stakes remain
 error CommissionRemain(); // Attempting lifecycle action while commission pending
+error InvalidCommission(); // Commission rate > denominator (kept for backwards compatibility)
+error InvalidScale(); // Invalid scale related parameter (generic guard)
 
 // --- Staking / Unstaking Operations ---
 error ZeroAmount(); // Amount parameter is zero
 error InsufficientStake(); // Not enough stake/shares to perform action
 error SelfStakeUnderflow(); // Prover trying to unstake more than self stake
 error TooManyPendingUnstakes(); // Exceeded per-staker pending unstake requests
-error NoStake(); // No active stake for operation
-error NoPendingUnstakes(); // No pending unstake entries exist
 error NoReadyUnstakes(); // Pending unstakes exist but none matured
 
-// --- Commission / Rewards (Legacy) ---
-error InvalidCommission(); // Commission rate > denominator (kept for backwards compatibility)
-
 // --- Min Self-Stake Update Workflow ---
-error NoMinStakeChange(); // New min self-stake equals current
 error NoPendingMinStakeUpdate(); // No pending decrease request
 error MinStakeDelay(); // Decrease delay not yet elapsed
 
@@ -237,7 +231,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _globalMinSelfStake Global minimum self-stake requirement for all provers
      */
     function _init(address _stakingToken, uint256 _globalMinSelfStake) private {
-        if (_globalMinSelfStake == 0) revert GlobalMinSelfStakeZero();
         stakingToken = _stakingToken;
         globalMinSelfStake = _globalMinSelfStake;
     }
@@ -363,11 +356,11 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
         ProverInfo storage prover = provers[_prover];
         StakeInfo storage stakeInfo = prover.stakes[msg.sender];
+        if (stakeInfo.pendingUnstakes.length >= MAX_PENDING_UNSTAKES) revert TooManyPendingUnstakes();
 
         // Convert amount to raw shares for internal accounting
         uint256 rawSharesToUnstake = _rawSharesFromAmount(_prover, _amount);
         if (stakeInfo.rawShares < rawSharesToUnstake) revert InsufficientStake();
-        if (stakeInfo.pendingUnstakes.length >= MAX_PENDING_UNSTAKES) revert TooManyPendingUnstakes();
 
         // === PROVER SELF-STAKE VALIDATION ===
         // For prover's self stake, ensure minimum self stake is maintained
@@ -422,8 +415,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         ProverInfo storage prover = provers[_prover];
         StakeInfo storage stakeInfo = prover.stakes[msg.sender];
 
-        if (stakeInfo.rawShares == 0) revert NoStake();
-
         // Calculate current effective amount for all raw shares
         uint256 effectiveAmount = _effectiveAmount(_prover, stakeInfo.rawShares);
 
@@ -451,8 +442,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     function completeUnstake(address _prover) external nonReentrant {
         StakeInfo storage stakeInfo = provers[_prover].stakes[msg.sender];
 
-        if (stakeInfo.pendingUnstakes.length == 0) revert NoPendingUnstakes();
-
         uint256 totalEffectiveAmount = 0;
         uint256 completedCount = 0;
 
@@ -473,19 +462,17 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             }
         }
 
-        // Remove all completed requests from the beginning of the array
-        if (completedCount > 0) {
-            // Shift remaining elements to the front
-            for (uint256 i = 0; i < stakeInfo.pendingUnstakes.length - completedCount; i++) {
-                stakeInfo.pendingUnstakes[i] = stakeInfo.pendingUnstakes[i + completedCount];
-            }
-            // Remove the completed elements from the end
-            for (uint256 i = 0; i < completedCount; i++) {
-                stakeInfo.pendingUnstakes.pop();
-            }
-        }
-
         if (completedCount == 0) revert NoReadyUnstakes();
+
+        // Remove all completed requests from the beginning of the array
+        // Shift remaining elements to the front
+        for (uint256 i = 0; i < stakeInfo.pendingUnstakes.length - completedCount; i++) {
+            stakeInfo.pendingUnstakes[i] = stakeInfo.pendingUnstakes[i + completedCount];
+        }
+        // Remove the completed elements from the end
+        for (uint256 i = 0; i < completedCount; i++) {
+            stakeInfo.pendingUnstakes.pop();
+        }
 
         if (totalEffectiveAmount > 0) {
             IERC20(stakingToken).safeTransfer(msg.sender, totalEffectiveAmount);
@@ -610,9 +597,8 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
         ProverInfo storage prover = provers[msg.sender];
         uint256 currentMinSelfStake = prover.minSelfStake;
-        if (_newMinSelfStake == currentMinSelfStake) revert NoMinStakeChange();
 
-        if (_newMinSelfStake > currentMinSelfStake) {
+        if (_newMinSelfStake >= currentMinSelfStake) {
             // === INCREASE: EFFECTIVE IMMEDIATELY ===
             // Increases strengthen requirements, so they're safe to apply immediately
             _applyMinSelfStakeUpdate(msg.sender, _newMinSelfStake);
@@ -672,7 +658,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _newDelay The new unstake delay in seconds
      */
     function setUnstakeDelay(uint256 _newDelay) external onlyOwner {
-        if (_newDelay > 30 days) revert InvalidArg();
         unstakeDelay = _newDelay;
         emit UnstakeDelayUpdated(_newDelay);
     }
@@ -682,7 +667,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _newDelay The new minSelfStake decrease delay in seconds
      */
     function setMinSelfStakeDecreaseDelay(uint256 _newDelay) external onlyOwner {
-        if (_newDelay > 30 days) revert InvalidArg();
         minSelfStakeDecreaseDelay = _newDelay;
         emit MinSelfStakeDecreaseDelayUpdated(_newDelay);
     }
@@ -692,7 +676,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _newGlobalMinSelfStake The new global minimum self-stake in token units
      */
     function setGlobalMinSelfStake(uint256 _newGlobalMinSelfStake) external onlyOwner {
-        if (_newGlobalMinSelfStake == 0) revert GlobalMinSelfStakeZero();
         globalMinSelfStake = _newGlobalMinSelfStake;
         emit GlobalMinSelfStakeUpdated(_newGlobalMinSelfStake);
     }

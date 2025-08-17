@@ -437,14 +437,6 @@ contract StakingTest is Test {
         assertEq(proverStaking.minSelfStakeDecreaseDelay(), newDelay, "MinSelfStake decrease delay should be updated");
     }
 
-    function test_CannotSetMinSelfStakeDecreaseDelayTooLong() public {
-        uint256 tooLongDelay = 31 days;
-
-        vm.prank(owner);
-        vm.expectRevert(TestErrors.InvalidArg.selector);
-        proverStaking.setMinSelfStakeDecreaseDelay(tooLongDelay);
-    }
-
     function test_OnlyOwnerCanSetMinSelfStakeDecreaseDelay() public {
         uint256 newDelay = 14 days;
 
@@ -457,12 +449,6 @@ contract StakingTest is Test {
         vm.expectRevert();
         vm.prank(user);
         proverStaking.setGlobalMinSelfStake(2000e18);
-    }
-
-    function test_CannotSetZeroGlobalMinSelfStake() public {
-        vm.expectRevert(TestErrors.GlobalMinSelfStakeZero.selector);
-        vm.prank(owner);
-        proverStaking.setGlobalMinSelfStake(0);
     }
 
     function test_InitProverMeetsGlobalMinimum() public {
@@ -845,7 +831,7 @@ contract StakingTest is Test {
 
         // Try to unstake all when staker has no stake
         vm.startPrank(staker1);
-        vm.expectRevert(TestErrors.NoStake.selector);
+        vm.expectRevert(TestErrors.ZeroAmount.selector);
         proverStaking.requestUnstakeAll(prover1);
         vm.stopPrank();
     }
