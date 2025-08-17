@@ -664,14 +664,14 @@ contract StakingTest is Test {
         proverStaking.deactivateProver(prover1);
     }
 
-    function test_AdminRetireProver() public {
+    function test_RetireProver() public {
         // Initialize prover with minimal stake
         vm.prank(prover1);
         brevToken.approve(address(proverStaking), GLOBAL_MIN_SELF_STAKE);
         vm.prank(prover1);
         proverStaking.initProver(GLOBAL_MIN_SELF_STAKE, COMMISSION_RATE);
 
-        // Admin cannot retire with active stakes
+        // Cannot retire with active stakes
         vm.expectRevert(TestErrors.ActiveStakesRemain.selector);
         vm.prank(owner);
         proverStaking.retireProver(prover1);
@@ -685,7 +685,7 @@ contract StakingTest is Test {
         vm.prank(prover1);
         proverStaking.completeUnstake(prover1);
 
-        // Now admin can retire
+        // Now anyone can retire the prover (using owner here but could be anyone)
         vm.expectEmit(true, false, false, false);
         emit ProverRetired(prover1);
         vm.prank(owner);
@@ -694,6 +694,33 @@ contract StakingTest is Test {
         // Verify prover is retired
         (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state == ProverStaking.ProverState.Retired, "Prover should be retired");
+    }
+
+    function test_AnyoneCanRetireProver() public {
+        // Initialize prover with minimal stake
+        vm.prank(prover2);
+        brevToken.approve(address(proverStaking), GLOBAL_MIN_SELF_STAKE);
+        vm.prank(prover2);
+        proverStaking.initProver(GLOBAL_MIN_SELF_STAKE, COMMISSION_RATE);
+
+        // Unstake all funds
+        vm.prank(prover2);
+        proverStaking.requestUnstake(prover2, GLOBAL_MIN_SELF_STAKE);
+
+        // Wait and complete
+        vm.warp(block.timestamp + 7 days + 1);
+        vm.prank(prover2);
+        proverStaking.completeUnstake(prover2);
+
+        // Any address can retire the prover (using staker1 as example)
+        vm.expectEmit(true, false, false, false);
+        emit ProverRetired(prover2);
+        vm.prank(staker1); // Random user retiring the prover
+        proverStaking.retireProver(prover2);
+
+        // Verify prover is retired
+        (ProverStaking.ProverState retiredState,,,,) = proverStaking.getProverInfo(prover2);
+        assertTrue(retiredState == ProverStaking.ProverState.Retired, "Prover should be retired");
     }
 
     function test_UnretireRetiredProver() public {

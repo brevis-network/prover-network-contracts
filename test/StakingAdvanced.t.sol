@@ -619,7 +619,7 @@ contract StakingAdvancedTest is Test {
         // Cannot retire with active stakes
         vm.expectRevert(TestErrors.ActiveStakesRemain.selector);
         vm.prank(prover1);
-        proverStaking.retireProver();
+        proverStaking.retireProver(prover1);
 
         // Staker unstakes
         vm.prank(staker1);
@@ -639,19 +639,11 @@ contract StakingAdvancedTest is Test {
         vm.expectEmit(true, false, false, false);
         emit ProverRetired(prover1);
         vm.prank(prover1);
-        proverStaking.retireProver();
+        proverStaking.retireProver(prover1);
 
         // Verify prover is retired
         (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state == ProverStaking.ProverState.Retired, "Prover should be retired");
-    }
-
-    function test_OnlyOwnerCanAdminRetire() public {
-        _initializeProver(prover1);
-
-        vm.expectRevert();
-        vm.prank(user);
-        proverStaking.retireProver(prover1);
     }
 
     function test_CannotRetireInactiveProver() public {
@@ -833,7 +825,7 @@ contract StakingAdvancedTest is Test {
         proverStaking.completeUnstake(prover1);
 
         vm.prank(prover1);
-        proverStaking.retireProver();
+        proverStaking.retireProver(prover1);
 
         // Test immediate decrease for retired prover
         uint256 newMinStake = 5_000e18; // Decrease from 10_000e18

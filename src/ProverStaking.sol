@@ -522,22 +522,36 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     }
 
     /**
-     * @notice Allow a prover to voluntarily retire (self-initiated retirement)
-     * @dev Provers can retire themselves when they have no active stakes or pending rewards
-     */
-    function retireProver() external {
-        if (provers[msg.sender].state == ProverState.Null) revert ProverNotRegistered();
-        _retireProver(msg.sender);
-    }
-
-    /**
-     * @notice Admin function to force retire a prover (admin-initiated retirement)
-     * @dev Allows admin to retire inactive provers for cleanup
+     * @notice Retire a prover that is completely cleared (anyone can trigger)
+     * @dev Since retirement can only succeed when prover has no stakes or pending rewards,
+     *      there's no security risk allowing anyone to trigger this cleanup operation.
+     *      This helps with protocol hygiene by allowing community cleanup of inactive provers.
+     *
+     *      Retirement Requirements (ensures clean state):
+     *      1. Prover must be inactive (no new stakes accepted)
+     *      2. No active stakes remaining (totalRawShares = 0)
+     *      3. No pending commission rewards (checked via ProverRewards contract if set)
+     *
      * @param _prover The address of the prover to retire
      */
-    function retireProver(address _prover) external onlyOwner {
+    function retireProver(address _prover) external {
         if (provers[_prover].state == ProverState.Null) revert ProverNotRegistered();
-        _retireProver(_prover);
+
+        ProverInfo storage prover = provers[_prover];
+        if (!(prover.state == ProverState.Active || prover.state == ProverState.Deactivated)) {
+            revert InvalidProverState();
+        }
+        if (prover.totalRawShares != 0) revert ActiveStakesRemain();
+
+        // Check for pending commission in ProverRewards contract if set
+        if (address(proverRewards) != address(0)) {
+            (, uint256 pendingCommission,) = proverRewards.getProverRewardInfo(_prover);
+            if (pendingCommission != 0) revert CommissionRemain();
+        }
+
+        prover.state = ProverState.Retired;
+        activeProvers.remove(_prover);
+        emit ProverRetired(_prover);
     }
 
     /**
@@ -907,35 +921,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     // =========================================================================
     // INTERNAL FUNCTIONS (STATE-CHANGING)
     // =========================================================================
-
-    /**
-     * @notice Internal function to handle prover retirement logic
-     * @dev Retirement Requirements (ensures clean state):
-     *      1. Prover must be inactive (no new stakes accepted)
-     *      2. No active stakes remaining (totalRawShares = 0)
-     *      3. No pending commission rewards (checked via ProverRewards contract if set)
-     *
-     *      This ensures all economic relationships are settled before retirement
-     *
-     * @param _prover The address of the prover to retire
-     */
-    function _retireProver(address _prover) internal {
-        ProverInfo storage prover = provers[_prover];
-        if (!(prover.state == ProverState.Active || prover.state == ProverState.Deactivated)) {
-            revert InvalidProverState();
-        }
-        if (prover.totalRawShares != 0) revert ActiveStakesRemain();
-
-        // Check for pending commission in ProverRewards contract if set
-        if (address(proverRewards) != address(0)) {
-            (, uint256 pendingCommission,) = proverRewards.getProverRewardInfo(_prover);
-            if (pendingCommission != 0) revert CommissionRemain();
-        }
-
-        prover.state = ProverState.Retired;
-        activeProvers.remove(_prover);
-        emit ProverRetired(_prover);
-    }
 
     /**
      * @notice Internal function to apply minSelfStake update
