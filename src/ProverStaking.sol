@@ -306,20 +306,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
     /**
      * @notice Request unstaking for a portion of staked tokens
-     * @dev Algorithm:
-     *      1. Validate unstake amount
-     *      2. Enforce minimum self-stake requirements for provers
-     *      3. Update reward accounting before share changes
-     *      4. Burn raw shares from active stake
-     *      5. Add new pending unstake request to queue
-     *      6. Update staker tracking if stake becomes zero
-     *
-     *      Security Features:
-     *      - Multiple unstake requests allowed per staker (up to MAX_PENDING_UNSTAKES)
-     *      - Provers must maintain minimum self-stake unless exiting completely
-     *      - Shares subject to slashing during unstaking period
-     *      - Works for both active and retired provers (allows exit after deactivation)
-     *
+     * @dev Converts amount to raw shares and delegates to internal shares-based function
      * @param _prover Address of the prover to unstake from
      * @param _amount Amount of tokens to unstake (effective amount)
      */
@@ -327,61 +314,16 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         if (_amount == 0) revert ZeroAmount();
         if (provers[_prover].state == ProverState.Null) revert ProverNotRegistered();
 
-        ProverInfo storage prover = provers[_prover];
-        StakeInfo storage stakeInfo = prover.stakes[msg.sender];
-        if (stakeInfo.pendingUnstakes.length >= MAX_PENDING_UNSTAKES) revert TooManyPendingUnstakes();
-
         // Convert amount to raw shares for internal accounting
         uint256 rawSharesToUnstake = _rawSharesFromAmount(_prover, _amount);
-        if (stakeInfo.rawShares < rawSharesToUnstake) revert InsufficientStake();
 
-        // === PROVER SELF-STAKE VALIDATION ===
-        // For prover's self stake, ensure minimum self stake is maintained
-        // EXCEPTION: Allow going to zero (complete exit) even if below minimum
-        if (msg.sender == _prover) {
-            uint256 currentSelfRawShares = _selfRawShares(_prover);
-            if (currentSelfRawShares < rawSharesToUnstake) revert SelfStakeUnderflow();
-            uint256 remainingEffective = _effectiveAmount(_prover, currentSelfRawShares - rawSharesToUnstake);
-
-            // Allow going below minSelfStake only if it results in zero self-stake (complete exit)
-            if (remainingEffective > 0) {
-                if (remainingEffective < prover.minSelfStake) revert MinSelfStakeNotMet();
-            } else if (prover.state == ProverState.Active) {
-                // === AUTO-DEACTIVATION ON COMPLETE EXIT ===
-                // Prover is exiting completely (remainingEffective == 0), deactivate them immediately
-                prover.state = ProverState.Deactivated;
-                activeProvers.remove(_prover);
-                emit ProverDeactivated(_prover);
-            }
-        }
-
-        // === REWARD ACCOUNTING === (via ProverRewards contract)
-        proverRewards.settleStakerRewards(_prover, msg.sender, stakeInfo.rawShares);
-
-        // === SHARE BURNING ===
-        // Update stake amount (in raw shares) - CEI ordering
-        stakeInfo.rawShares -= rawSharesToUnstake;
-        prover.totalRawShares -= rawSharesToUnstake;
-
-        // If staker's active stake is now zero, remove them from the stakers set
-        if (stakeInfo.rawShares == 0) {
-            prover.stakers.remove(msg.sender);
-        }
-
-        // === UNSTAKING QUEUE ===
-        // Add new pending unstake request
-        stakeInfo.pendingUnstakes.push(PendingUnstake({rawShares: rawSharesToUnstake, unstakeTime: block.timestamp}));
-
-        // === UPDATE REWARD DEBT === (via ProverRewards contract)
-        proverRewards.updateStakerRewardDebt(_prover, msg.sender, stakeInfo.rawShares);
-
-        emit UnstakeRequested(msg.sender, _prover, _amount, rawSharesToUnstake);
+        // Delegate to internal shares-based function
+        _requestUnstakeShares(_prover, rawSharesToUnstake, _amount);
     }
 
     /**
      * @notice Request unstaking for all staked tokens with a prover
-     * @dev Convenience function to avoid rounding surprises when trying to unstake everything.
-     *      Calculates the current effective amount and delegates to requestUnstake for consistency.
+     * @dev Efficiently unstakes all shares without round-trip conversion
      * @param _prover Address of the prover to unstake all tokens from
      */
     function requestUnstakeAll(address _prover) external {
@@ -390,11 +332,11 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         ProverInfo storage prover = provers[_prover];
         StakeInfo storage stakeInfo = prover.stakes[msg.sender];
 
-        // Calculate current effective amount for all raw shares
-        uint256 effectiveAmount = _effectiveAmount(_prover, stakeInfo.rawShares);
+        // Get all raw shares for this staker
+        uint256 rawSharesToUnstake = stakeInfo.rawShares;
 
-        // Delegate to requestUnstake to handle all the logic consistently
-        requestUnstake(_prover, effectiveAmount);
+        // Delegate to internal shares-based function (will revert with InsufficientStake if rawShares is 0)
+        _requestUnstakeShares(_prover, rawSharesToUnstake, _effectiveAmount(_prover, rawSharesToUnstake));
     }
 
     /**
@@ -910,6 +852,76 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     // =========================================================================
     // INTERNAL FUNCTIONS (STATE-CHANGING)
     // =========================================================================
+
+    /**
+     * @notice Internal function to handle unstaking logic using raw shares
+     * @dev Algorithm:
+     *      1. Validate unstake shares
+     *      2. Enforce minimum self-stake requirements for provers
+     *      3. Update reward accounting before share changes
+     *      4. Burn raw shares from active stake
+     *      5. Add new pending unstake request to queue
+     *      6. Update staker tracking if stake becomes zero
+     *
+     *      Security Features:
+     *      - Multiple unstake requests allowed per staker (up to MAX_PENDING_UNSTAKES)
+     *      - Provers must maintain minimum self-stake unless exiting completely
+     *      - Shares subject to slashing during unstaking period
+     *      - Works for both active and retired provers (allows exit after deactivation)
+     *
+     * @param _prover Address of the prover to unstake from
+     * @param _rawSharesToUnstake Number of raw shares to unstake
+     * @param _amountToUnstake Effective token amount (for event emission, may change if slashed)
+     */
+    function _requestUnstakeShares(address _prover, uint256 _rawSharesToUnstake, uint256 _amountToUnstake) internal {
+        ProverInfo storage prover = provers[_prover];
+        StakeInfo storage stakeInfo = prover.stakes[msg.sender];
+
+        if (stakeInfo.pendingUnstakes.length >= MAX_PENDING_UNSTAKES) revert TooManyPendingUnstakes();
+        if (_rawSharesToUnstake == 0 || stakeInfo.rawShares < _rawSharesToUnstake) revert InsufficientStake();
+
+        // === PROVER SELF-STAKE VALIDATION ===
+        // For prover's self stake, ensure minimum self stake is maintained
+        // EXCEPTION: Allow going to zero (complete exit) even if below minimum
+        if (msg.sender == _prover) {
+            uint256 currentSelfRawShares = _selfRawShares(_prover);
+            if (currentSelfRawShares < _rawSharesToUnstake) revert SelfStakeUnderflow();
+            uint256 remainingEffective = _effectiveAmount(_prover, currentSelfRawShares - _rawSharesToUnstake);
+
+            // Allow going below minSelfStake only if it results in zero self-stake (complete exit)
+            if (remainingEffective > 0) {
+                if (remainingEffective < prover.minSelfStake) revert MinSelfStakeNotMet();
+            } else if (prover.state == ProverState.Active) {
+                // === AUTO-DEACTIVATION ON COMPLETE EXIT ===
+                // Prover is exiting completely (remainingEffective == 0), deactivate them immediately
+                prover.state = ProverState.Deactivated;
+                activeProvers.remove(_prover);
+                emit ProverDeactivated(_prover);
+            }
+        }
+
+        // === REWARD ACCOUNTING === (via ProverRewards contract)
+        proverRewards.settleStakerRewards(_prover, msg.sender, stakeInfo.rawShares);
+
+        // === SHARE BURNING ===
+        // Update stake amount (in raw shares) - CEI ordering
+        stakeInfo.rawShares -= _rawSharesToUnstake;
+        prover.totalRawShares -= _rawSharesToUnstake;
+
+        // If staker's active stake is now zero, remove them from the stakers set
+        if (stakeInfo.rawShares == 0) {
+            prover.stakers.remove(msg.sender);
+        }
+
+        // === UNSTAKING QUEUE ===
+        // Add new pending unstake request
+        stakeInfo.pendingUnstakes.push(PendingUnstake({rawShares: _rawSharesToUnstake, unstakeTime: block.timestamp}));
+
+        // === UPDATE REWARD DEBT === (via ProverRewards contract)
+        proverRewards.updateStakerRewardDebt(_prover, msg.sender, stakeInfo.rawShares);
+
+        emit UnstakeRequested(msg.sender, _prover, _amountToUnstake, _rawSharesToUnstake);
+    }
 
     /**
      * @notice Internal function to apply minSelfStake update

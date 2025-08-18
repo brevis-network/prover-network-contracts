@@ -866,7 +866,7 @@ contract StakingTest is Test {
 
         // Try to unstake all when staker has no stake
         vm.startPrank(staker1);
-        vm.expectRevert(TestErrors.ZeroAmount.selector);
+        vm.expectRevert(TestErrors.InsufficientStake.selector);
         proverStaking.requestUnstakeAll(prover1);
         vm.stopPrank();
     }
