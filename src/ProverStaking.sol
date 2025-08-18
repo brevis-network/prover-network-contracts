@@ -167,10 +167,10 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
     // Slashing events
     event ProverSlashed(address indexed prover, uint256 percentage, uint256 totalSlashed);
-    event TreasuryPoolWithdrawn(address indexed to, uint256 amount);
 
     // Administrative events
     event GlobalParamUpdated(ParamName indexed param, uint256 newValue);
+    event TreasuryPoolWithdrawn(address indexed to, uint256 amount);
 
     // =========================================================================
     // CONSTRUCTOR & INITIALIZATION
@@ -522,7 +522,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     }
 
     // =========================================================================
-    // EXTERNAL FUNCTIONS (ADMIN ONLY)
+    // ADMIN FUNCTIONS
     // =========================================================================
 
     /**
@@ -839,16 +839,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         return (stakeInfo.rawShares, totalPendingRawShares);
     }
 
-    /**
-     * @notice Gets the prover's self-stake in raw shares
-     * @param _prover Prover address
-     * @return Raw shares owned by the prover themselves
-     */
-    function _selfRawShares(address _prover) internal view returns (uint256) {
-        ProverInfo storage prover = provers[_prover];
-        return prover.stakes[_prover].rawShares;
-    }
-
     // =========================================================================
     // INTERNAL FUNCTIONS (STATE-CHANGING)
     // =========================================================================
@@ -976,6 +966,16 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     function _getTotalEffectiveStake(address _prover) internal view returns (uint256) {
         ProverInfo storage prover = provers[_prover];
         return _effectiveAmount(_prover, prover.totalRawShares);
+    }
+
+    /**
+     * @notice Gets the prover's self-stake in raw shares
+     * @param _prover Prover address
+     * @return Raw shares owned by the prover themselves
+     */
+    function _selfRawShares(address _prover) internal view returns (uint256) {
+        ProverInfo storage prover = provers[_prover];
+        return prover.stakes[_prover].rawShares;
     }
 
     // =========================================================================
