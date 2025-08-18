@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {Verifier} from "./Groth16Verifier.sol";
 import {IPicoVerifier} from "./IPicoVerifier.sol";
 
-/// @title Pico Verifier
+/// @title Mock Pico Verifier
 /// @author Brevis Network
-/// @notice This contracts implements a solidity verifier for Pico.
-contract PicoVerifier is Verifier, IPicoVerifier {
+/// @notice This contracts implements a mock solidity verifier for Pico.
+contract MockPicoVerifier is IPicoVerifier {
     /// @notice Thrown when the proof is invalid.
     error InvalidProof();
 
@@ -21,7 +20,7 @@ contract PicoVerifier is Verifier, IPicoVerifier {
     /// @param riscvVkey The verification key for the RISC-V program.
     /// @param publicValues The public values encoded as bytes.
     /// @param proof The proof of the riscv program execution in the Pico.
-    function verifyPicoProof(bytes32 riscvVkey, bytes calldata publicValues, uint256[8] calldata proof) external view {
+    function verifyPicoProof(bytes32 riscvVkey, bytes calldata publicValues, uint256[8] calldata proof) external pure {
         bytes32 publicValuesDigest = sha256PublicValues(publicValues);
         verifyPicoProof(riscvVkey, publicValuesDigest, proof);
     }
@@ -30,10 +29,10 @@ contract PicoVerifier is Verifier, IPicoVerifier {
     /// @param riscvVkey The verification key for the RISC-V program.
     /// @param publicValuesDigest The sha256 hash of bytes-encoded public values.
     /// @param proof The proof of the riscv program execution in the Pico.
-    function verifyPicoProof(bytes32 riscvVkey, bytes32 publicValuesDigest, uint256[8] calldata proof) public view {
-        uint256[2] memory inputs;
-        inputs[0] = uint256(riscvVkey);
-        inputs[1] = uint256(publicValuesDigest);
-        this.verifyProof(proof, inputs);
+    function verifyPicoProof(bytes32 riscvVkey, bytes32 publicValuesDigest, uint256[8] calldata proof) public pure {
+        // Mock verification: use first two elements of proof array as vkey and digest
+        bytes32 vk = bytes32(proof[0]);
+        bytes32 digest = bytes32(proof[1]);
+        require(riscvVkey == vk && publicValuesDigest == digest, "invalid proof");
     }
 }

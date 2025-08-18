@@ -3,7 +3,7 @@
 pragma solidity ^0.8.20;
 
 import "./access/AccessControl.sol";
-import "./pico/PicoVerifier.sol";
+import "./pico/IPicoVerifier.sol";
 
 // fee/prover related
 struct FeeParams {
