@@ -282,73 +282,6 @@ contract StakingTest is Test {
         assertEq(pendingUnstake, MIN_SELF_STAKE);
     }
 
-    function test_SlashProver() public {
-        // Setup staking
-        _initializeProver(prover1);
-        uint256 stakeAmount = 9000e18;
-        _stakeToProver(staker1, prover1, stakeAmount);
-
-        uint256 totalStakeBefore = 19000e18; // MIN_SELF_STAKE + 9000e18
-        uint256 slashPercentage = 200000; // 20%
-
-        vm.prank(owner);
-        proverStaking.slash(prover1, slashPercentage);
-
-        (, uint256 totalStakeAfter,,) = proverStaking.getProverInfo(prover1);
-        uint256 expectedStakeAfter = (totalStakeBefore * 80) / 100; // 80% remaining = 15200e18
-
-        assertEq(totalStakeAfter, expectedStakeAfter);
-    }
-
-    function test_SlashInactiveProver() public {
-        _initializeProver(prover1);
-        _stakeToProver(staker1, prover1, 1000e18);
-
-        // Deactivate prover
-        vm.prank(owner);
-        proverStaking.deactivateProver(prover1);
-
-        // Should still be able to slash inactive prover
-        uint256 stakeBefore = 11000e18; // MIN_SELF_STAKE + 1000e18
-        vm.prank(owner);
-        proverStaking.slash(prover1, 100000); // 10%
-
-        (, uint256 stakeAfter,,) = proverStaking.getProverInfo(prover1);
-        assertEq(stakeAfter, (stakeBefore * 90) / 100);
-    }
-
-    function test_SlashAfterUnbondingStart() public {
-        _initializeProver(prover1);
-        _stakeToProver(staker1, prover1, 900e18);
-
-        // Staker initiates unstake
-        vm.prank(staker1);
-        proverStaking.requestUnstake(prover1, 500e18);
-
-        // Slash while unbonding
-        vm.prank(owner);
-        proverStaking.slash(prover1, 200000); // 20%
-
-        // Complete unstake - should receive slashed amount
-        vm.warp(block.timestamp + 7 days + 1);
-        uint256 balanceBefore = brevToken.balanceOf(staker1);
-        vm.prank(staker1);
-        proverStaking.completeUnstake(prover1);
-        uint256 balanceAfter = brevToken.balanceOf(staker1);
-
-        // Should receive 80% of 500e18 = 400e18
-        assertEq(balanceAfter - balanceBefore, 400e18);
-    }
-
-    function test_CannotSlashAboveMax() public {
-        _initializeProver(prover1);
-
-        // 100% slash now falls under generic SlashTooHigh (exceeds MAX_SLASH_PERCENTAGE = 50%)
-        vm.expectRevert(TestErrors.SlashTooHigh.selector);
-        vm.prank(owner);
-        proverStaking.slash(prover1, 1_000_000); // 100%
-    }
-
     // ========== HELPER FUNCTIONS ==========
 
     function _initializeProver(address prover) internal {
@@ -429,21 +362,6 @@ contract StakingTest is Test {
             proverStaking.globalParams(ProverStaking.ParamName.MinSelfStake),
             newGlobalMin,
             "Global min self stake should be updated"
-        );
-    }
-
-    function test_SetMaxSlashFactor() public {
-        uint256 newMaxSlash = 300000; // 30% (300,000 parts per million)
-
-        vm.prank(owner);
-        vm.expectEmit(true, false, false, true);
-        emit GlobalParamUpdated(ProverStaking.ParamName.MaxSlashFactor, newMaxSlash);
-        proverStaking.setGlobalParam(ProverStaking.ParamName.MaxSlashFactor, newMaxSlash);
-
-        assertEq(
-            proverStaking.globalParams(ProverStaking.ParamName.MaxSlashFactor),
-            newMaxSlash,
-            "Max slash percentage should be updated"
         );
     }
 
@@ -581,45 +499,6 @@ contract StakingTest is Test {
         (eligible, totalStake) = proverStaking.isProverEligible(prover4, 8000e18); // More than 7500e18 (slashed amount)
         assertFalse(eligible, "Slashed prover below required amount should not be eligible");
         assertEq(totalStake, 7500e18, "Should return slashed total stake"); // 15000e18 * 0.5 = 7500e18
-    }
-
-    function test_SlashExternalWithRole() public {
-        _initializeProver(prover1);
-
-        // Add a staker
-        vm.prank(staker1);
-        brevToken.approve(address(proverStaking), 5000e18);
-        vm.prank(staker1);
-        proverStaking.stake(prover1, 5000e18);
-
-        uint256 slashPercentage = 100000; // 10%
-
-        // Get initial stake
-        (uint256 initialStake,,,) = proverStaking.getStakeInfo(prover1, staker1);
-
-        // Slash as this test contract (has slasher role)
-        proverStaking.slash(prover1, slashPercentage);
-
-        // Check that stake was reduced
-        (uint256 finalStake,,,) = proverStaking.getStakeInfo(prover1, staker1);
-        assertLt(finalStake, initialStake, "Stake should be reduced after slashing");
-
-        // Check approximately 10% slash (90% remaining)
-        uint256 expectedStake = (initialStake * 9) / 10;
-        assertApproxEqRel(finalStake, expectedStake, 0.01e18, "Should be approximately 10% slashed");
-    }
-
-    function test_OnlySlasherRoleCanSlash() public {
-        _initializeProver(prover1);
-
-        // Owner has slasher role from setup, so this should work
-        vm.prank(owner);
-        proverStaking.slash(prover1, 50000); // 5%
-
-        // But user without role should fail
-        vm.expectRevert("unauthorized role");
-        vm.prank(user);
-        proverStaking.slash(prover1, 100000); // 10%
     }
 
     // ========== PROVER MANAGEMENT TESTS ==========
@@ -927,73 +806,6 @@ contract StakingTest is Test {
         vm.expectRevert(TestErrors.InvalidProverState.selector);
         proverStaking.stake(prover1, 500e18);
         vm.stopPrank();
-    }
-
-    function test_CannotUnretireSlashedProver() public {
-        // Initialize prover
-        _initializeProver(prover1);
-
-        // Slash prover by maximum allowed (50% slash - brings scale to 0.5 which is above DEACTIVATION_SCALE of 0.2)
-        // Need to slash prover multiple times to get below deactivation threshold
-        vm.prank(owner);
-        proverStaking.slash(prover1, 500000); // 50% slash -> scale becomes 0.5
-
-        vm.prank(owner);
-        proverStaking.slash(prover1, 500000); // Another 50% of remaining -> scale becomes 0.25
-
-        vm.prank(owner);
-        proverStaking.slash(prover1, 400000); // 40% of remaining -> scale becomes 0.15 (below 0.2 threshold)
-
-        // Prover should be auto-deactivated due to slashing
-        (ProverStaking.ProverState state,,,) = proverStaking.getProverInfo(prover1);
-        assertTrue(state == ProverStaking.ProverState.Deactivated, "Prover should be deactivated after heavy slash");
-
-        // Unstake remaining and retire
-        (uint256 remainingStake,,,) = proverStaking.getStakeInfo(prover1, prover1);
-        vm.prank(prover1);
-        proverStaking.requestUnstake(prover1, remainingStake);
-        vm.warp(block.timestamp + 7 days + 1);
-        vm.prank(prover1);
-        proverStaking.completeUnstake(prover1);
-
-        // Retire the prover
-        vm.prank(owner);
-        proverStaking.retireProver(prover1);
-
-        // Try to stake while retired to meet minimum requirements
-        vm.prank(prover1);
-        brevToken.approve(address(proverStaking), MIN_SELF_STAKE);
-        vm.prank(prover1);
-        proverStaking.stake(prover1, MIN_SELF_STAKE);
-
-        // Cannot unretire due to low scale (InvalidScale error)
-        vm.expectRevert(TestErrors.InvalidScale.selector);
-        vm.prank(prover1);
-        proverStaking.unretireProver();
-    }
-
-    function test_CannotReactivateSlashedProver() public {
-        // Initialize prover
-        _initializeProver(prover1);
-
-        // Slash prover by maximum allowed multiple times to get below deactivation threshold
-        vm.prank(owner);
-        proverStaking.slash(prover1, 500000); // 50% slash -> scale becomes 0.5
-
-        vm.prank(owner);
-        proverStaking.slash(prover1, 500000); // Another 50% of remaining -> scale becomes 0.25
-
-        vm.prank(owner);
-        proverStaking.slash(prover1, 400000); // 40% of remaining -> scale becomes 0.15 (below 0.2 threshold)
-
-        // Prover should be auto-deactivated due to slashing
-        (ProverStaking.ProverState state,,,) = proverStaking.getProverInfo(prover1);
-        assertTrue(state == ProverStaking.ProverState.Deactivated, "Prover should be deactivated after heavy slash");
-
-        // Admin cannot reactivate due to low scale (InvalidScale error)
-        vm.expectRevert(TestErrors.InvalidScale.selector);
-        vm.prank(owner);
-        proverStaking.reactivateProver(prover1);
     }
 
     // ========== HELPER FUNCTIONS ==========

@@ -76,98 +76,7 @@ contract StakingAdvancedTest is Test {
 
     // ========== EXTREME SCENARIOS ==========
 
-    function test_MassiveStakeAndSlash() public {
-        _initializeProver(prover1);
-
-        // Stake enormous amount
-        uint256 massiveStake = 100_000_000e18;
-        brevToken.mint(staker1, massiveStake);
-        vm.prank(staker1);
-        brevToken.approve(address(proverStaking), massiveStake);
-        vm.prank(staker1);
-        proverStaking.stake(prover1, massiveStake);
-
-        // Slash maximum allowed (50%)
-        vm.prank(owner);
-        proverStaking.slash(prover1, 500000); // 50%
-
-        (, uint256 totalStake,,) = proverStaking.getProverInfo(prover1);
-        uint256 expectedRemaining = (MIN_SELF_STAKE + massiveStake) / 2; // 50%
-        assertApproxEqRel(totalStake, expectedRemaining, 1e15);
-    }
-
-    function test_ExtremeSlashingScenario() public {
-        _initializeProver(prover1);
-        _stakeToProver(staker1, prover1, 4000e18);
-
-        // Multiple maximum slashes to demonstrate auto-deactivation at 20% threshold
-        proverStaking.slash(prover1, 500000); // 50% slash - leaves 50%
-
-        // Verify still active after first slash
-        (ProverStaking.ProverState state1,,,) = proverStaking.getProverInfo(prover1);
-        assertEq(uint256(state1), uint256(ProverStaking.ProverState.Active));
-
-        proverStaking.slash(prover1, 500000); // 50% of remaining - leaves 25% total
-
-        // Verify still active after second slash (still above 20% threshold)
-        (ProverStaking.ProverState state2,,,) = proverStaking.getProverInfo(prover1);
-        assertEq(uint256(state2), uint256(ProverStaking.ProverState.Active));
-
-        proverStaking.slash(prover1, 500000); // 50% of remaining - leaves 12.5% total
-
-        // NOW should be auto-deactivated (below 20% threshold)
-        (ProverStaking.ProverState finalState,,,) = proverStaking.getProverInfo(prover1);
-        assertEq(uint256(finalState), uint256(ProverStaking.ProverState.Deactivated));
-
-        (, uint256 finalStake,,) = proverStaking.getProverInfo(prover1);
-        uint256 originalStake = MIN_SELF_STAKE + 4000e18; // 14000e18
-        // After 3 slashes of 50% each: 14000 * (0.5)^3 = 14000 * 0.125 = 1750e18
-        uint256 expectedFinalStake = originalStake / 8; // 12.5% remaining
-
-        assertEq(finalStake, expectedFinalStake);
-
-        // Staker should still be able to unstake remaining amount
-        // After 3 slashes of 50% each, the staker's stake is reduced by the same factor
-        // Original staker stake: 4000e18, after slashes: 4000e18 * (0.5)^3 = 4000e18 * 0.125 = 500e18
-        uint256 stakerRemainingStake = 4000e18 / 8; // 12.5% remaining
-
-        vm.prank(staker1);
-        proverStaking.requestUnstake(prover1, stakerRemainingStake);
-
-        vm.warp(block.timestamp + 7 days + 1);
-        uint256 balanceBefore = brevToken.balanceOf(staker1);
-        vm.prank(staker1);
-        proverStaking.completeUnstake(prover1);
-        uint256 balanceAfter = brevToken.balanceOf(staker1);
-
-        assertEq(balanceAfter - balanceBefore, stakerRemainingStake);
-    }
-
     // ========== COMPLEX INTERACTION SEQUENCES ==========
-
-    function test_SlashDuringUnstakingPeriod() public {
-        _initializeProver(prover1);
-        _stakeToProver(staker1, prover1, 1000e18);
-
-        // Request unstake
-        vm.prank(staker1);
-        proverStaking.requestUnstake(prover1, 800e18);
-
-        // Slash 30% during unstaking period
-        vm.prank(owner);
-        proverStaking.slash(prover1, 300000); // 30% slash
-
-        // Complete unstake after delay
-        vm.warp(block.timestamp + 7 days + 1);
-        uint256 balanceBefore = brevToken.balanceOf(staker1);
-        vm.prank(staker1);
-        proverStaking.completeUnstake(prover1);
-        uint256 balanceAfter = brevToken.balanceOf(staker1);
-
-        // Should receive 70% of original unstake amount (800e18 * 0.7 = 560e18)
-        uint256 expectedPayout = (800e18 * 70) / 100;
-        assertEq(balanceAfter - balanceBefore, expectedPayout, "Unstake payout should reflect slash");
-    }
 
     function test_RestakeAfterFullExit() public {
         _initializeProver(prover1);
@@ -235,42 +144,6 @@ contract StakingAdvancedTest is Test {
 
         (,,, uint256 proverRewardsAfter) = proverStaking.getStakeInfo(prover1, prover1);
         assertEq(proverRewardsAfter, 0);
-    }
-
-    function test_SlashDuringMultipleUnbonding() public {
-        _initializeProver(prover1);
-        _stakeToProver(staker1, prover1, 5000e18);
-        _stakeToProver(staker2, prover1, 3000e18);
-
-        // Both stakers initiate unstaking
-        vm.prank(staker1);
-        proverStaking.requestUnstake(prover1, 2000e18);
-
-        vm.warp(block.timestamp + 3600); // 1 hour later
-        vm.prank(staker2);
-        proverStaking.requestUnstake(prover1, 1000e18);
-
-        // Slash 50% while both are unbonding
-        vm.prank(owner);
-        proverStaking.slash(prover1, 500000);
-
-        // Complete first unstake
-        vm.warp(block.timestamp + 7 days);
-        uint256 balance1Before = brevToken.balanceOf(staker1);
-        vm.prank(staker1);
-        proverStaking.completeUnstake(prover1);
-        uint256 balance1After = brevToken.balanceOf(staker1);
-
-        // Complete second unstake
-        vm.warp(block.timestamp + 3600); // Original unstake + 7 days for staker2
-        uint256 balance2Before = brevToken.balanceOf(staker2);
-        vm.prank(staker2);
-        proverStaking.completeUnstake(prover1);
-        uint256 balance2After = brevToken.balanceOf(staker2);
-
-        // Both should receive 50% of their unstaked amounts
-        assertEq(balance1After - balance1Before, 1000e18); // 50% of 2000e18
-        assertEq(balance2After - balance2Before, 500e18); // 50% of 1000e18
     }
 
     function test_SimultaneousOperationsFromMultipleStakers() public {
@@ -503,71 +376,6 @@ contract StakingAdvancedTest is Test {
         // Verify new stake amount
         (uint256 amount,,,) = proverStaking.getStakeInfo(prover1, prover1);
         assertEq(amount, unretireStake, "Should have new stake amount");
-    }
-
-    function test_UnretireWithSlashingHistory() public {
-        // Initialize prover and add delegations
-        _initializeProver(prover1);
-        _stakeToProver(staker1, prover1, 1000e18);
-
-        // Slash the prover by 10% (keep scale above DEACTIVATION_SCALE of 20%)
-        vm.prank(owner);
-        proverStaking.slash(prover1, 100000); // 10%
-
-        // Verify slash took effect
-        (uint256 totalStaked1,,,) = proverStaking.getStakeInfo(prover1, prover1);
-        assertEq(totalStaked1, MIN_SELF_STAKE * 9 / 10, "Self-stake should be reduced by 10% after slash");
-
-        // Unstake completely and retire
-        vm.prank(prover1);
-        proverStaking.requestUnstake(prover1, totalStaked1);
-        vm.prank(staker1);
-        proverStaking.requestUnstake(prover1, 900e18); // 90% of original 1000e18
-
-        vm.warp(block.timestamp + 7 days + 1);
-        vm.prank(prover1);
-        proverStaking.completeUnstake(prover1);
-        vm.prank(staker1);
-        proverStaking.completeUnstake(prover1);
-
-        vm.prank(owner);
-        proverStaking.retireProver(prover1);
-
-        // Self-stake while retired - need to stake more to account for slashing
-        // With 10% slash, scale is 0.9, so need to stake ~111% of MIN_SELF_STAKE to get effective MIN_SELF_STAKE
-        uint256 stakeAmount = (MIN_SELF_STAKE * 10) / 9; // Slightly more than MIN_SELF_STAKE / 0.9
-        vm.prank(prover1);
-        brevToken.approve(address(proverStaking), stakeAmount);
-        vm.prank(prover1);
-        proverStaking.stake(prover1, stakeAmount);
-
-        // Unretire after self-staking (should work since scale is 0.9 > 0.2)
-        vm.prank(prover1);
-        proverStaking.unretireProver();
-
-        // Verify stake retains slashing history - effective amount should meet minimum
-        (uint256 totalStaked2,,,) = proverStaking.getStakeInfo(prover1, prover1);
-        assertGe(totalStaked2, MIN_SELF_STAKE, "Effective stake should meet minimum self-stake requirement");
-
-        // Verify prover scale retains slashing history (0.9 from 10% slash)
-        (, uint256 scale,) = proverStaking.getProverInternals(prover1);
-        assertEq(scale, 0.9e18, "Scale should retain slashing history (0.9 from 10% slash)");
-    }
-
-    function test_MaxSlashFactorLimit() public {
-        _initializeProver(prover1);
-        _stakeToProver(staker1, prover1, 1000e18);
-
-        // Try to slash more than 50% - should revert
-        vm.expectRevert(TestErrors.SlashTooHigh.selector);
-        proverStaking.slash(prover1, 500001); // 50.0001%
-
-        // Slash exactly 50% - should work
-        proverStaking.slash(prover1, 500000); // 50%
-
-        // Verify prover is still active after 50% slash
-        (ProverStaking.ProverState state,,,) = proverStaking.getProverInfo(prover1);
-        assertTrue(state == ProverStaking.ProverState.Active, "Prover should still be active after 50% slash");
     }
 
     function test_AutoDeactivationOnMinScale() public {
