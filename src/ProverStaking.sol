@@ -66,7 +66,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     enum ParamName {
         UnstakeDelay,
         MinSelfStake,
-        MaxSlashPercentage
+        MaxSlashFactor
     }
 
     // Commission rates are expressed in basis points (1 bp = 0.01%)
@@ -204,7 +204,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         // Initialize global parameters with default values
         globalParams[ParamName.UnstakeDelay] = 7 days;
         globalParams[ParamName.MinSelfStake] = _minSelfStakeAmount;
-        globalParams[ParamName.MaxSlashPercentage] = 500000; // 50% (500,000 parts per million)
+        globalParams[ParamName.MaxSlashFactor] = 500000; // 50% (500,000 parts per million)
     }
 
     // =========================================================================
@@ -407,7 +407,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      */
     function slash(address _prover, uint256 _percentage) external onlyRole(SLASHER_ROLE) {
         if (provers[_prover].state == ProverState.Null) revert ProverNotRegistered();
-        if (_percentage > _maxSlashPercentage()) revert SlashTooHigh();
+        if (_percentage > _maxSlashFactor()) revert SlashTooHigh();
 
         ProverInfo storage prover = provers[_prover];
 
@@ -948,10 +948,10 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     }
 
     /**
-     * @notice Get current max slash percentage
-     * @return Current max slash percentage in parts per million
+     * @notice Get current max slash factor
+     * @return Current max slash factor in parts per million
      */
-    function _maxSlashPercentage() internal view returns (uint256) {
-        return globalParams[ParamName.MaxSlashPercentage];
+    function _maxSlashFactor() internal view returns (uint256) {
+        return globalParams[ParamName.MaxSlashFactor];
     }
 }

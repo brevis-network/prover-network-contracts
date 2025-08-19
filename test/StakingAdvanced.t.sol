@@ -882,7 +882,7 @@ contract StakingAdvancedTest is Test {
         assertGt(balanceAfter, balanceBefore, "Prover should receive rewards");
     }
 
-    function test_MaxSlashPercentageLimit() public {
+    function test_MaxSlashFactorLimit() public {
         _initializeProver(prover1);
         _stakeToProver(staker1, prover1, 1000e18);
 

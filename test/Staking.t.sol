@@ -432,16 +432,16 @@ contract StakingTest is Test {
         );
     }
 
-    function test_SetMaxSlashPercentage() public {
+    function test_SetMaxSlashFactor() public {
         uint256 newMaxSlash = 300000; // 30% (300,000 parts per million)
 
         vm.prank(owner);
         vm.expectEmit(true, false, false, true);
-        emit GlobalParamUpdated(ProverStaking.ParamName.MaxSlashPercentage, newMaxSlash);
-        proverStaking.setGlobalParam(ProverStaking.ParamName.MaxSlashPercentage, newMaxSlash);
+        emit GlobalParamUpdated(ProverStaking.ParamName.MaxSlashFactor, newMaxSlash);
+        proverStaking.setGlobalParam(ProverStaking.ParamName.MaxSlashFactor, newMaxSlash);
 
         assertEq(
-            proverStaking.globalParams(ProverStaking.ParamName.MaxSlashPercentage),
+            proverStaking.globalParams(ProverStaking.ParamName.MaxSlashFactor),
             newMaxSlash,
             "Max slash percentage should be updated"
         );

@@ -381,14 +381,14 @@ The system uses a unified parameter management system:
 enum ParamName {
     UnstakeDelay,        // Time delay for unstaking completion
     MinSelfStake,  // Minimum self-stake required for all provers
-    MaxSlashPercentage   // Maximum slash percentage per operation
+    MaxSlashFactor   // Maximum slash factor per operation
 }
 ```
 
 ### Default Values
 - **UnstakeDelay**: 7 days
 - **MinSelfStake**: Set during contract initialization
-- **MaxSlashPercentage**: 500,000 PPM (50%)
+- **MaxSlashFactor**: 500,000 PPM (50%)
 
 ### Parameter Updates
 - Only owner can update via `setGlobalParam(ParamName, uint256)`
@@ -428,7 +428,7 @@ proverStaking.grantRole(proverStaking.SLASHER_ROLE(), slasherAddress);
 
 // Optional: Update global parameters
 proverStaking.setGlobalParam(ProverStaking.ParamName.UnstakeDelay, 14 days);
-proverStaking.setGlobalParam(ProverStaking.ParamName.MaxSlashPercentage, 300000); // 30%
+proverStaking.setGlobalParam(ProverStaking.ParamName.MaxSlashFactor, 300000); // 30%
 ```
 
 ### 3. Upgradeability Support
