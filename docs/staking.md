@@ -49,7 +49,6 @@ enum ProverState { Null, Active, Retired, Deactivated }
 
 struct ProverInfo {
     ProverState state;                // Current prover status
-    uint256 minSelfStake;            // Individual minimum self-stake requirement
     uint256 totalRawShares;          // Total raw shares (pre-slashing)
     uint256 scale;                   // Global scale factor (1e18 = no slashing)
     mapping(address => StakeInfo) stakes;       // Individual stake info
@@ -287,9 +286,8 @@ enum ProverState {
 ### State Transitions
 
 #### Initialization: Null → Active
-- Call `initProver(minSelfStake, commissionRate)`
-- Must meet global minimum self-stake requirement
-- Automatically stakes minimum required amount
+- Call `initProver(commissionRate)`
+- Automatically stakes global minimum self-stake amount
 - Initializes reward tracking if ProverRewards contract is set
 
 #### Retirement: Active → Retired (Self-Initiated)
@@ -298,7 +296,7 @@ enum ProverState {
   - No pending commission rewards
 - Prover can `unretireProver()` if:
   - Scale factor > `DEACTIVATION_SCALE` (not severely slashed)
-  - Meets minimum self-stake requirements
+  - Meets global minimum self-stake requirements
 
 #### Deactivation: Active → Deactivated
 - **Auto-deactivation**: Scale drops to/below `DEACTIVATION_SCALE` (20%)
@@ -308,12 +306,13 @@ enum ProverState {
 #### Reactivation: Deactivated → Active
 - Admin calls `reactivateProver()` if:
   - Scale factor > `DEACTIVATION_SCALE`
-  - Meets minimum self-stake requirements
+  - Meets global minimum self-stake requirements
 
-### Minimum Self-Stake Management
-- Provers set individual `minSelfStake` ≥ global minimum
-- Updates are immediate (no delay period)
-- Must maintain self-stake above minimum to accept new delegations
+### Global Minimum Self-Stake Management
+- Single global minimum self-stake applies to all provers
+- Set during contract initialization via constructor parameter
+- Can be updated by owner via `setGlobalParam()`
+- All provers must maintain self-stake above global minimum to accept new delegations
 - Exception: Can go to zero for complete exit (triggers auto-deactivation)
 
 ## Integration Points
@@ -381,14 +380,14 @@ The system uses a unified parameter management system:
 ```solidity
 enum ParamName {
     UnstakeDelay,        // Time delay for unstaking completion
-    GlobalMinSelfStake,  // Minimum self-stake required for all provers
+    MinSelfStake,  // Minimum self-stake required for all provers
     MaxSlashPercentage   // Maximum slash percentage per operation
 }
 ```
 
 ### Default Values
 - **UnstakeDelay**: 7 days
-- **GlobalMinSelfStake**: Set during contract initialization
+- **MinSelfStake**: Set during contract initialization
 - **MaxSlashPercentage**: 500,000 PPM (50%)
 
 ### Parameter Updates
@@ -437,7 +436,7 @@ For upgradeable deployments, use the no-argument constructor and initialize:
 ```solidity
 // Deploy behind proxy
 ProverStaking proverStaking = new ProverStaking();
-proverStaking.init(address(stakingToken), globalMinSelfStake);
+proverStaking.init(address(stakingToken), minSelfStake);
 
 ProverRewards proverRewards = new ProverRewards();
 proverRewards.init(address(proverStaking), address(rewardToken));
@@ -448,14 +447,13 @@ proverRewards.init(address(proverStaking), address(rewardToken));
 ### ProverStaking Functions
 
 #### Core Operations
-- `initProver(uint256 minSelfStake, uint64 commissionRate)` - Register as prover
+- `initProver(uint64 commissionRate)` - Register as prover with global minimum stake
 - `stake(address prover, uint256 amount)` - Stake tokens to prover
 - `requestUnstake(address prover, uint256 amount)` - Request unstaking
 - `requestUnstakeAll(address prover)` - Request unstaking all tokens
 - `completeUnstake(address prover)` - Complete unstaking after delay
 
 #### Prover Management
-- `updateMinSelfStake(uint256 newMinSelfStake)` - Update minimum self-stake
 - `retireProver(address prover)` - Retire a prover (anyone can call)
 - `unretireProver()` - Unretire self (prover only)
 
@@ -515,10 +513,10 @@ For systems migrating from a monolithic staking contract:
 - **Prover Self-Rewards**: Prover receives both staking rewards and commission
 
 ### Self-Stake Management
-- **Below Minimum**: Prover cannot accept new delegations (own staking still allowed)
+- **Below Global Minimum**: Prover cannot accept new delegations (own staking still allowed)
 - **Complete Exit**: Unstaking all self-stake triggers auto-deactivation
-- **Partial Exit**: Must maintain minimum or go to zero
-- **Reactivation**: Requires meeting minimum self-stake requirements
+- **Partial Exit**: Must maintain global minimum or go to zero
+- **Reactivation**: Requires meeting global minimum self-stake requirements
 
 ### Scale Factor Edge Cases
 - **Severe Slashing**: Auto-deactivation when scale ≤ 20% (DEACTIVATION_SCALE)

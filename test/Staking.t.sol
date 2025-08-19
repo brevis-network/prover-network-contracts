@@ -27,7 +27,7 @@ contract StakingTest is Test {
 
     uint256 public constant INITIAL_SUPPLY = 1_000_000e18;
     uint256 public constant MIN_SELF_STAKE = 10_000e18;
-    uint256 public constant GLOBAL_MIN_SELF_STAKE = 50e18;
+    uint256 public constant GLOBAL_MIN_SELF_STAKE = 10_000e18; // Set equal to MIN_SELF_STAKE for compatibility
     uint64 public constant COMMISSION_RATE = 1000; // 10%
 
     function setUp() public {
@@ -65,31 +65,25 @@ contract StakingTest is Test {
     function test_InitProver() public {
         // Initialize prover
         vm.prank(prover1);
-        brevToken.approve(address(proverStaking), MIN_SELF_STAKE);
+        brevToken.approve(address(proverStaking), GLOBAL_MIN_SELF_STAKE);
 
         vm.prank(prover1);
-        proverStaking.initProver(MIN_SELF_STAKE, COMMISSION_RATE);
+        proverStaking.initProver(COMMISSION_RATE);
 
         // Verify prover details
-        (
-            ProverStaking.ProverState state,
-            uint256 minSelfStake,
-            uint256 totalStaked,
-            uint256 selfEffectiveStake,
-            uint256 stakersCount
-        ) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state, uint256 totalStaked, uint256 selfEffectiveStake, uint256 stakersCount) =
+            proverStaking.getProverInfo(prover1);
 
         assertTrue(state == ProverStaking.ProverState.Active);
-        assertEq(minSelfStake, MIN_SELF_STAKE);
-        assertEq(totalStaked, MIN_SELF_STAKE);
-        assertEq(selfEffectiveStake, MIN_SELF_STAKE);
+        assertEq(totalStaked, GLOBAL_MIN_SELF_STAKE);
+        assertEq(selfEffectiveStake, GLOBAL_MIN_SELF_STAKE);
         assertEq(stakersCount, 1); // Prover counts as one staker
 
         // Verify prover's stake
         (uint256 amount, uint256 pendingUnstake, uint256 pendingUnstakeCount, uint256 pendingRewards) =
             proverStaking.getStakeInfo(prover1, prover1);
 
-        assertEq(amount, MIN_SELF_STAKE);
+        assertEq(amount, GLOBAL_MIN_SELF_STAKE);
         assertEq(pendingUnstake, 0);
         assertEq(pendingUnstakeCount, 0);
         assertEq(pendingRewards, 0);
@@ -110,20 +104,20 @@ contract StakingTest is Test {
 
         // Try to initialize again - should fail
         vm.prank(prover1);
-        brevToken.approve(address(proverStaking), MIN_SELF_STAKE);
+        brevToken.approve(address(proverStaking), GLOBAL_MIN_SELF_STAKE);
 
         vm.expectRevert(TestErrors.InvalidProverState.selector);
         vm.prank(prover1);
-        proverStaking.initProver(MIN_SELF_STAKE, COMMISSION_RATE);
+        proverStaking.initProver(COMMISSION_RATE);
     }
 
     function test_RevertOnInvalidCommissionRate() public {
         vm.prank(prover1);
-        brevToken.approve(address(proverStaking), MIN_SELF_STAKE);
+        brevToken.approve(address(proverStaking), GLOBAL_MIN_SELF_STAKE);
 
         vm.expectRevert(TestErrors.InvalidCommission.selector);
         vm.prank(prover1);
-        proverStaking.initProver(MIN_SELF_STAKE, 10001); // > 100%
+        proverStaking.initProver(10001); // > 100%
     }
 
     function test_Stake() public {
@@ -144,8 +138,8 @@ contract StakingTest is Test {
         assertEq(amount, stakeAmount);
 
         // Verify total stake increased
-        (,, uint256 totalStaked,,) = proverStaking.getProverInfo(prover1);
-        assertEq(totalStaked, MIN_SELF_STAKE + stakeAmount);
+        (, uint256 totalStaked,,) = proverStaking.getProverInfo(prover1);
+        assertEq(totalStaked, GLOBAL_MIN_SELF_STAKE + stakeAmount);
     }
 
     function test_RevertOnStakeToInactiveProver() public {
@@ -161,9 +155,9 @@ contract StakingTest is Test {
 
     function test_RevertOnStakeBelowMinSelfStake() public {
         vm.prank(prover1);
-        brevToken.approve(address(proverStaking), MIN_SELF_STAKE);
+        brevToken.approve(address(proverStaking), GLOBAL_MIN_SELF_STAKE);
         vm.prank(prover1);
-        proverStaking.initProver(MIN_SELF_STAKE, COMMISSION_RATE);
+        proverStaking.initProver(COMMISSION_RATE);
 
         // Slash prover to reduce effective self-stake below minimum
         vm.prank(owner);
@@ -300,7 +294,7 @@ contract StakingTest is Test {
         vm.prank(owner);
         proverStaking.slash(prover1, slashPercentage);
 
-        (,, uint256 totalStakeAfter,,) = proverStaking.getProverInfo(prover1);
+        (, uint256 totalStakeAfter,,) = proverStaking.getProverInfo(prover1);
         uint256 expectedStakeAfter = (totalStakeBefore * 80) / 100; // 80% remaining = 15200e18
 
         assertEq(totalStakeAfter, expectedStakeAfter);
@@ -319,7 +313,7 @@ contract StakingTest is Test {
         vm.prank(owner);
         proverStaking.slash(prover1, 100000); // 10%
 
-        (,, uint256 stakeAfter,,) = proverStaking.getProverInfo(prover1);
+        (, uint256 stakeAfter,,) = proverStaking.getProverInfo(prover1);
         assertEq(stakeAfter, (stakeBefore * 90) / 100);
     }
 
@@ -359,10 +353,10 @@ contract StakingTest is Test {
 
     function _initializeProver(address prover) internal {
         vm.prank(prover);
-        brevToken.approve(address(proverStaking), MIN_SELF_STAKE);
+        brevToken.approve(address(proverStaking), GLOBAL_MIN_SELF_STAKE);
 
         vm.prank(prover);
-        proverStaking.initProver(MIN_SELF_STAKE, COMMISSION_RATE);
+        proverStaking.initProver(COMMISSION_RATE);
     }
 
     function test_StakerTracking() public {
@@ -375,7 +369,7 @@ contract StakingTest is Test {
         assertEq(stakers[0], prover1, "Prover should be in stakers list");
 
         // Check staker count from getProverInfo
-        (,,,, uint256 stakerCount) = proverStaking.getProverInfo(prover1);
+        (,,, uint256 stakerCount) = proverStaking.getProverInfo(prover1);
         assertEq(stakerCount, 1, "Staker count should be 1");
 
         // Add another staker
@@ -396,7 +390,7 @@ contract StakingTest is Test {
         assertTrue(foundStaker, "Staker should be in stakers list");
 
         // Check staker count
-        (,,,, stakerCount) = proverStaking.getProverInfo(prover1);
+        (,,, stakerCount) = proverStaking.getProverInfo(prover1);
         assertEq(stakerCount, 2, "Staker count should be 2");
 
         // Fully unstake one staker
@@ -409,7 +403,7 @@ contract StakingTest is Test {
         assertEq(stakers[0], prover1, "Only prover should remain in stakers list");
 
         // Check staker count
-        (,,,, stakerCount) = proverStaking.getProverInfo(prover1);
+        (,,, stakerCount) = proverStaking.getProverInfo(prover1);
         assertEq(stakerCount, 1, "Staker count should be 1 after unstaking");
     }
 
@@ -423,16 +417,16 @@ contract StakingTest is Test {
 
     // === GLOBAL MIN SELF STAKE TESTS ===
 
-    function test_SetGlobalMinSelfStake() public {
+    function test_SetMinSelfStake() public {
         uint256 newGlobalMin = 75e18;
 
         vm.prank(owner);
         vm.expectEmit(true, false, false, true);
-        emit GlobalParamUpdated(ProverStaking.ParamName.GlobalMinSelfStake, newGlobalMin);
-        proverStaking.setGlobalParam(ProverStaking.ParamName.GlobalMinSelfStake, newGlobalMin);
+        emit GlobalParamUpdated(ProverStaking.ParamName.MinSelfStake, newGlobalMin);
+        proverStaking.setGlobalParam(ProverStaking.ParamName.MinSelfStake, newGlobalMin);
 
         assertEq(
-            proverStaking.globalParams(ProverStaking.ParamName.GlobalMinSelfStake),
+            proverStaking.globalParams(ProverStaking.ParamName.MinSelfStake),
             newGlobalMin,
             "Global min self stake should be updated"
         );
@@ -453,14 +447,14 @@ contract StakingTest is Test {
         );
     }
 
-    function test_OnlyOwnerCanSetGlobalMinSelfStake() public {
+    function test_OnlyOwnerCanSetMinSelfStake() public {
         vm.expectRevert();
         vm.prank(user);
-        proverStaking.setGlobalParam(ProverStaking.ParamName.GlobalMinSelfStake, 2000e18);
+        proverStaking.setGlobalParam(ProverStaking.ParamName.MinSelfStake, 2000e18);
     }
 
     function test_InitProverMeetsGlobalMinimum() public {
-        uint256 minSelfStake = 75e18; // Above global minimum
+        uint256 minSelfStake = GLOBAL_MIN_SELF_STAKE; // Exactly the global minimum
 
         // Setup tokens for prover
         brevToken.mint(prover2, minSelfStake);
@@ -468,25 +462,25 @@ contract StakingTest is Test {
         brevToken.approve(address(proverStaking), minSelfStake);
 
         // Should succeed
-        proverStaking.initProver(minSelfStake, COMMISSION_RATE);
+        proverStaking.initProver(COMMISSION_RATE);
 
         vm.stopPrank();
 
-        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover2);
+        (ProverStaking.ProverState state,,,) = proverStaking.getProverInfo(prover2);
         assertTrue(state == ProverStaking.ProverState.Active);
     }
 
     function test_InitProverBelowGlobalMinimumFails() public {
-        uint256 minSelfStake = 25e18; // Below global minimum of 50e18
+        uint256 insufficientAmount = 25e18; // Below global minimum of 50e18
 
-        // Setup tokens for prover
-        brevToken.mint(prover2, minSelfStake);
+        // Setup tokens for prover (insufficient amount)
+        brevToken.mint(prover2, insufficientAmount);
         vm.startPrank(prover2);
-        brevToken.approve(address(proverStaking), minSelfStake);
+        brevToken.approve(address(proverStaking), insufficientAmount);
 
-        // Should fail
-        vm.expectRevert(TestErrors.GlobalMinSelfStakeNotMet.selector);
-        proverStaking.initProver(minSelfStake, COMMISSION_RATE);
+        // Should fail due to insufficient balance (ERC20 transfer will fail)
+        vm.expectRevert(); // Generic revert from ERC20 transfer
+        proverStaking.initProver(COMMISSION_RATE);
 
         vm.stopPrank();
     }
@@ -494,31 +488,29 @@ contract StakingTest is Test {
     function test_GlobalMinDoesNotAffectExistingProvers() public {
         // First initialize prover1 with current requirements
         vm.prank(prover1);
-        brevToken.approve(address(proverStaking), MIN_SELF_STAKE);
+        brevToken.approve(address(proverStaking), GLOBAL_MIN_SELF_STAKE);
         vm.prank(prover1);
-        proverStaking.initProver(MIN_SELF_STAKE, COMMISSION_RATE);
+        proverStaking.initProver(COMMISSION_RATE);
 
         // Verify prover1 is active
-        (ProverStaking.ProverState initialState,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState initialState,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(initialState == ProverStaking.ProverState.Active);
 
         // Increase global minimum above prover1's current requirement
         vm.prank(owner);
-        proverStaking.setGlobalParam(ProverStaking.ParamName.GlobalMinSelfStake, 20000e18);
+        proverStaking.setGlobalParam(ProverStaking.ParamName.MinSelfStake, 20000e18);
 
         // prover1 should still be active (not retroactive)
-        (ProverStaking.ProverState state1,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state1,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state1 == ProverStaking.ProverState.Active);
 
-        // But new provers must meet the new requirement
-        uint256 lowMinSelfStake = 15000e18; // Below new global minimum
-
-        brevToken.mint(prover2, lowMinSelfStake);
+        // But new provers must meet the global minimum (which is enforced in initProver)
+        brevToken.mint(prover2, 30e18); // Below global minimum of 50e18
         vm.startPrank(prover2);
-        brevToken.approve(address(proverStaking), lowMinSelfStake);
+        brevToken.approve(address(proverStaking), 30e18);
 
-        vm.expectRevert(TestErrors.GlobalMinSelfStakeNotMet.selector);
-        proverStaking.initProver(lowMinSelfStake, COMMISSION_RATE);
+        vm.expectRevert(); // Should fail due to insufficient balance for global minimum
+        proverStaking.initProver(COMMISSION_RATE);
 
         vm.stopPrank();
     }
@@ -536,59 +528,59 @@ contract StakingTest is Test {
 
         // Test 2: Initialize prover with proper self-stake above global minimum
         vm.prank(prover);
-        proverStaking.initProver(1000e18, 1000); // 1000e18 > globalMinSelfStake (50e18)
+        proverStaking.initProver(1000); // 10% commission rate
 
-        // Test 3: Eligible prover with sufficient stake
-        (eligible, totalStake) = proverStaking.isProverEligible(prover, 500e18);
+        // Test 3: Eligible prover with sufficient stake (use global minimum)
+        (eligible, totalStake) = proverStaking.isProverEligible(prover, 8000e18); // Less than global minimum
         assertTrue(eligible, "Properly initialized prover should be eligible");
-        assertEq(totalStake, 1000e18, "Total stake should match self-stake");
+        assertEq(totalStake, GLOBAL_MIN_SELF_STAKE, "Total stake should match global minimum self-stake");
 
         // Test 4: Prover with insufficient total stake
-        (eligible, totalStake) = proverStaking.isProverEligible(prover, 2000e18);
+        (eligible, totalStake) = proverStaking.isProverEligible(prover, 15000e18); // More than what prover has
         assertFalse(eligible, "Prover with insufficient total stake should not be eligible");
-        assertEq(totalStake, 1000e18, "Should still return current total stake");
+        assertEq(totalStake, GLOBAL_MIN_SELF_STAKE, "Should still return current total stake");
 
         // Test 5: Deactivated prover should not be eligible
         vm.prank(owner);
         proverStaking.deactivateProver(prover);
-        (eligible, totalStake) = proverStaking.isProverEligible(prover, 500e18);
+        (eligible, totalStake) = proverStaking.isProverEligible(prover, 8000e18);
         assertFalse(eligible, "Deactivated prover should not be eligible");
-        assertEq(totalStake, 1000e18, "Deactivated prover should still return actual total stake");
+        assertEq(totalStake, GLOBAL_MIN_SELF_STAKE, "Deactivated prover should still return actual total stake");
 
         // Test 6: Prover below global minimum (through global minimum change)
         address prover3 = makeAddr("prover3");
-        brevToken.mint(prover3, 10000e18);
+        brevToken.mint(prover3, 20000e18);
         vm.prank(prover3);
-        brevToken.approve(address(proverStaking), 10000e18);
+        brevToken.approve(address(proverStaking), 20000e18);
 
         // Initialize with current global minimum
         vm.prank(prover3);
-        proverStaking.initProver(50e18, 1000); // Exactly at global minimum
+        proverStaking.initProver(1000); // 10% commission rate
 
         // Increase global minimum
         vm.prank(owner);
-        proverStaking.setGlobalParam(ProverStaking.ParamName.GlobalMinSelfStake, 100e18);
+        proverStaking.setGlobalParam(ProverStaking.ParamName.MinSelfStake, 15000e18);
 
-        (eligible, totalStake) = proverStaking.isProverEligible(prover3, 25e18);
+        (eligible, totalStake) = proverStaking.isProverEligible(prover3, 8000e18);
         assertFalse(eligible, "Prover below new global minimum should not be eligible");
-        assertEq(totalStake, 50e18, "Should return actual total stake");
+        assertEq(totalStake, 10000e18, "Should return actual total stake");
 
         // Test 7: Prover with insufficient actual self-stake due to slashing
         address prover4 = makeAddr("prover4");
-        brevToken.mint(prover4, 10000e18);
+        brevToken.mint(prover4, 20000e18);
         vm.prank(prover4);
-        brevToken.approve(address(proverStaking), 10000e18);
+        brevToken.approve(address(proverStaking), 20000e18);
 
         vm.prank(prover4);
-        proverStaking.initProver(1000e18, 1000);
+        proverStaking.initProver(1000); // 10% commission rate
 
         // Slash the prover by 50%
         vm.prank(owner);
         proverStaking.slash(prover4, 500000);
 
-        (eligible, totalStake) = proverStaking.isProverEligible(prover4, 200e18);
-        assertFalse(eligible, "Slashed prover below minSelfStake should not be eligible");
-        assertEq(totalStake, 500e18, "Should return slashed total stake"); // 1000e18 * 0.5 = 500e18
+        (eligible, totalStake) = proverStaking.isProverEligible(prover4, 8000e18); // More than 7500e18 (slashed amount)
+        assertFalse(eligible, "Slashed prover below required amount should not be eligible");
+        assertEq(totalStake, 7500e18, "Should return slashed total stake"); // 15000e18 * 0.5 = 7500e18
     }
 
     function test_SlashExternalWithRole() public {
@@ -637,7 +629,7 @@ contract StakingTest is Test {
         _initializeProver(prover1);
 
         // Verify prover is active
-        (ProverStaking.ProverState state1,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state1,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state1 == ProverStaking.ProverState.Active, "Prover should be active");
 
         // Deactivate prover (admin action)
@@ -647,7 +639,7 @@ contract StakingTest is Test {
         proverStaking.deactivateProver(prover1);
 
         // Verify prover is deactivated after deactivation
-        (ProverStaking.ProverState state2,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state2,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state2 == ProverStaking.ProverState.Deactivated, "Prover should be deactivated");
     }
 
@@ -677,7 +669,7 @@ contract StakingTest is Test {
         vm.prank(prover1);
         brevToken.approve(address(proverStaking), GLOBAL_MIN_SELF_STAKE);
         vm.prank(prover1);
-        proverStaking.initProver(GLOBAL_MIN_SELF_STAKE, COMMISSION_RATE);
+        proverStaking.initProver(COMMISSION_RATE);
 
         // Cannot retire with active stakes
         vm.expectRevert(TestErrors.ActiveStakesRemain.selector);
@@ -700,7 +692,7 @@ contract StakingTest is Test {
         proverStaking.retireProver(prover1);
 
         // Verify prover is retired
-        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state == ProverStaking.ProverState.Retired, "Prover should be retired");
     }
 
@@ -709,7 +701,7 @@ contract StakingTest is Test {
         vm.prank(prover2);
         brevToken.approve(address(proverStaking), GLOBAL_MIN_SELF_STAKE);
         vm.prank(prover2);
-        proverStaking.initProver(GLOBAL_MIN_SELF_STAKE, COMMISSION_RATE);
+        proverStaking.initProver(COMMISSION_RATE);
 
         // Unstake all funds
         vm.prank(prover2);
@@ -727,7 +719,7 @@ contract StakingTest is Test {
         proverStaking.retireProver(prover2);
 
         // Verify prover is retired
-        (ProverStaking.ProverState retiredState,,,,) = proverStaking.getProverInfo(prover2);
+        (ProverStaking.ProverState retiredState,,,) = proverStaking.getProverInfo(prover2);
         assertTrue(retiredState == ProverStaking.ProverState.Retired, "Prover should be retired");
     }
 
@@ -747,14 +739,14 @@ contract StakingTest is Test {
         proverStaking.retireProver(prover1);
 
         // Verify prover is retired
-        (ProverStaking.ProverState state1,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state1,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state1 == ProverStaking.ProverState.Retired, "Prover should be retired");
 
         // Self-stake while retired to meet minimum requirements
         vm.prank(prover1);
-        brevToken.approve(address(proverStaking), MIN_SELF_STAKE);
+        brevToken.approve(address(proverStaking), GLOBAL_MIN_SELF_STAKE);
         vm.prank(prover1);
-        proverStaking.stake(prover1, MIN_SELF_STAKE);
+        proverStaking.stake(prover1, GLOBAL_MIN_SELF_STAKE);
 
         // Unretire prover (state change only)
         vm.expectEmit(true, false, false, false);
@@ -763,7 +755,7 @@ contract StakingTest is Test {
         proverStaking.unretireProver();
 
         // Verify prover is active again
-        (ProverStaking.ProverState state2,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state2,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state2 == ProverStaking.ProverState.Active, "Prover should be active after unretiring");
 
         // Verify stake was applied
@@ -780,7 +772,7 @@ contract StakingTest is Test {
         proverStaking.deactivateProver(prover1);
 
         // Verify prover is deactivated
-        (ProverStaking.ProverState state1,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state1,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state1 == ProverStaking.ProverState.Deactivated, "Prover should be deactivated");
 
         // Admin reactivates prover
@@ -790,7 +782,7 @@ contract StakingTest is Test {
         proverStaking.reactivateProver(prover1);
 
         // Verify prover is active again
-        (ProverStaking.ProverState state2,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state2,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state2 == ProverStaking.ProverState.Active, "Prover should be active after admin reactivation");
     }
 
@@ -911,8 +903,8 @@ contract StakingTest is Test {
         _stakeToProver(staker1, prover1, 1000e18);
 
         // Verify prover is initially active
-        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover1);
-        assertTrue(state == ProverStaking.ProverState.Active, "Prover should be active initially");
+        (ProverStaking.ProverState initialState,,,) = proverStaking.getProverInfo(prover1);
+        assertTrue(initialState == ProverStaking.ProverState.Active, "Prover should be active initially");
 
         // Prover unstakes all - should trigger auto-deactivation
         vm.startPrank(prover1);
@@ -922,8 +914,8 @@ contract StakingTest is Test {
         vm.stopPrank();
 
         // Verify prover is now deactivated
-        (state,,,,) = proverStaking.getProverInfo(prover1);
-        assertTrue(state == ProverStaking.ProverState.Deactivated, "Prover should be auto-deactivated");
+        (ProverStaking.ProverState finalState,,,) = proverStaking.getProverInfo(prover1);
+        assertTrue(finalState == ProverStaking.ProverState.Deactivated, "Prover should be auto-deactivated");
 
         // Verify existing delegator can still unstake from deactivated prover
         vm.startPrank(staker1);
@@ -953,7 +945,7 @@ contract StakingTest is Test {
         proverStaking.slash(prover1, 400000); // 40% of remaining -> scale becomes 0.15 (below 0.2 threshold)
 
         // Prover should be auto-deactivated due to slashing
-        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state == ProverStaking.ProverState.Deactivated, "Prover should be deactivated after heavy slash");
 
         // Unstake remaining and retire
@@ -995,7 +987,7 @@ contract StakingTest is Test {
         proverStaking.slash(prover1, 400000); // 40% of remaining -> scale becomes 0.15 (below 0.2 threshold)
 
         // Prover should be auto-deactivated due to slashing
-        (ProverStaking.ProverState state,,,,) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state,,,) = proverStaking.getProverInfo(prover1);
         assertTrue(state == ProverStaking.ProverState.Deactivated, "Prover should be deactivated after heavy slash");
 
         // Admin cannot reactivate due to low scale (InvalidScale error)

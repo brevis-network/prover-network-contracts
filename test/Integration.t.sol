@@ -23,7 +23,7 @@ contract IntegrationTest is Test {
 
     uint256 public constant INITIAL_SUPPLY = 1_000_000e18;
     uint256 public constant MIN_SELF_STAKE = 10_000e18;
-    uint256 public constant GLOBAL_MIN_SELF_STAKE = 1_000e18;
+    uint256 public constant GLOBAL_MIN_SELF_STAKE = 10_000e18;
     uint64 public constant COMMISSION_RATE = 1000; // 10%
 
     function setUp() public {
@@ -52,24 +52,18 @@ contract IntegrationTest is Test {
     function test_IntegratedFlow() public {
         // Test 1: Prover initialization
         vm.prank(prover1);
-        stakingToken.approve(address(proverStaking), MIN_SELF_STAKE);
+        stakingToken.approve(address(proverStaking), GLOBAL_MIN_SELF_STAKE);
 
         vm.prank(prover1);
-        proverStaking.initProver(MIN_SELF_STAKE, COMMISSION_RATE);
+        proverStaking.initProver(COMMISSION_RATE);
 
         // Verify prover info in both contracts
-        (
-            ProverStaking.ProverState state,
-            uint256 minSelfStake,
-            uint256 totalStaked,
-            uint256 selfStake,
-            uint256 stakerCount
-        ) = proverStaking.getProverInfo(prover1);
+        (ProverStaking.ProverState state, uint256 totalStaked, uint256 selfStake, uint256 stakerCount) =
+            proverStaking.getProverInfo(prover1);
 
         assertTrue(state == ProverStaking.ProverState.Active);
-        assertEq(minSelfStake, MIN_SELF_STAKE);
-        assertEq(totalStaked, MIN_SELF_STAKE);
-        assertEq(selfStake, MIN_SELF_STAKE);
+        assertEq(totalStaked, GLOBAL_MIN_SELF_STAKE);
+        assertEq(selfStake, GLOBAL_MIN_SELF_STAKE);
         assertEq(stakerCount, 1);
 
         (uint64 commissionRate, uint256 pendingCommission, uint256 accRewardPerRawShare) =
@@ -88,8 +82,8 @@ contract IntegrationTest is Test {
         proverStaking.stake(prover1, stakeAmount);
 
         // Verify updated totals
-        (,, totalStaked,, stakerCount) = proverStaking.getProverInfo(prover1);
-        assertEq(totalStaked, MIN_SELF_STAKE + stakeAmount);
+        (, totalStaked,, stakerCount) = proverStaking.getProverInfo(prover1);
+        assertEq(totalStaked, GLOBAL_MIN_SELF_STAKE + stakeAmount);
         assertEq(stakerCount, 2);
 
         // Test 3: Reward distribution
@@ -101,7 +95,8 @@ contract IntegrationTest is Test {
         proverRewards.addRewards(prover1, rewardAmount);
 
         // Test 4: Reward withdrawal
-        uint256 expectedStakerReward = (rewardAmount * 9000 / 10000) * stakeAmount / (MIN_SELF_STAKE + stakeAmount); // 90% of rewards, proportional to stake
+        uint256 expectedStakerReward =
+            (rewardAmount * 9000 / 10000) * stakeAmount / (GLOBAL_MIN_SELF_STAKE + stakeAmount); // 90% of rewards, proportional to stake
         uint256 expectedProverReward = rewardAmount - expectedStakerReward; // Commission + proportional stake reward
 
         // Record balances before withdrawal
@@ -127,10 +122,10 @@ contract IntegrationTest is Test {
 
         // Initialize prover
         vm.prank(prover1);
-        stakingToken.approve(address(proverStaking), MIN_SELF_STAKE);
+        stakingToken.approve(address(proverStaking), GLOBAL_MIN_SELF_STAKE);
 
         vm.prank(prover1);
-        proverStaking.initProver(MIN_SELF_STAKE, COMMISSION_RATE);
+        proverStaking.initProver(COMMISSION_RATE);
 
         // Verify staking works with ProverRewards properly set
         uint256 stakeAmount = 5_000e18;

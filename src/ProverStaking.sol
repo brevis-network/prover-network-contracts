@@ -11,17 +11,16 @@ import "./access/AccessControl.sol";
 import "./interfaces/IProverRewards.sol";
 
 // =============================================================
-// Custom Errors (grouped by functional domain)
+// Custom Errors
 // =============================================================
 
 // --- Global ---
-error GlobalMinSelfStakeNotMet(); // Provided value below global min requirement
+error MinSelfStakeNotMet(); // Provided value below minimum self-stake requirement
 error InvalidArg(); // Generic invalid admin/user argument (delay too long, zero addr, etc.)
 
 // --- Prover Lifecycle & State ---
 error ProverNotRegistered(); // Prover struct not initialized
 error InvalidProverState(); // Prover in unexpected state for operation
-error MinSelfStakeNotMet(); // Prover's self effective stake < required min
 error ActiveStakesRemain(); // Attempting lifecycle action while stakes remain
 error CommissionRemain(); // Attempting lifecycle action while commission pending
 error InvalidCommission(); // Commission rate > denominator (kept for backwards compatibility)
@@ -66,7 +65,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
 
     enum ParamName {
         UnstakeDelay,
-        GlobalMinSelfStake,
+        MinSelfStake,
         MaxSlashPercentage
     }
 
@@ -101,7 +100,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      */
     struct ProverInfo {
         ProverState state; // Current state of the prover (Null, Active, Retired, Deactivated)
-        uint256 minSelfStake; // Minimum self-stake required to accept delegations
         uint256 totalRawShares; // Total raw shares across all stakers (invariant to slashing)
         uint256 scale; // Global scale factor for this prover (decreases with slashing)
         mapping(address => StakeInfo) stakes; // Individual stake information per staker
@@ -150,27 +148,22 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     // =========================================================================
 
     // Prover lifecycle events
-    event ProverInitialized(address indexed prover, uint256 minSelfStake, uint64 commissionRate);
+    event ProverInitialized(address indexed prover, uint64 commissionRate);
     event ProverDeactivated(address indexed prover);
     event ProverRetired(address indexed prover);
     event ProverUnretired(address indexed prover);
     event ProverReactivated(address indexed prover);
-
-    // Prover configuration events
-    event MinSelfStakeUpdated(address indexed prover, uint256 newMinSelfStake);
-    event ProverRewardsContractUpdated(address indexed newContract);
+    event ProverSlashed(address indexed prover, uint256 percentage, uint256 totalSlashed);
 
     // Staking lifecycle events
     event Staked(address indexed staker, address indexed prover, uint256 amount, uint256 mintedShares);
     event UnstakeRequested(address indexed staker, address indexed prover, uint256 amount, uint256 rawSharesToUnstake);
     event UnstakeCompleted(address indexed staker, address indexed prover, uint256 amount);
 
-    // Slashing events
-    event ProverSlashed(address indexed prover, uint256 percentage, uint256 totalSlashed);
-
     // Administrative events
     event GlobalParamUpdated(ParamName indexed param, uint256 newValue);
     event TreasuryPoolWithdrawn(address indexed to, uint256 amount);
+    event ProverRewardsContractUpdated(address indexed newContract);
 
     // =========================================================================
     // CONSTRUCTOR & INITIALIZATION
@@ -181,10 +174,10 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @dev Initializes the contract with staking token and global minimum self-stake.
      *      For upgradeable deployment, use the no-arg constructor and call init() instead.
      * @param _stakingToken ERC20 token address for staking
-     * @param _globalMinSelfStakeAmount Global minimum self-stake requirement for all provers
+     * @param _minSelfStakeAmount Global minimum self-stake requirement for all provers
      */
-    constructor(address _stakingToken, uint256 _globalMinSelfStakeAmount) {
-        _init(_stakingToken, _globalMinSelfStakeAmount);
+    constructor(address _stakingToken, uint256 _minSelfStakeAmount) {
+        _init(_stakingToken, _minSelfStakeAmount);
         // Note: Ownable constructor automatically sets msg.sender as owner
     }
 
@@ -192,10 +185,10 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @notice Initialize the staking contract for upgradeable deployment
      * @dev This function sets up the contract state after deployment.
      * @param _stakingToken ERC20 token address used for staking
-     * @param _globalMinSelfStakeAmount Global minimum self-stake requirement for all provers
+     * @param _minSelfStakeAmount Global minimum self-stake requirement for all provers
      */
-    function init(address _stakingToken, uint256 _globalMinSelfStakeAmount) external {
-        _init(_stakingToken, _globalMinSelfStakeAmount);
+    function init(address _stakingToken, uint256 _minSelfStakeAmount) external {
+        _init(_stakingToken, _minSelfStakeAmount);
         initOwner();
     }
 
@@ -203,14 +196,14 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @notice Initialize the staking contract for upgradeable deployment
      *         Internal initialization logic shared by constructor and init function
      * @param _stakingToken ERC20 token address for staking
-     * @param _globalMinSelfStakeAmount Global minimum self-stake requirement for all provers
+     * @param _minSelfStakeAmount Global minimum self-stake requirement for all provers
      */
-    function _init(address _stakingToken, uint256 _globalMinSelfStakeAmount) private {
+    function _init(address _stakingToken, uint256 _minSelfStakeAmount) private {
         stakingToken = _stakingToken;
 
         // Initialize global parameters with default values
         globalParams[ParamName.UnstakeDelay] = 7 days;
-        globalParams[ParamName.GlobalMinSelfStake] = _globalMinSelfStakeAmount;
+        globalParams[ParamName.MinSelfStake] = _minSelfStakeAmount;
         globalParams[ParamName.MaxSlashPercentage] = 500000; // 50% (500,000 parts per million)
     }
 
@@ -219,18 +212,15 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     // =========================================================================
 
     /**
-     * @notice Initialize a new prover and self-stake with a minimum amount
-     * @param _minSelfStake Minimum tokens the prover must self-stake to accept delegations
+     * @notice Initialize a new prover and self-stake with the global minimum amount
      * @param _commissionRate Commission percentage in basis points (0-10000) - used for ProverRewards contract
      */
-    function initProver(uint256 _minSelfStake, uint64 _commissionRate) external {
+    function initProver(uint64 _commissionRate) external {
         if (provers[msg.sender].state != ProverState.Null) revert InvalidProverState();
         if (_commissionRate > COMMISSION_RATE_DENOMINATOR) revert InvalidCommission();
-        if (_minSelfStake < _globalMinSelfStake()) revert GlobalMinSelfStakeNotMet();
 
         ProverInfo storage prover = provers[msg.sender];
         prover.state = ProverState.Active;
-        prover.minSelfStake = _minSelfStake;
         prover.scale = SCALE_FACTOR; // Initialize scale to 1.0 (no slashing yet)
 
         // Register prover in global mappings
@@ -241,9 +231,9 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         proverRewards.initProverRewards(msg.sender, _commissionRate);
 
         // Prover must stake at least the minimum self stake to accept delegations
-        stake(msg.sender, _minSelfStake);
+        stake(msg.sender, _minSelfStake());
 
-        emit ProverInitialized(msg.sender, _minSelfStake, _commissionRate);
+        emit ProverInitialized(msg.sender, _commissionRate);
     }
 
     /**
@@ -272,10 +262,10 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             // Only allow delegation to active provers, but always allow self-staking
             if (prover.state != ProverState.Active) revert InvalidProverState();
 
-            // Gate delegations when prover is below min self-stake
+            // Gate delegations when prover is below global minimum self-stake
             // This ensures prover has skin in the game before accepting external delegations
             uint256 selfEffective = _effectiveAmount(_prover, _selfRawShares(_prover));
-            if (selfEffective < prover.minSelfStake) revert MinSelfStakeNotMet();
+            if (selfEffective < _minSelfStake()) revert MinSelfStakeNotMet();
         }
 
         // Transfer tokens from staker to contract (fail early if insufficient balance/allowance)
@@ -496,29 +486,15 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         // Prevent unretiring if prover has been severely slashed (scale below deactivation threshold)
         if (prover.scale <= DEACTIVATION_SCALE) revert InvalidScale();
 
-        // Verify prover meets minimum self-stake requirements before unretiring
+        // Verify prover meets global minimum self-stake requirements before unretiring
         uint256 selfEffective = _effectiveAmount(msg.sender, _selfRawShares(msg.sender));
-        if (selfEffective < prover.minSelfStake) revert MinSelfStakeNotMet();
-        if (selfEffective < _globalMinSelfStake()) revert GlobalMinSelfStakeNotMet();
+        if (selfEffective < _minSelfStake()) revert MinSelfStakeNotMet();
 
         // Unretire as active prover (keeping historical scale/slashing record)
         prover.state = ProverState.Active;
         activeProvers.add(msg.sender);
 
         emit ProverUnretired(msg.sender);
-    }
-
-    /**
-     * @notice Update minimum self-stake requirement for a prover
-     * @dev All updates are now effective immediately since provers can exit anytime via unstaking
-     * @param _newMinSelfStake New minimum self-stake amount in token units
-     */
-    function updateMinSelfStake(uint256 _newMinSelfStake) external {
-        if (provers[msg.sender].state == ProverState.Null) revert ProverNotRegistered();
-        if (_newMinSelfStake < _globalMinSelfStake()) revert GlobalMinSelfStakeNotMet();
-
-        // Apply the update immediately - no delay needed
-        _applyMinSelfStakeUpdate(msg.sender, _newMinSelfStake);
     }
 
     // =========================================================================
@@ -572,10 +548,9 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         // Prevent reactivation if prover has been severely slashed (scale below deactivation threshold)
         if (prover.scale <= DEACTIVATION_SCALE) revert InvalidScale();
 
-        // Check if prover still meets minimum self-stake requirements
+        // Check if prover still meets global minimum self-stake requirements
         uint256 selfEffective = _effectiveAmount(_prover, _selfRawShares(_prover));
-        if (selfEffective < prover.minSelfStake) revert MinSelfStakeNotMet();
-        if (selfEffective < _globalMinSelfStake()) revert GlobalMinSelfStakeNotMet();
+        if (selfEffective < _minSelfStake()) revert MinSelfStakeNotMet();
 
         prover.state = ProverState.Active;
         activeProvers.add(_prover);
@@ -613,7 +588,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @notice Get detailed prover information including self-stake data
      * @param _prover Address of the prover to query
      * @return state Current state of the prover (Null, Active, Retired, Deactivated)
-     * @return minSelfStake Minimum self-stake required for accepting delegations
      * @return totalStaked Total effective stake from all stakers (post-slashing)
      * @return selfEffectiveStake Prover's own effective stake amount (post-slashing)
      * @return stakerCount Number of active stakers (excluding zero-balance stakers)
@@ -621,18 +595,12 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     function getProverInfo(address _prover)
         external
         view
-        returns (
-            ProverState state,
-            uint256 minSelfStake,
-            uint256 totalStaked,
-            uint256 selfEffectiveStake,
-            uint256 stakerCount
-        )
+        returns (ProverState state, uint256 totalStaked, uint256 selfEffectiveStake, uint256 stakerCount)
     {
         ProverInfo storage prover = provers[_prover];
         uint256 effectiveTotalStaked = _getTotalEffectiveStake(_prover);
         uint256 selfEffective = _effectiveAmount(_prover, _selfRawShares(_prover));
-        return (prover.state, prover.minSelfStake, effectiveTotalStaked, selfEffective, prover.stakers.length());
+        return (prover.state, effectiveTotalStaked, selfEffective, prover.stakers.length());
     }
 
     /**
@@ -778,19 +746,14 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
             return (false, currentTotalStake);
         }
 
-        // Check if prover meets global minimum self-stake requirement
-        if (prover.minSelfStake < _globalMinSelfStake()) {
-            return (false, currentTotalStake);
-        }
-
         // Check if total stake meets the required threshold
         if (currentTotalStake < _minimumTotalStake) {
             return (false, currentTotalStake);
         }
 
-        // Verify prover actually meets their own minimum self-stake requirement
+        // Verify prover actually meets the global minimum self-stake requirement
         uint256 selfEffectiveStake = _effectiveAmount(_prover, _selfRawShares(_prover));
-        if (selfEffectiveStake < prover.minSelfStake) {
+        if (selfEffectiveStake < _minSelfStake()) {
             return (false, currentTotalStake);
         }
 
@@ -871,16 +834,16 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         if (_rawSharesToUnstake == 0 || stakeInfo.rawShares < _rawSharesToUnstake) revert InsufficientStake();
 
         // === PROVER SELF-STAKE VALIDATION ===
-        // For prover's self stake, ensure minimum self stake is maintained
+        // For prover's self stake, ensure global minimum self stake is maintained
         // EXCEPTION: Allow going to zero (complete exit) even if below minimum
         if (msg.sender == _prover) {
             uint256 currentSelfRawShares = _selfRawShares(_prover);
             if (currentSelfRawShares < _rawSharesToUnstake) revert SelfStakeUnderflow();
             uint256 remainingEffective = _effectiveAmount(_prover, currentSelfRawShares - _rawSharesToUnstake);
 
-            // Allow going below minSelfStake only if it results in zero self-stake (complete exit)
+            // Allow going below global minimum only if it results in zero self-stake (complete exit)
             if (remainingEffective > 0) {
-                if (remainingEffective < prover.minSelfStake) revert MinSelfStakeNotMet();
+                if (remainingEffective < _minSelfStake()) revert MinSelfStakeNotMet();
             } else if (prover.state == ProverState.Active) {
                 // === AUTO-DEACTIVATION ON COMPLETE EXIT ===
                 // Prover is exiting completely (remainingEffective == 0), deactivate them immediately
@@ -911,20 +874,6 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
         proverRewards.updateStakerRewardDebt(_prover, msg.sender, stakeInfo.rawShares);
 
         emit UnstakeRequested(msg.sender, _prover, _amountToUnstake, _rawSharesToUnstake);
-    }
-
-    /**
-     * @notice Internal function to apply minSelfStake update
-     * @param _prover The address of the prover
-     * @param _newMinSelfStake The new minimum self-stake amount
-     */
-    function _applyMinSelfStakeUpdate(address _prover, uint256 _newMinSelfStake) internal {
-        ProverInfo storage prover = provers[_prover];
-
-        // Update the minSelfStake
-        prover.minSelfStake = _newMinSelfStake;
-
-        emit MinSelfStakeUpdated(_prover, _newMinSelfStake);
     }
 
     // =========================================================================
@@ -991,11 +940,11 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
     }
 
     /**
-     * @notice Get current global minimum self stake
-     * @return Current global minimum self stake
+     * @notice Get current minimum self stake
+     * @return Current minimum self stake
      */
-    function _globalMinSelfStake() internal view returns (uint256) {
-        return globalParams[ParamName.GlobalMinSelfStake];
+    function _minSelfStake() internal view returns (uint256) {
+        return globalParams[ParamName.MinSelfStake];
     }
 
     /**

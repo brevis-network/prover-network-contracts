@@ -3,9 +3,9 @@ pragma solidity ^0.8.20;
 
 // Helper library exposing custom error selectors for vm.expectRevert
 library TestErrors {
-    error GlobalMinSelfStakeZero();
+    error MinSelfStakeZero();
     error InvalidCommission();
-    error GlobalMinSelfStakeNotMet();
+    error MinSelfStakeNotMet();
     error ZeroAmount();
     error ProverNotRegistered();
     error InvalidProverState();
@@ -17,7 +17,6 @@ library TestErrors {
     error NoReadyUnstakes();
     error SlashTooHigh();
     error ScaleTooLow();
-    error MinSelfStakeNotMet();
     error NoMinStakeChange();
     error NoPendingMinStakeUpdate();
     error MinStakeDelay();

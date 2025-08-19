@@ -13,9 +13,9 @@ contract TestProverStaking is ProverStaking {
     /**
      * @notice Test contract constructor
      * @param _token ERC20 token address (pass address(0) for upgradeable deployment)
-     * @param _globalMinSelfStake Global minimum self-stake requirement for all provers
+     * @param _minSelfStake Global minimum self-stake requirement for all provers
      */
-    constructor(address _token, uint256 _globalMinSelfStake) ProverStaking(_token, _globalMinSelfStake) {}
+    constructor(address _token, uint256 _minSelfStake) ProverStaking(_token, _minSelfStake) {}
 
     // Additional test helpers
     function getEffectiveAmount(address _prover, uint256 rawShares) external view returns (uint256) {

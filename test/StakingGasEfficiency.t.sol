@@ -72,7 +72,7 @@ contract StakingGasEfficiencyTest is Test {
         vm.prank(prover);
         brevToken.approve(address(proverStaking), MIN_SELF_STAKE);
         vm.prank(prover);
-        proverStaking.initProver(MIN_SELF_STAKE, COMMISSION_RATE);
+        proverStaking.initProver( COMMISSION_RATE);
 
         // Add 100 stakers
         address[] memory stakers = new address[](100);
@@ -105,7 +105,7 @@ contract StakingGasEfficiencyTest is Test {
         vm.prank(prover);
         brevToken.approve(address(proverStaking), MIN_SELF_STAKE);
         vm.prank(prover);
-        proverStaking.initProver(MIN_SELF_STAKE, COMMISSION_RATE);
+        proverStaking.initProver( COMMISSION_RATE);
 
         // Add 1000 stakers
         for (uint256 i = 0; i < 1000; i++) {
@@ -149,7 +149,7 @@ contract StakingGasEfficiencyTest is Test {
             vm.prank(testProver);
             brevToken.approve(address(proverStaking), MIN_SELF_STAKE);
             vm.prank(testProver);
-            proverStaking.initProver(MIN_SELF_STAKE, COMMISSION_RATE);
+            proverStaking.initProver( COMMISSION_RATE);
 
             // Add stakers
             for (uint256 i = 0; i < stakerCounts[j]; i++) {
@@ -180,7 +180,7 @@ contract StakingGasEfficiencyTest is Test {
         vm.prank(prover);
         brevToken.approve(address(proverStaking), MIN_SELF_STAKE);
         vm.prank(prover);
-        proverStaking.initProver(MIN_SELF_STAKE, 1000);
+        proverStaking.initProver( 1000);
 
         vm.prank(staker1);
         brevToken.approve(address(proverStaking), STAKE_AMOUNT);
@@ -210,7 +210,7 @@ contract StakingGasEfficiencyTest is Test {
         brevToken.approve(address(proverStaking), STAKE_AMOUNT);
         uint256 gasUsed = gasleft();
         vm.prank(prover);
-        proverStaking.initProver(STAKE_AMOUNT, 1000);
+        proverStaking.initProver( 1000);
         gasUsed = gasUsed - gasleft();
         console.log("InitProver:", gasUsed);
 

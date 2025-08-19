@@ -49,7 +49,7 @@ contract RewardsTest is Test {
     function _initializeProver(address prover) internal {
         vm.startPrank(prover);
         brevToken.approve(address(proverStaking), MIN_SELF_STAKE);
-        proverStaking.initProver(MIN_SELF_STAKE, uint64(COMMISSION_RATE));
+        proverStaking.initProver(uint64(COMMISSION_RATE));
         vm.stopPrank();
     }
 
