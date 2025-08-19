@@ -7,7 +7,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
-import "./access/AccessControl.sol";
+import "./access/PauserControl.sol"; // internally inherit AccessControl
 import "./interfaces/IProverRewards.sol";
 
 // =============================================================
@@ -48,7 +48,7 @@ error TreasuryInsufficient(); // Treasury pool balance too low for withdrawal
  *      - Unstaking has a configurable delay period for security
  *      - Rewards are handled by a separate ProverRewards contract for security isolation
  */
-contract ProverStaking is ReentrancyGuard, AccessControl {
+contract ProverStaking is ReentrancyGuard, PauserControl {
     using SafeERC20 for IERC20;
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -215,7 +215,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @notice Initialize a new prover and self-stake with the global minimum amount
      * @param _commissionRate Commission percentage in basis points (0-10000) - used for ProverRewards contract
      */
-    function initProver(uint64 _commissionRate) external {
+    function initProver(uint64 _commissionRate) external whenNotPaused {
         if (provers[msg.sender].state != ProverState.Null) revert InvalidProverState();
         if (_commissionRate > COMMISSION_RATE_DENOMINATOR) revert InvalidCommission();
 
@@ -250,7 +250,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _prover Address of the prover to stake with
      * @param _amount Amount of tokens to delegate
      */
-    function stake(address _prover, uint256 _amount) public nonReentrant {
+    function stake(address _prover, uint256 _amount) public whenNotPaused nonReentrant {
         if (_amount == 0) revert ZeroAmount();
         if (provers[_prover].state == ProverState.Null) revert ProverNotRegistered();
 
@@ -346,7 +346,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      *
      * @param _prover Address of the prover to complete unstaking from
      */
-    function completeUnstake(address _prover) external nonReentrant {
+    function completeUnstake(address _prover) external whenNotPaused nonReentrant {
         StakeInfo storage stakeInfo = provers[_prover].stakes[msg.sender];
 
         uint256 totalEffectiveAmount = 0;
@@ -405,7 +405,7 @@ contract ProverStaking is ReentrancyGuard, AccessControl {
      * @param _prover The address of the prover to be slashed
      * @param _percentage The percentage of stake to slash (0 to configured max slash percentage)
      */
-    function slash(address _prover, uint256 _percentage) external onlyRole(SLASHER_ROLE) {
+    function slash(address _prover, uint256 _percentage) external onlyRole(SLASHER_ROLE) whenNotPaused {
         if (provers[_prover].state == ProverState.Null) revert ProverNotRegistered();
         if (_percentage > _maxSlashFactor()) revert SlashTooHigh();
 
