@@ -58,7 +58,7 @@ contract DeployProverNetwork is Script {
             vaultFactoryProxy, // Use the proxy address
             vm.envUint("UNSTAKE_DELAY"),
             vm.envUint("MIN_SELF_STAKE"),
-            vm.envUint("MAX_SLASH_FACTOR")
+            vm.envUint("MAX_SLASH_BPS")
         );
 
         // Step 1d: Deploy StakingController proxy
@@ -128,7 +128,7 @@ contract DeployProverNetwork is Script {
         console.log("Staking Token:", vm.envAddress("STAKING_TOKEN_ADDRESS"));
         console.log("Unstake Delay:", vm.envUint("UNSTAKE_DELAY"));
         console.log("Min Self Stake:", vm.envUint("MIN_SELF_STAKE"));
-        console.log("Max Slash Factor:", vm.envUint("MAX_SLASH_FACTOR"));
+        console.log("Max Slash BPS:", vm.envUint("MAX_SLASH_BPS"));
         console.log("=== Brevis Market ===");
         console.log("Pico Verifier:", vm.envAddress("PICO_VERIFIER_ADDRESS"));
         console.log("Bidding Phase Duration:", vm.envUint("BIDDING_PHASE_DURATION"));

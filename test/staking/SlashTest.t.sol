@@ -39,7 +39,7 @@ contract SlashTest is Test {
             address(factory),
             DEFAULT_UNBOND_DELAY,
             1e18, // minSelfStake: 1 token
-            5000 // maxSlashFactor: 50%
+            5000 // maxSlashBps: 50%
         );
 
         // Grant roles
@@ -88,12 +88,12 @@ contract SlashTest is Test {
         console.log("Initial treasury:", initialTreasury);
 
         // Slash 10% (1000 basis points)
-        uint256 slashFactor = 1000; // 10%
+        uint256 slashBps = 1000; // 10%
         vm.prank(slasher); // slasher has SLASHER_ROLE
-        uint256 slashedAmount = controller.slash(prover1, slashFactor);
+        uint256 slashedAmount = controller.slash(prover1, slashBps);
 
         // Verify slash amount calculation
-        uint256 expectedSlash = (initialAssets * slashFactor) / controller.SLASH_FACTOR_DENOMINATOR();
+        uint256 expectedSlash = (initialAssets * slashBps) / controller.BPS_DENOMINATOR();
         assertEq(slashedAmount, expectedSlash, "Slashed amount should match expected");
 
         // Verify vault assets reduced
@@ -114,13 +114,13 @@ contract SlashTest is Test {
         vm.prank(prover1);
         controller.initializeProver(1000);
 
-        // Try to slash with factor higher than MaxSlashFactor
-        uint256 maxSlashFactor = controller.maxSlashFactor();
-        uint256 tooHighFactor = maxSlashFactor + 1;
+        // Try to slash with percentage higher than MaxSlashBps
+        uint256 maxSlashBps = controller.maxSlashBps();
+        uint256 tooHighBps = maxSlashBps + 1;
 
         vm.prank(slasher);
         vm.expectRevert(IStakingController.ControllerSlashTooHigh.selector);
-        controller.slash(prover1, tooHighFactor);
+        controller.slash(prover1, tooHighBps);
 
         // Try to slash as non-slasher (should fail)
         vm.prank(staker1);
@@ -150,12 +150,12 @@ contract SlashTest is Test {
 
         // If there are assets, slash them first to empty the vault
         if (initialAssets > 0) {
-            // Use maxSlashFactor instead of 100%
-            uint256 maxSlashFactor = controller.maxSlashFactor();
-            console.log("Max slash factor:", maxSlashFactor);
+            // Use maxSlashBps instead of 100%
+            uint256 maxSlashBps = controller.maxSlashBps();
+            console.log("Max slash bps:", maxSlashBps);
 
             vm.prank(slasher);
-            controller.slash(prover1, maxSlashFactor); // Max allowed slash to reduce vault
+            controller.slash(prover1, maxSlashBps); // Max allowed slash to reduce vault
         }
 
         // Now vault should have reduced assets, slash again should work
@@ -187,22 +187,22 @@ contract SlashTest is Test {
         uint256 initialAssets = vault.totalAssets();
 
         // Slash and check event
-        uint256 slashFactor = 2000; // 20%
-        uint256 expectedSlash = (initialAssets * slashFactor) / controller.SLASH_FACTOR_DENOMINATOR();
+        uint256 slashBps = 2000; // 20%
+        uint256 expectedSlash = (initialAssets * slashBps) / controller.BPS_DENOMINATOR();
 
         vm.expectEmit(true, false, false, true);
-        emit IStakingController.ProverSlashed(prover1, expectedSlash, slashFactor);
+        emit IStakingController.ProverSlashed(prover1, expectedSlash, slashBps);
 
         vm.prank(slasher);
-        uint256 actualSlash = controller.slash(prover1, slashFactor);
+        uint256 actualSlash = controller.slash(prover1, slashBps);
 
         assertEq(actualSlash, expectedSlash, "Actual slash should match expected");
     }
 
     function testSlashAutoDeactivatesProverBelowMinSelfStake() public {
-        // Increase MaxSlashFactor for testing
+        // Increase MaxSlashBps for testing
         vm.prank(admin);
-        controller.setMaxSlashFactor(9000); // Allow up to 90% slashing
+        controller.setMaxSlashBps(9000); // Allow up to 90% slashing
 
         // Initialize prover (will self-stake 1 ether due to MinSelfStake)
         vm.prank(prover1);
@@ -314,9 +314,9 @@ contract SlashTest is Test {
         uint256 proverAssets = IProverVault(vault).convertToAssets(proverShares);
         assertEq(proverAssets, 11 ether, "Prover should have 11 ether self-stake");
 
-        // Increase MaxSlashFactor for testing
+        // Increase MaxSlashBps for testing
         vm.prank(admin);
-        controller.setMaxSlashFactor(8000); // Allow up to 80% slashing
+        controller.setMaxSlashBps(8000); // Allow up to 80% slashing
 
         // Request unstake for some of the prover's stake to create pending unstakes
         // This is necessary because scale-based deactivation only applies when there are pending unstakes
@@ -356,9 +356,9 @@ contract SlashTest is Test {
 
         assertEq(uint256(controller.getProverState(prover1)), uint256(IStakingController.ProverState.Deactivated));
 
-        // Increase MaxSlashFactor for testing
+        // Increase MaxSlashBps for testing
         vm.prank(admin);
-        controller.setMaxSlashFactor(8000); // Allow up to 80% slashing
+        controller.setMaxSlashBps(8000); // Allow up to 80% slashing
 
         // Slash heavily (should not change state since already deactivated)
         vm.prank(slasher);
@@ -375,12 +375,12 @@ contract SlashTest is Test {
     // =========================================================================
 
     // From PendingUnstakes.sol constants
-    uint256 constant SLASH_FACTOR_DENOMINATOR = 10000;
+    uint256 constant BPS_DENOMINATOR = 10000;
     uint256 constant DEACTIVATION_SCALE = 4000; // 40%
     uint256 constant MIN_SCALE_FLOOR = 2000; // 20%
 
-    function testSlashFactorZeroIsNoOp() public {
-        // Test: Slash factor = 0 (no-op) succeeds (or expected behavior).
+    function testSlashPercentageZeroIsNoOp() public {
+        // Test: Slash percentage = 0 (no-op) succeeds (or expected behavior).
         // Value: State machine + guardrail validation.
 
         // Initialize prover
@@ -404,35 +404,35 @@ contract SlashTest is Test {
         uint256 treasuryBefore = controller.treasuryPool();
         IStakingController.ProverState stateBefore = controller.getProverState(prover1);
 
-        // Slash with factor 0
+        // Slash with percentage 0
         vm.prank(slasher);
         uint256 slashedAmount = controller.slash(prover1, 0);
 
         // Verify no-op behavior
-        assertEq(slashedAmount, 0, "Slash factor 0 should result in 0 slashed amount");
+        assertEq(slashedAmount, 0, "Slash percentage 0 should result in 0 slashed amount");
         assertEq(IProverVault(vault).totalAssets(), vaultAssetsBefore, "Vault assets should be unchanged");
         assertEq(controller.treasuryPool(), treasuryBefore, "Treasury should be unchanged");
         assertEq(uint256(controller.getProverState(prover1)), uint256(stateBefore), "Prover state should be unchanged");
     }
 
-    function testMaxSlashFactorZeroDisablesSlashingAboveZero() public {
-        // Test: maxSlashFactor = 0 disables slashing >0 (reverts); factor 0 still allowed.
+    function testMaxSlashBpsZeroDisablesSlashingAboveZero() public {
+        // Test: maxSlashBps = 0 disables slashBps 0 still allowed.
         // Value: State machine + guardrail validation.
 
         // Initialize prover
         vm.prank(prover1);
         controller.initializeProver(1000);
 
-        // Set max slash factor to 0 (disables all slashing except factor=0)
+        // Set max slashBps=0)
         vm.prank(admin);
-        controller.setMaxSlashFactor(0);
+        controller.setMaxSlashBps(0);
 
-        // Slash with factor 0 should still work
+        // Slash with percentage 0 should still work
         vm.prank(slasher);
         uint256 slashedAmount = controller.slash(prover1, 0);
-        assertEq(slashedAmount, 0, "Factor 0 should be allowed even when maxSlashFactor=0");
+        assertEq(slashedAmount, 0, "Percentage 0 should be allowed even when maxSlashBps=0");
 
-        // Slash with any non-zero factor should revert
+        // Slash with any non-zero percentage should revert
         vm.prank(slasher);
         vm.expectRevert(IStakingController.ControllerSlashTooHigh.selector);
         controller.slash(prover1, 1);
@@ -454,9 +454,9 @@ contract SlashTest is Test {
         vm.prank(prover1);
         controller.initializeProver(1000);
 
-        // Increase max slash factor for this test
+        // Increase max slashBps for this test
         vm.prank(admin);
-        controller.setMaxSlashFactor(9000);
+        controller.setMaxSlashBps(9000);
 
         // Setup: Create pending unstaking to enable scale tracking
         vm.prank(staker1);
@@ -493,9 +493,9 @@ contract SlashTest is Test {
         vm.prank(prover1);
         controller.initializeProver(1000);
 
-        // Increase max slash factor for this test
+        // Increase max slashBps for this test
         vm.prank(admin);
-        controller.setMaxSlashFactor(9000);
+        controller.setMaxSlashBps(9000);
 
         // Setup: Create pending unstaking to enable scale tracking
         // Give prover much more stake so vault slashing doesn't trigger minSelfStake deactivation
@@ -516,7 +516,7 @@ contract SlashTest is Test {
         controller.requestUnstake(prover1, 5 ether);
 
         // Slash to bring scale exactly to DEACTIVATION_SCALE (4000 = 40%)
-        // Initial scale is 10000, we want final scale = 4000, so factor = (10000-4000)/10000 = 6000 (60% slash)
+        // Initial scale is 10000, we want final scale = 4000, so percentage = (10000-4000)/10000 = 6000 (60% slash)
         vm.prank(slasher);
         controller.slash(prover1, 6000); // 60% slash -> scale becomes 4000 (exactly at boundary)
 
@@ -536,9 +536,9 @@ contract SlashTest is Test {
         vm.prank(prover1);
         controller.initializeProver(1000);
 
-        // Increase max slash factor for this test
+        // Increase max slashBps for this test
         vm.prank(admin);
-        controller.setMaxSlashFactor(9000);
+        controller.setMaxSlashBps(9000);
 
         // Setup: Create pending unstaking to enable scale tracking
         vm.prank(staker1);
@@ -553,7 +553,7 @@ contract SlashTest is Test {
         controller.requestUnstake(prover1, 5 ether);
 
         // Slash to bring scale just below DEACTIVATION_SCALE (< 4000)
-        // We want final scale = 3999, so factor = (10000-3999)/10000 = 6001 (60.01% slash)
+        // We want final scale = 3999, so percentage = (10000-3999)/10000 = 6001 (60.01% slash)
         vm.prank(slasher);
         controller.slash(prover1, 6001); // 60.01% slash -> scale becomes 3999 (just below boundary)
 
@@ -573,15 +573,15 @@ contract SlashTest is Test {
         vm.prank(prover1);
         controller.initializeProver(1000);
 
-        // Increase max slash factor for this test
+        // Increase max slashBps for this test
         vm.prank(admin);
-        controller.setMaxSlashFactor(9000);
+        controller.setMaxSlashBps(9000);
 
         // No pending unstakes - prover only has vault assets
-        // Note: The slashing scale is initialized to SLASH_FACTOR_DENOMINATOR (10000) even without unstaking
+        // Note: The slashing scale is initialized to BPS_DENOMINATOR (10000) even without unstaking
 
         // Slash enough to trigger deactivation (>60% to go below DEACTIVATION_SCALE of 4000)
-        uint256 slashFactor = 6500; // 65% slash -> scale becomes 10000 * 0.35 = 3500 (below DEACTIVATION_SCALE)
+        uint256 slashBps = 6500; // 65% slash -> scale becomes 10000 * 0.35 = 3500 (below DEACTIVATION_SCALE)
 
         // Verify prover is active before slash
         assertEq(
@@ -591,7 +591,7 @@ contract SlashTest is Test {
         );
 
         vm.prank(slasher);
-        uint256 slashedAmount = controller.slash(prover1, slashFactor);
+        uint256 slashedAmount = controller.slash(prover1, slashBps);
 
         // With no pending unstaking, only vault assets are slashed
         // But the scale is still updated and deactivation should trigger
@@ -603,23 +603,23 @@ contract SlashTest is Test {
         );
     }
 
-    function testSetMaxSlashFactorLoweredBlocksPreviouslyValidFactor() public {
-        // Test: setMaxSlashFactor lowered mid-process blocks previously valid higher factor.
+    function testSetMaxSlashBpsLoweredBlocksPreviouslyValidPercentage() public {
+        // Test: setMaxSlashBps lowered mid-process blocks previously valid higher percentage.
         // Value: State machine + guardrail validation.
 
         // Initialize prover
         vm.prank(prover1);
         controller.initializeProver(1000);
 
-        // Initial maxSlashFactor is 5000 (50%) from constructor
+        // Initial maxSlashBps is 5000 (50%) from constructor
 
-        // First slash with factor 4000 should work (within default 50% limit)
+        // First slashBps 4000 should work (within default 50% limit)
         vm.prank(slasher);
         controller.slash(prover1, 4000); // 40% slash
 
-        // Lower maxSlashFactor to 3000 (30%)
+        // Lower maxSlashBps to 3000 (30%)
         vm.prank(admin);
-        controller.setMaxSlashFactor(3000);
+        controller.setMaxSlashBps(3000);
 
         // Now attempting 4000 (40%) slash should revert (exceeds new 30% limit)
         vm.prank(slasher);
@@ -638,9 +638,9 @@ contract SlashTest is Test {
         vm.prank(prover1);
         controller.initializeProver(1000);
 
-        // Increase max slash factor for this test
+        // Increase max slashBps for this test
         vm.prank(admin);
-        controller.setMaxSlashFactor(9000);
+        controller.setMaxSlashBps(9000);
 
         // Setup: Give prover enough stake to survive vault slashing
         vm.prank(prover1);
@@ -680,7 +680,7 @@ contract SlashTest is Test {
         );
 
         // Third slash: 28.57% of remaining -> scale becomes 5600 * 0.7143 ≈ 4000 (exactly at boundary)
-        // To get from 5600 to 4000: factor = (5600-4000)/5600 = 1600/5600 ≈ 2857
+        // To get from 5600 to 4000: percentage = (5600-4000)/5600 = 1600/5600 ≈ 2857
         vm.prank(slasher);
         controller.slash(prover1, 2857);
         assertEq(
@@ -708,9 +708,9 @@ contract SlashTest is Test {
         vm.prank(prover1);
         controller.initializeProver(1000);
 
-        // Increase max slash factor for this test
+        // Increase max slashBps for this test
         vm.prank(admin);
-        controller.setMaxSlashFactor(9000);
+        controller.setMaxSlashBps(9000);
 
         // Setup: Stake large amounts
         vm.prank(staker1);
@@ -796,9 +796,9 @@ contract SlashTest is Test {
         stakingToken.mint(staker3, INITIAL_MINT);
         vm.stopPrank();
 
-        // Increase max slash factor
+        // Increase max slashBps
         vm.prank(admin);
-        controller.setMaxSlashFactor(8000);
+        controller.setMaxSlashBps(8000);
 
         // Setup: Each staker stakes 100 ether
         vm.prank(staker1);
@@ -914,7 +914,7 @@ contract SlashTest is Test {
 
         // Slash the prover (should affect all 10 pending requests)
         vm.prank(admin);
-        controller.setMaxSlashFactor(6000);
+        controller.setMaxSlashBps(6000);
         vm.prank(slasher);
         uint256 slashedAmount = controller.slash(prover1, 4000); // 40% slash
 
@@ -1022,7 +1022,7 @@ contract SlashTest is Test {
 
         // Now slash the prover heavily
         vm.prank(admin);
-        controller.setMaxSlashFactor(8000);
+        controller.setMaxSlashBps(8000);
         vm.prank(slasher);
         controller.slash(prover1, 6000); // 60% slash
 
@@ -1067,11 +1067,11 @@ contract SlashTest is Test {
 
         // Allow maximum slashing
         vm.prank(admin);
-        controller.setMaxSlashFactor(9000);
+        controller.setMaxSlashBps(9000);
 
         // Slash to just above MIN_SCALE_FLOOR (20%)
         // To get scale to 2001 (just above 20%), need to slash 79.99%
-        // Current scale 10000, target scale 2001: factor = (10000-2001)/10000 = 7999
+        // Current scale 10000, target scale 2001: percentage = (10000-2001)/10000 = 7999
         vm.prank(slasher);
         controller.slash(prover1, 7999); // 79.99% slash
 
@@ -1083,7 +1083,7 @@ contract SlashTest is Test {
         );
 
         // Verify scale is just above MIN_SCALE_FLOOR
-        uint256 currentScale = controller.getProverSlashingFactor(prover1);
+        uint256 currentScale = controller.getProverSlashingScale(prover1);
         assertGt(currentScale, 2000, "Scale should be above MIN_SCALE_FLOOR");
         assertLt(currentScale, 2100, "Scale should be just above floor");
 
@@ -1148,5 +1148,187 @@ contract SlashTest is Test {
         // Should receive slashed amount: 50 * 0.7 = 35 ether
         uint256 expected = (50 ether * 7000) / 10000;
         assertEq(received, expected, "Should receive slashed amount after delay");
+    }
+
+    // =========================================================================
+    // AMOUNT-BASED SLASHING TESTS
+    // =========================================================================
+
+    function testSlashByAmount_exactProportional() public {
+        // Setup: Prover with 100 tokens, request 25% slash
+        setupProverWithAssets(prover1, 100e18);
+
+        uint256 totalAssets = getProverTotalAssets(prover1);
+        uint256 requestAmount = totalAssets / 4; // 25%
+
+        vm.prank(slasher);
+        uint256 actualSlashed = controller.slashByAmount(prover1, requestAmount);
+
+        // Should slash exactly the requested amount (within rounding tolerance)
+        assertApproxEqAbs(actualSlashed, requestAmount, 1, "Should slash requested amount within rounding tolerance");
+
+        // Verify final assets reduced by slashed amount
+        uint256 finalAssets = getProverTotalAssets(prover1);
+        assertEq(finalAssets, totalAssets - actualSlashed, "Final assets should equal initial minus slashed");
+    }
+
+    function testSlashByAmount_capAtMax() public {
+        // Setup: Prover with 100 tokens, maxSlashBps = 50%
+        setupProverWithAssets(prover1, 100e18);
+
+        uint256 totalAssets = getProverTotalAssets(prover1);
+        uint256 requestAmount = totalAssets * 80 / 100; // Request 80% (exceeds 50% cap)
+        uint256 expectedCap = totalAssets * controller.maxSlashBps() / controller.BPS_DENOMINATOR();
+
+        vm.prank(slasher);
+        uint256 actualSlashed = controller.slashByAmount(prover1, requestAmount);
+
+        // Should be capped at maxSlashBps
+        assertEq(actualSlashed, expectedCap, "Should be capped at maxSlashBps");
+        assertTrue(actualSlashed < requestAmount, "Actual should be less than requested due to cap");
+    }
+
+    function testSlashByAmount_roundsToZero() public {
+        // Setup: Prover with 1 token, request tiny amount that rounds to 0%
+        setupProverWithAssets(prover1, 1e18);
+
+        uint256 tinyAmount = 1; // 1 wei - should round to 0 bps
+
+        vm.prank(slasher);
+        uint256 actualSlashed = controller.slashByAmount(prover1, tinyAmount);
+
+        // Should slash 0 due to rounding
+        assertEq(actualSlashed, 0, "Should slash 0 due to rounding");
+    }
+
+    function testSlashByAmount_includesUnstaking() public {
+        // Setup: Prover with vault assets + pending unstakes
+        setupProverWithAssets(prover1, 1000 ether);
+
+        // Add a second staker for unstaking test
+        stakingToken.mint(staker2, 500 ether);
+        vm.prank(staker2);
+        stakingToken.approve(address(controller), 500 ether);
+        vm.prank(staker2);
+        controller.stake(prover1, 500 ether);
+
+        // Create pending unstakes
+        address vault = controller.getProverVault(prover1);
+        vm.prank(staker2);
+        IProverVault(vault).approve(address(controller), 200 ether);
+        vm.prank(staker2);
+        controller.requestUnstake(prover1, 200 ether);
+
+        // Now we have: ~1000 vault assets + ~200 pending unstaking = ~1200 total
+        uint256 vaultAssetsBefore = IProverVault(vault).totalAssets();
+        uint256 pendingUnstakingBefore = controller.getProverTotalUnstaking(prover1);
+        uint256 totalBefore = vaultAssetsBefore + pendingUnstakingBefore;
+
+        // Slash 300 tokens (~25% of total ~1200)
+        vm.prank(slasher);
+        uint256 actualSlashed = controller.slashByAmount(prover1, 300 ether);
+
+        // Verify both vault and pending unstaking were reduced
+        uint256 vaultAssetsAfter = IProverVault(vault).totalAssets();
+        uint256 pendingUnstakingAfter = controller.getProverTotalUnstaking(prover1);
+
+        // Both should be reduced proportionally
+        uint256 vaultReduction = vaultAssetsBefore - vaultAssetsAfter;
+        uint256 unstakeReduction = pendingUnstakingBefore - pendingUnstakingAfter;
+
+        assertGt(vaultReduction, 0, "Vault assets should be reduced");
+        assertGt(unstakeReduction, 0, "Pending unstaking should be reduced");
+        assertEq(actualSlashed, vaultReduction + unstakeReduction, "Total slashed should equal sum of reductions");
+
+        // Verify proportional slashing (within reasonable tolerance)
+        uint256 expectedBps = (300 ether * 10000) / totalBefore;
+        uint256 actualBps = (actualSlashed * 10000) / totalBefore;
+
+        // Allow for small rounding differences
+        assertTrue(
+            actualBps >= expectedBps - 1 && actualBps <= expectedBps + 1,
+            "Should slash approximately the expected percentage"
+        );
+    }
+
+    function testSlashByAmount_autoDeactivateOnAmountSlash() public {
+        // Setup: Prover with exactly minSelfStake, slash amount that drops below minimum
+        uint256 minSelfStake = controller.minSelfStake();
+        setupProverWithAssets(prover1, minSelfStake + 1e15); // Add small buffer
+
+        // Verify prover is active
+        assertEq(uint256(controller.getProverState(prover1)), uint256(IStakingController.ProverState.Active));
+
+        // Slash amount that will drop self-stake below minimum
+        uint256 slashAmount = 2e15; // Drop below minSelfStake
+
+        vm.prank(slasher);
+        controller.slashByAmount(prover1, slashAmount);
+
+        // Should auto-deactivate
+        assertEq(uint256(controller.getProverState(prover1)), uint256(IStakingController.ProverState.Deactivated));
+    }
+
+    function testSlashByAmount_event() public {
+        setupProverWithAssets(prover1, 100e18);
+        uint256 requestAmount = 20e18;
+
+        // Calculate expected BPS
+        uint256 totalAssets = controller.getProverTotalAssets(prover1);
+        uint256 expectedBps = (requestAmount * controller.BPS_DENOMINATOR()) / totalAssets;
+
+        vm.expectEmit(true, false, false, true);
+        emit IStakingController.ProverSlashed(prover1, requestAmount, expectedBps);
+
+        vm.prank(slasher);
+        controller.slashByAmount(prover1, requestAmount);
+    }
+
+    function testSlashByAmount_zeroAmount() public {
+        setupProverWithAssets(prover1, 100e18);
+
+        vm.prank(slasher);
+        uint256 actualSlashed = controller.slashByAmount(prover1, 0);
+
+        assertEq(actualSlashed, 0, "Should slash 0 when amount is 0");
+    }
+
+    function testSlashByAmount_exceedsTotal() public {
+        // Setup: Request amount greater than total slashable assets
+        setupProverWithAssets(prover1, 100e18);
+
+        uint256 totalAssets = controller.getProverTotalAssets(prover1);
+        uint256 requestAmount = totalAssets * 2; // Request 200% of total
+        uint256 expectedCap = totalAssets * controller.maxSlashBps() / controller.BPS_DENOMINATOR();
+
+        vm.prank(slasher);
+        uint256 actualSlashed = controller.slashByAmount(prover1, requestAmount);
+
+        // Should be capped at maxSlashBps, not total assets
+        assertEq(actualSlashed, expectedCap, "Should be capped at maxSlashBps even when exceeding total");
+    }
+
+    // =========================================================================
+    // HELPER FUNCTIONS FOR AMOUNT SLASHING TESTS
+    // =========================================================================
+
+    function setupProverWithAssets(address prover, uint256 assets) internal {
+        // Initialize prover first (uses existing approval from setUp)
+        vm.prank(prover);
+        controller.initializeProver(500); // 5% default commission
+
+        // Now stake additional assets (beyond minSelfStake)
+        if (assets > controller.minSelfStake()) {
+            uint256 additionalAssets = assets - controller.minSelfStake();
+
+            vm.startPrank(prover);
+            stakingToken.approve(address(controller), additionalAssets);
+            controller.stake(prover, additionalAssets);
+            vm.stopPrank();
+        }
+    }
+
+    function getProverTotalAssets(address prover) internal view returns (uint256) {
+        return controller.getProverTotalAssets(prover);
     }
 }

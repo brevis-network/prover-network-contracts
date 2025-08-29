@@ -21,22 +21,17 @@ A staking system with isolated per-prover vaults, time-delayed unstaking, slashi
 The staking system consists of three main components:
 
 ### **StakingController** (Central Orchestrator)
-- Orchestrates lifecycle: delegation, rewards, slashing, state transitions.
-- Custodies pending unstakes and slashed funds (treasury).
-- Provides O(1) share accounting and enforces minimum self-stake + optional authorization.
+- Orchestrates lifecycle: delegation, rewards, slashing, state transitions
+- Custodies pending unstakes and slashed funds (treasury)
+- Provides O(1) share accounting and enforces minimum self-stake
 
 ### **ProverVault** (Per-Prover Isolation)
-- Per-prover ERC4626 vault; only controller can deposit/withdraw underlying.
-- Shares are transferable ERC20 (self-stake minimum portion non‑transferable).
-- Rewards are donated (no new shares), raising share price for all.
+- Per-prover ERC4626 vault; only controller can deposit/withdraw underlying
+- Shares are transferable ERC20 (minimum self-stake portion non‑transferable)
+- Rewards are donated (no new shares), raising share price for all
 
 ### **VaultFactory** (Deterministic Deployment)
 - Creates predictable vault addresses using CREATE2 (supports pre-registration & off-chain discovery)
-
-### **Key Properties**
-- Constant-time accounting: per-prover O(1) core operations
-- Capital-efficient: rewards auto-compound; shares remain liquid (minus locked self-stake)
-- Two-phase unstake: requests burn shares immediately; value remains slashable until completion
 
 ---
 
@@ -48,20 +43,18 @@ The staking system consists of three main components:
 - **Null:** Not initialized
 - **Active:** Accepting delegations, participating in consensus, slashable
 - **Deactivated:** Not accepting new delegations, can still complete unstakes
-- **Jailed:** Admin penalty state, stronger than deactivated
+- **Jailed:** Admin penalty state, cannot self-reactivate
 
 **State Transitions:**
-- `initializeProver()` -> **Active** (requires minimum self-stake)
-- Full self-stake exit -> **Deactivated** (automatic)
-- Slashing below minimum -> **Deactivated** (automatic)  
-- Admin actions -> **Deactivated**/**Jailed**/**Active**
-- `retireProver()` -> **Null** (only if vault empty and no pending unstakes)
+- Initialize prover -> `Active` (requires minimum self-stake)
+- Self exit or slashing below minimum -> `Deactivated` (automatic)
+- Admin actions -> `Deactivated`/`Jailed`/`Active`
+- Retire prover -> `Null` (only if vault empty and no pending unstakes)
 
 ### **Self-Stake Policy**
 
 - **Minimum Enforcement:** Provers must maintain `MinSelfStake` in active vault shares
-- **Partial Restrictions:** Cannot reduce self-stake to (0, MinSelfStake) range
-- **Full Exit Allowed:** Complete self-stake removal permitted (triggers deactivation)
+- **Exit Policy:** Cannot reduce to (0, MinSelfStake) range; full exit permitted (triggers deactivation)
 - **Pending Exclusion:** Only vault shares count, not assets in pending unstakes
 - **Dynamic Enforcement:** Changes to `MinSelfStake` don't force immediate deactivation
 
@@ -71,29 +64,19 @@ The staking system consists of three main components:
 
 ### **Staking Flow**
 1. **Validation:** Prover exists and (if delegator) state is Active.
-2. **Token Transfer & Deposit:** Controller pulls user tokens and deposits into the prover's vault, receiving shares.
-3. **Accounting & Event:** Share balances updated via hooks; emit `Staked` (prover, staker, assets, shares).
+2. **Deposit:** Controller pulls user tokens and deposits into the prover's vault, receiving shares.
+3. **Accounting:** Share balances updated via hooks; emit `Staked` (prover, staker, assets, shares).
 
 ### **Two-Phase Unstaking**
 
 **Phase 1: Request (`requestUnstake`)**
-- **Share Burning:** Shares immediately burned, stop accruing rewards  
-- **Request Recording:** Creates `UnstakeRequest` with current slashing scale snapshot
-- **Self-Stake Check:** Enforces minimum requirements for prover
-- **Request Limits:** Maximum 10 pending requests per (prover, staker) pair
-- **Auto-Deactivation:** Triggers if prover exits all self-stake
+- Shares immediately burned, stop accruing rewards; records `UnstakeRequest`
+- Enforces minimum self-stake requirements; maximum 10 pending requests per (prover, staker) pair
 
 **Phase 2: Completion (`completeUnstake`)**  
-- **Delay Enforcement:** Must wait at least `unstakeDelay` seconds
-- **Current Slashing:** Effective amount computed via slashing scale (see Section 5)
-- **Batch Processing:** Processes all ready requests from oldest first
-- **Asset Transfer:** Transfers effective amounts to user
-- **Continuous Slashing:** Assets remain slashable until completion transaction
-
-**Critical Behaviors:**
-- **Post-Maturity Slashing:** Ready requests continue to be affected by slashing
-- **Zero Delay Still Two-Step:** Even with `unstakeDelay = 0`, completion required
-- **Scale Continues:** No "freezing" of value at maturity time
+- Must wait at least `unstakeDelay` seconds
+- Effective amount computed via current slashing scale; transfers assets to user
+- Ready requests continue affected by slashing until completion; no "freezing" of value at maturity
 
 ---
 
@@ -103,34 +86,38 @@ The staking system consists of three main components:
 - Caller invokes `addRewards(prover, totalAmount)` (`msg.sender` = reward source)
 - Lookup rate: `rate = getCommissionRate(prover, msg.sender)` (basis points)
 - Split: `commission = totalAmount * rate / 10000`; `remainder = totalAmount - commission`
-- Accrue: add `commission` to `pendingCommission`
-- Donate: send `remainder` to the vault (no new shares minted)
+- Accrue & Donate: add `commission` to `pendingCommission`; send `remainder` to the vault
 - Effect: vault share price increases for all existing holders; reverts if vault has zero shares (windfall guard)
 
-### **Commission Management**
+### **Commission Rate**
 - **Resolution:** `rate = commissionRates[msg.sender] if set else commissionRates[address(0)]` (basis points)
-- **Rationale:** Aligns commission with heterogeneous source cost profiles (heavy proof fees vs baseline) while avoiding over/under‑charging and vault proliferation
+- **Rationale:** Aligns commission with heterogeneous source cost profiles (heavy proof fees vs baseline)
 
 ---
 
 ## 5. Slashing Model
 
-### **Dual-Target Slashing**
-```
-slash(prover, factor) // factor in basis points (0-10000)
-├── Pending Unstakes: Apply factor to slashingScale, reduce totalUnstaking
-├── Vault Assets: Proportional removal via vault.controllerSlash()  
-└── Treasury Transfer: All slashed amounts moved to controller treasury
-```
+### **Slashing Functions**
+The system provides two slashing interfaces that both use the same dual-target mechanism:
+
+**Percentage-Based Slashing:**
+- Function: `slash(prover, bps)` (percentage in basis points 0-10000) - default primary slash function
+- Uses the provided percentage to slash both targets proportionally
+
+**Amount-Based Slashing:**
+- Function: `slashByAmount(prover, amount)` - convenience variant that internally converts absolute asset amount to bps
+- Derivation: `bps = amount * 10000 / (vaultAssets + pendingUnstaking)` (rounded down, capped by `maxSlashBps`)
+- Result: may slash less than requested due to cap or rounding
+
+### **Dual-Target Mechanism**
+Both slashing functions apply the determined percentage to two targets, and move slashed assets to controller treasury.
+- **Vault Assets:** Proportional removal via `vault.controllerSlash()`
+- **Pending Unstakes:** Apply percentage to slashingScale, reduce totalUnstaking
 
 ### **Slashing Scale & Application**
-- **Initial Scale:** 10000 bps (100%).
-- **Cumulative Scaling:** Each slash: `newScale = currentScale × (10000 - factor) ÷ 10000` (then bounded by floor).
-- **Floor:** `MIN_SCALE_FLOOR` (2000 = 20%) prevents total value wipeout.
-- **Deactivation:** Triggers if scale < `DEACTIVATION_SCALE` (4000 = 40%) or self-stake < minimum (see [Section 2](#2-prover-lifecycle)).
-- **Future Requests:** Snapshot current scale at request time.
-- **Pending Requests:** Effective withdrawal = `original × currentScale ÷ snapshotScale` at completion.
-- **Continuous Impact:** Scale changes propagate to all pending requests until completed.
+- **Scale Management:** Starts at 100%; each slash reduces the scale proportionally with a floor at 20% to prevent total value wipeout
+- **Deactivation Triggers:** Scale below 40% or self-stake below minimum automatically deactivates prover
+- **Pending Unstake Impact:** New requests snapshot current scale; existing requests are adjusted proportionally until completion
 
 ---
 
@@ -140,7 +127,7 @@ slash(prover, factor) // factor in basis points (0-10000)
 | Parameter | Units / Format | Description |
 |-----------|----------------|-------------|
 | `MinSelfStake` | tokens | Minimum self-stake a prover must maintain to stay Active |
-| `MaxSlashFactor` | bps (0–10000) | Max fraction removable in a single slashing event |
+| `MaxSlashBps` | bps (0–10000) | Max fraction removable in a single slashing event |
 | `UnstakeDelay` | seconds | Minimum wait between request and completion of unstake |
 | `AuthorizationRequired` | bool | If true, `initializeProver` requires `AUTHORIZED_PROVER_ROLE` |
 
@@ -166,11 +153,7 @@ slash(prover, factor) // factor in basis points (0-10000)
 
 ### **Built-In Protections**
 
-**Smart Contract Safety:**
-- **Reentrancy Protection:** All external calls protected by OpenZeppelin ReentrancyGuard
-- **State Consistency:** Share-transfer hook syncs controller balances on every mint/burn/transfer
-- **Access Controls:** Role-based permissions prevent unauthorized operations
-- **Input Validation:** All operations validate prover existence, state requirements, and parameter bounds
+**Smart Contract Safety:** Reentrancy Protection | State Consistency | Access Controls | Input Validation
 
 **Economic Safeguards (summarized):** Core protections are specified in earlier functional sections (slashing floor, windfall guard, request limit, self‑stake minimum, two‑phase unstake with continued slashability) and not repeated here to avoid redundancy; see Sections 3–5.
 
@@ -182,7 +165,7 @@ slash(prover, factor) // factor in basis points (0-10000)
 - Role mismanagement (slasher / authorized prover) can enable unintended actions
 
 **Parameter Abuse**
-- Adverse adjustments to `MinSelfStake`, `MaxSlashFactor`, or `UnstakeDelay` can shift economics suddenly
+- Adverse adjustments to `MinSelfStake`, `MaxSlashBps`, or `UnstakeDelay` can shift economics suddenly
 - Governance process (off‑chain) needed for parameter change review
 
 **Commission Front‑Running**
@@ -191,16 +174,6 @@ slash(prover, factor) // factor in basis points (0-10000)
 **Implementation Drift**
 - Future vault/controller code changes could desynchronize accounting assumptions
 - Maintain invariant tests around share/asset accounting and slashing math
-
-**Underlying Asset Risk**
-- Underlying token pause / upgrade / depeg impacts all vaults
-- Consider whitelisting only battle‑tested assets and monitoring token events
-
-**Monitoring Practices**
-- Track cumulative slashing scale for extreme penalties
-- Periodically withdraw & account treasury balances
-- Audit commission rate changes for anomalous timing
-- Rotate slasher roles; review access lists regularly
 
 ---
 
@@ -213,9 +186,9 @@ The interface is organized into logical sections:
 - [Staking Operations](../src/staking/interfaces/IStakingController.sol#L136) - Stake, unstake, complete withdrawal  
 - [Reward & Commission](../src/staking/interfaces/IStakingController.sol#L163) - Reward distribution and commission claims
 - [Slashing](../src/staking/interfaces/IStakingController.sol#L197) - Penalty mechanisms
-- [View Functions](../src/staking/interfaces/IStakingController.sol#L209) - Query prover info, staking data, and unstaking status
-- [Vault Integration](../src/staking/interfaces/IStakingController.sol#L411) - Vault interaction controls
-- [Admin Functions](../src/staking/interfaces/IStakingController.sol#L465) - Parameter management and emergency controls
+- [View Functions](../src/staking/interfaces/IStakingController.sol#L220) - Query prover info, staking data, and unstaking status
+- [Vault Integration](../src/staking/interfaces/IStakingController.sol#L429) - Vault interaction controls
+- [Admin Functions](../src/staking/interfaces/IStakingController.sol#L483) - Parameter management and emergency controls
 
 ---
 

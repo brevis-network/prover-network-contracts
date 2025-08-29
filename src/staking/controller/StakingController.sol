@@ -6,7 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
-import "@security/access/PauserControl.sol"; // internally inherit AccessControl
+import "@security/access/PauserControl.sol"; // PauserControl -> AccessControl -> Ownable
 import "../interfaces/IStakingController.sol";
 import "../interfaces/IVaultFactory.sol";
 import "../interfaces/IProverVault.sol";
@@ -31,8 +31,6 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
     // 77a8d217b4b31e7c722578c208f5ba9973f8291ae83d602d73c54039808746ae
     bytes32 public constant AUTHORIZED_PROVER_ROLE = keccak256("AUTHORIZED_PROVER_ROLE");
 
-    uint256 public constant COMMISSION_RATE_DENOMINATOR = 10000; // 100.00%
-
     // =========================================================================
     // STORAGE
     // =========================================================================
@@ -42,7 +40,7 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
 
     // Parameter storage
     uint256 public minSelfStake;
-    uint256 public maxSlashFactor;
+    uint256 public maxSlashBps;
     bool public authorizationRequired;
 
     // Core data structures
@@ -83,11 +81,11 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
         address _vaultFactory,
         uint256 _unstakeDelay,
         uint256 _minSelfStake,
-        uint256 _maxSlashFactor
+        uint256 _maxSlashBps
     ) {
         // Only initialize if non-zero values are provided (direct deployment)
         if (_stakingToken != address(0) && _vaultFactory != address(0)) {
-            _init(_stakingToken, _vaultFactory, _unstakeDelay, _minSelfStake, _maxSlashFactor);
+            _init(_stakingToken, _vaultFactory, _unstakeDelay, _minSelfStake, _maxSlashBps);
             // Note: Ownable constructor automatically sets msg.sender as owner
         }
         // For upgradeable deployment, pass zero addresses and call init() separately
@@ -102,9 +100,9 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
         address _vaultFactory,
         uint256 _unstakeDelay,
         uint256 _minSelfStake,
-        uint256 _maxSlashFactor
+        uint256 _maxSlashBps
     ) external {
-        _init(_stakingToken, _vaultFactory, _unstakeDelay, _minSelfStake, _maxSlashFactor);
+        _init(_stakingToken, _vaultFactory, _unstakeDelay, _minSelfStake, _maxSlashBps);
         initOwner(); // requires _owner == address(0), which is only possible when it's a delegateCall
     }
 
@@ -117,13 +115,13 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
         address _vaultFactory,
         uint256 _unstakeDelay,
         uint256 _minSelfStake,
-        uint256 _maxSlashFactor
+        uint256 _maxSlashBps
     ) internal {
         stakingToken = IERC20(_stakingToken);
         vaultFactory = IVaultFactory(_vaultFactory);
         unstakeDelay = _unstakeDelay;
         minSelfStake = _minSelfStake;
-        maxSlashFactor = _maxSlashFactor;
+        maxSlashBps = _maxSlashBps;
 
         // Note: Slasher role will be set by owner after BrevisMarket deployment
     }
@@ -146,7 +144,7 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
         returns (address vault)
     {
         // Validate inputs
-        if (defaultCommissionRate > COMMISSION_RATE_DENOMINATOR) revert ControllerInvalidArg();
+        if (defaultCommissionRate > BPS_DENOMINATOR) revert ControllerInvalidArg();
 
         // Check prover not already initialized
         address prover = msg.sender;
@@ -156,7 +154,7 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
         vault = vaultFactory.createVault(address(stakingToken), prover, address(this));
 
         // Initialize prover slashing scale to 100% (10000 basis points)
-        pendingUnstakes[prover].slashingScale = SLASH_FACTOR_DENOMINATOR;
+        pendingUnstakes[prover].slashingScale = BPS_DENOMINATOR;
 
         // Store prover info
         // Initialize prover info
@@ -432,7 +430,7 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
         uint256 commissionRate = getCommissionRate(prover, msg.sender);
 
         // Calculate commission split
-        commission = (amount * commissionRate) / COMMISSION_RATE_DENOMINATOR;
+        commission = (amount * commissionRate) / BPS_DENOMINATOR;
         toStakers = amount - commission;
 
         // Add commission to pending balance
@@ -492,7 +490,7 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
         if (proverInfo.state == ProverState.Null) revert ControllerProverNotInitialized();
 
         // Validate new rate <= 100%
-        if (newRate > COMMISSION_RATE_DENOMINATOR) revert ControllerInvalidArg();
+        if (newRate > BPS_DENOMINATOR) revert ControllerInvalidArg();
 
         // Get old rate for event (0 if not set)
         (, uint256 oldRate) = proverInfo.commissionRates.tryGet(source);
@@ -535,10 +533,10 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
     /**
      * @notice Slash a prover's vault (admin/slasher only)
      * @param prover The prover to slash
-     * @param factor The factor to slash (in basis points)
+     * @param bps The percentage to slash (in basis points)
      * @return slashedAmount The amount of assets slashed
      */
-    function slash(address prover, uint256 factor)
+    function slash(address prover, uint256 bps)
         external
         override
         whenNotPaused
@@ -550,16 +548,63 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
         ProverInfo storage proverInfo = _proverInfo[prover];
         if (proverInfo.state == ProverState.Null) revert ControllerProverNotInitialized();
 
-        // Validate factor <= MaxSlashFactor
-        if (factor > maxSlashFactor) revert ControllerSlashTooHigh();
+        // Validate bps <= MaxSlashBps
+        if (bps > maxSlashBps) revert ControllerSlashTooHigh();
+
+        return _executeSlash(prover, bps);
+    }
+
+    /**
+     * @notice Slash a specific amount from a prover's total assets (admin/slasher only)
+     * @dev Calculates the appropriate percentage based on total slashable assets
+     * @param prover The prover to slash
+     * @param amount The exact amount to slash
+     * @return slashedAmount The actual amount of assets slashed (may be less if insufficient assets)
+     */
+    function slashByAmount(address prover, uint256 amount)
+        external
+        whenNotPaused
+        nonReentrant
+        onlyRole(SLASHER_ROLE)
+        returns (uint256 slashedAmount)
+    {
+        // Validate prover exists
+        ProverInfo storage proverInfo = _proverInfo[prover];
+        if (proverInfo.state == ProverState.Null) revert ControllerProverNotInitialized();
+
+        if (amount == 0) return 0;
+
+        // Get total slashable assets using the public view function
+        uint256 totalAssets = getProverTotalAssets(prover);
+        if (totalAssets == 0) return 0;
+
+        // Calculate the bps needed to slash the requested amount
+        uint256 bps = (amount * BPS_DENOMINATOR) / totalAssets;
+
+        // Cap bps to maxSlashBps
+        if (bps > maxSlashBps) {
+            bps = maxSlashBps;
+        }
+
+        return _executeSlash(prover, bps);
+    }
+
+    /**
+     * @notice Internal function to execute slashing with a given percentage
+     * @param prover The prover to slash
+     * @param bps The slashing percentage in basis points
+     * @return slashedAmount The total amount slashed
+     */
+    function _executeSlash(address prover, uint256 bps) internal returns (uint256 slashedAmount) {
+        ProverInfo storage proverInfo = _proverInfo[prover];
 
         // First slash unstaking tokens proportionally
-        (uint256 unstakingSlashed, bool shouldDeactivate) = _slashUnstaking(prover, factor);
+        (uint256 unstakingSlashed, bool shouldDeactivate) = _slashUnstaking(prover, bps);
 
         // Calculate vault slash amount from vault's total assets
         address vault = proverInfo.vault;
         uint256 vaultAssets = IProverVault(vault).totalAssets();
-        uint256 vaultSlashedAmount = (vaultAssets * factor) / SLASH_FACTOR_DENOMINATOR;
+        uint256 vaultSlashedAmount = (vaultAssets * bps) / BPS_DENOMINATOR;
         // Ensure we don't slash more than what's available
         if (vaultSlashedAmount > vaultAssets) {
             vaultSlashedAmount = vaultAssets;
@@ -591,7 +636,7 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
         treasuryPool += slashedAmount;
 
         // Emit ProverSlashed event
-        emit ProverSlashed(prover, slashedAmount, factor);
+        emit ProverSlashed(prover, slashedAmount, bps);
 
         // Return slashed amount
         return slashedAmount;
@@ -898,6 +943,24 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
         }
     }
 
+    /**
+     * @notice Get total slashable assets for a prover (vault + unstaking)
+     * @param prover The prover address
+     * @return totalAssets The total slashable assets (vault assets + pending unstaking assets)
+     */
+    function getProverTotalAssets(address prover) public view override returns (uint256 totalAssets) {
+        // Validate prover exists
+        ProverInfo storage proverInfo = _proverInfo[prover];
+        if (proverInfo.state == ProverState.Null) return 0;
+
+        // Calculate total slashable assets (vault + unstaking)
+        address vault = proverInfo.vault;
+        uint256 vaultAssets = IProverVault(vault).totalAssets();
+        uint256 unstakingAssets = pendingUnstakes[prover].totalUnstaking;
+
+        return vaultAssets + unstakingAssets;
+    }
+
     // =========================================================================
     // INTERNAL HELPER FUNCTIONS
     // =========================================================================
@@ -950,15 +1013,15 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
     }
 
     /**
-     * @notice Set maximum slash factor (owner only)
-     * @param value The new maximum slash factor value (in basis points)
-     * @dev Zero value disables all slashing (only factor=0 allowed)
+     * @notice Set maximum slash percentage (owner only)
+     * @param value The new maximum slash percentage value (in basis points)
+     * @dev Zero value disables all slashing (only bps=0 allowed)
      */
-    function setMaxSlashFactor(uint256 value) external override onlyOwner {
-        if (value > SLASH_FACTOR_DENOMINATOR) revert ControllerInvalidArg();
-        uint256 oldValue = maxSlashFactor;
-        maxSlashFactor = value;
-        emit MaxSlashFactorUpdated(oldValue, value);
+    function setMaxSlashBps(uint256 value) external override onlyOwner {
+        if (value > BPS_DENOMINATOR) revert ControllerInvalidArg();
+        uint256 oldValue = maxSlashBps;
+        maxSlashBps = value;
+        emit MaxSlashBpsUpdated(oldValue, value);
     }
 
     /**

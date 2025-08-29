@@ -29,7 +29,7 @@ contract ShareTransferTest is Test {
             address(factory),
             3 days,
             1e18, // minSelfStake: 1 token
-            5000 // maxSlashFactor: 50%
+            5000 // maxSlashBps: 50%
         );
         // Grant controller permission to create vaults (test contract is default admin)
         factory.init(address(controller));

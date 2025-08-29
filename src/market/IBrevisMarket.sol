@@ -18,7 +18,8 @@ interface IBrevisMarket {
     enum ReqStatus {
         Pending,
         Fulfilled,
-        Refunded
+        Refunded,
+        Slashed
     }
 
     // =========================================================================
@@ -55,11 +56,16 @@ interface IBrevisMarket {
     event BidRevealed(bytes32 indexed reqid, address indexed prover, uint256 fee);
     event ProofSubmitted(bytes32 indexed reqid, address indexed prover, uint256[8] proof, uint256 actualFee);
     event Refunded(bytes32 indexed reqid, address indexed requester, uint256 amount);
+    event ProverSlashed(bytes32 indexed reqid, address indexed prover, uint256 slashAmount);
     event PicoVerifierUpdated(address indexed oldVerifier, address indexed newVerifier);
     event BiddingPhaseDurationUpdated(uint64 oldDuration, uint64 newDuration);
     event RevealPhaseDurationUpdated(uint64 oldDuration, uint64 newDuration);
     event MinMaxFeeUpdated(uint256 oldFee, uint256 newFee);
     event FeeTokenUpdated(address indexed oldToken, address indexed newToken);
+    event SlashBpsUpdated(uint256 oldBps, uint256 newBps);
+    event SlashWindowUpdated(uint256 oldWindow, uint256 newWindow);
+    event ProtocolFeeBpsUpdated(uint256 oldBps, uint256 newBps);
+    event ProtocolFeeWithdrawn(address indexed to, uint256 amount);
 
     // =========================================================================
     // ERRORS
@@ -82,9 +88,15 @@ interface IBrevisMarket {
     error MarketNotExpectedProver(address expected, address actual);
     error MarketInvalidRequestStatus(ReqStatus status);
     error MarketBeforeDeadline(uint256 currentTime, uint256 deadline);
+    error MarketCannotRefundYet(uint256 currentTime, uint256 deadline, uint256 biddingEndTime, uint256 revealEndTime);
     error MarketProverNotEligible(address prover, uint256 requiredStake, uint256 actualStake);
     error MarketZeroAddress();
     error MarketInvalidStakingController();
+    error MarketInvalidSlashBps();
+    error MarketSlashWindowExpired(uint256 currentTime, uint256 slashWindowEnd);
+    error MarketNoAssignedProverToSlash(bytes32 reqid);
+    error MarketInvalidProtocolFeeBps();
+    error MarketNoProtocolFeeToWithdraw();
 
     // =========================================================================
     // PROOF REQUEST MANAGEMENT
@@ -131,6 +143,13 @@ interface IBrevisMarket {
      */
     function refund(bytes32 reqid) external;
 
+    /**
+     * @notice Slash the assigned prover for failing to submit proof within deadline
+     * @dev Can be called by anyone within slash window after deadline passes
+     * @param reqid The request ID for which to slash the assigned prover
+     */
+    function slash(bytes32 reqid) external;
+
     // =========================================================================
     // ADMIN FUNCTIONS
     // =========================================================================
@@ -162,6 +181,34 @@ interface IBrevisMarket {
      * @param newMinFee New minimum fee amount
      */
     function setMinMaxFee(uint256 newMinFee) external;
+
+    /**
+     * @notice Update the slash percentage for penalizing non-performing provers
+     * @dev Only owner can call this function
+     * @param newBps New slash percentage in basis points (0-10000)
+     */
+    function setSlashBps(uint256 newBps) external;
+
+    /**
+     * @notice Update the slash window duration
+     * @dev Only owner can call this function
+     * @param newWindow New slash window duration in seconds
+     */
+    function setSlashWindow(uint256 newWindow) external;
+
+    /**
+     * @notice Update the protocol fee percentage
+     * @dev Only owner can call this function
+     * @param newBps New protocol fee percentage in basis points (0-10000)
+     */
+    function setProtocolFeeBps(uint256 newBps) external;
+
+    /**
+     * @notice Withdraw accumulated protocol fees
+     * @dev Only owner can call this function
+     * @param to Address to send the fees to
+     */
+    function withdrawProtocolFee(address to) external;
 
     // =========================================================================
     // VIEW FUNCTIONS
@@ -208,6 +255,13 @@ interface IBrevisMarket {
      * @return fee Minimum fee amount
      */
     function minMaxFee() external view returns (uint256 fee);
+
+    /**
+     * @notice Get the protocol fee percentage and balance
+     * @return feeBps Protocol fee percentage in basis points
+     * @return balance Accumulated protocol fee balance
+     */
+    function getProtocolFeeInfo() external view returns (uint256 feeBps, uint256 balance);
 
     // =========================================================================
     // REQUEST QUERY FUNCTIONS

@@ -40,7 +40,7 @@ Deploys only the BrevisMarket as an upgradeable contract using transparent proxy
    STAKING_TOKEN_ADDRESS=0x...          # ERC20 token for staking
    UNSTAKE_DELAY=604800                 # 7 days in seconds
    MIN_SELF_STAKE=1000000000000000000   # 1 token minimum
-   MAX_SLASH_FACTOR=5000                # 50% max slashing
+   MAX_SLASH_BPS=5000                   # 50% max slashing
    
    # Market System  
    PICO_VERIFIER_ADDRESS=0x...          # PicoVerifier contract

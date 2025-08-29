@@ -34,7 +34,7 @@ contract MinSelfStakeTest is Test {
             address(factory),
             INITIAL_UNBOND_DELAY,
             1e18, // minSelfStake: 1 token (will be updated below)
-            5000 // maxSlashFactor: 50%
+            5000 // maxSlashBps: 50%
         );
 
         // Initialize the factory with the controller
@@ -259,22 +259,22 @@ contract MinSelfStakeTest is Test {
         uint256 preSlashAssets = IProverVault(vault).totalAssets();
         assertTrue(preSlashAssets >= MIN_SELF_STAKE + 50e18, "Should have sufficient stake before slashing");
 
-        // Check current max slash factor
-        uint256 currentMaxSlash = controller.maxSlashFactor();
-        console.log("Current max slash factor:", currentMaxSlash);
+        // Check current max slashBps
+        uint256 currentMaxSlash = controller.maxSlashBps();
+        console.log("Current max slashBps:", currentMaxSlash);
 
-        // Set higher max slash factor to allow sufficient slashing (use admin as owner)
+        // Set higher max slashBps to allow sufficient slashing (use admin as owner)
         vm.prank(admin);
-        controller.setMaxSlashFactor(8000); // Allow up to 80% slashing
+        controller.setMaxSlashBps(8000); // Allow up to 80% slashing
 
-        uint256 newMaxSlash = controller.maxSlashFactor();
-        console.log("New max slash factor:", newMaxSlash);
-        assertEq(newMaxSlash, 8000, "Max slash factor should be updated");
+        uint256 newMaxSlash = controller.maxSlashBps();
+        console.log("New max slashBps:", newMaxSlash);
+        assertEq(newMaxSlash, 8000, "Max slashBps should be updated");
 
-        // Use a slash factor that's definitely within the new limit (50%)
-        uint256 slashFactor = 5000; // 50% slash, should be fine
+        // Use a slashBps that's definitely within the new limit (50%)
+        uint256 slashBps = 5000; // 50% slash, should be fine
         vm.prank(admin);
-        controller.slash(prover1, slashFactor);
+        controller.slash(prover1, slashBps);
 
         uint256 postSlashAssets = IProverVault(vault).totalAssets();
         console.log("Pre-slash assets:", preSlashAssets);
@@ -620,9 +620,9 @@ contract MinSelfStakeTest is Test {
 
         // Multiple small slashes
         for (uint256 i = 0; i < 5; i++) {
-            uint256 slashFactor = 1500; // 15% each time
+            uint256 slashBps = 1500; // 15% each time
             vm.prank(admin);
-            controller.slash(prover1, slashFactor);
+            controller.slash(prover1, slashBps);
 
             uint256 assetsAfterSlash = IProverVault(vault).totalAssets();
 
@@ -701,9 +701,9 @@ contract MinSelfStakeTest is Test {
         address vault = controller.getProverVault(prover1);
 
         // Slash below minimum to deactivate - 50% should bring 100e18 to 50e18, below minimum
-        uint256 slashFactor = 5000; // 50% slash - should bring below minimum
+        uint256 slashBps = 5000; // 50% slash - should bring below minimum
         vm.prank(admin);
-        controller.slash(prover1, slashFactor);
+        controller.slash(prover1, slashBps);
 
         IStakingController.ProverState state = controller.getProverState(prover1);
         assertTrue(state == IStakingController.ProverState.Deactivated, "Should be deactivated");
@@ -779,9 +779,9 @@ contract MinSelfStakeTest is Test {
         controller.requestUnstake(prover1, attemptedShares);
 
         // Slash that reduces prover's effective stake
-        uint256 slashFactor = 3000; // 30% slash
+        uint256 slashBps = 3000; // 30% slash
         vm.prank(admin);
-        controller.slash(prover1, slashFactor);
+        controller.slash(prover1, slashBps);
 
         uint256 proverAssetsAfterSlash = IProverVault(vault).convertToAssets(IProverVault(vault).balanceOf(prover1));
 

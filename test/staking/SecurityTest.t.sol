@@ -32,7 +32,7 @@ contract SecurityTest is Test {
             address(vaultFactory),
             7 days,
             1e18, // minSelfStake: 1 token
-            5000 // maxSlashFactor: 50%
+            5000 // maxSlashBps: 50%
         );
 
         // Grant vault creator role to controller (test contract is owner)
@@ -355,7 +355,7 @@ contract SecurityTest is Test {
 
         vm.prank(attacker);
         vm.expectRevert();
-        controller.setMaxSlashFactor(8000);
+        controller.setMaxSlashBps(8000);
 
         // Test that provers can only manage their own state
         address prover2 = makeAddr("prover2");

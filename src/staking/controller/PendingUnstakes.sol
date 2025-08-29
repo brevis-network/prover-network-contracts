@@ -13,14 +13,11 @@ import "../interfaces/IStakingController.sol";
 abstract contract PendingUnstakes is IStakingController {
     using EnumerableSet for EnumerableSet.AddressSet;
     // =========================================================================
-    // CONSTANTS & CONFIGURATION
+    // CONSTANTS
     // =========================================================================
 
-    // Denominator for slashing calculations
-    uint256 public constant SLASH_FACTOR_DENOMINATOR = 10000;
-
-    // Maximum unstaking requests per staker per prover
-    uint256 public constant MAX_PENDING_UNSTAKES = 10;
+    uint256 public constant BPS_DENOMINATOR = 10000; // 100.00%
+    uint256 public constant MAX_PENDING_UNSTAKES = 10; // Maximum unstaking requests per staker per prover
 
     // Slashing protection thresholds
     uint256 public constant DEACTIVATION_SCALE = 4000; // 40% (soft threshold - triggers deactivation)
@@ -34,7 +31,7 @@ abstract contract PendingUnstakes is IStakingController {
     uint256 public unstakeDelay;
 
     // Consolidated pending unstakes data per prover
-    // StakingController initializeProver initializes slashingScale to SLASH_FACTOR_DENOMINATOR
+    // StakingController initializeProver initializes slashingScale to BPS_DENOMINATOR
     mapping(address => ProverPendingUnstakes) pendingUnstakes;
 
     uint256 public totalUnstaking; // Total amount currently unstaking across all provers
@@ -146,19 +143,18 @@ abstract contract PendingUnstakes is IStakingController {
     /**
      * @notice Slashes unstaking tokens proportionally for a prover
      * @param prover The prover to slash unstaking tokens for
-     * @param factor The slashing factor in basis points (e.g., 2000 = 20%)
+     * @param bps The slashing percentage in basis points (e.g., 2000 = 20%)
      * @return slashedAmount The total amount of tokens slashed from unstaking pool
      * @return shouldDeactivate Whether the prover should be deactivated
      */
-    function _slashUnstaking(address prover, uint256 factor)
+    function _slashUnstaking(address prover, uint256 bps)
         internal
         returns (uint256 slashedAmount, bool shouldDeactivate)
     {
-        if (factor > SLASH_FACTOR_DENOMINATOR) revert ControllerInvalidArg();
+        if (bps > BPS_DENOMINATOR) revert ControllerInvalidArg();
 
         // Calculate what the new scale would be after slashing
-        uint256 newScale =
-            (pendingUnstakes[prover].slashingScale * (SLASH_FACTOR_DENOMINATOR - factor)) / SLASH_FACTOR_DENOMINATOR;
+        uint256 newScale = (pendingUnstakes[prover].slashingScale * (BPS_DENOMINATOR - bps)) / BPS_DENOMINATOR;
 
         // Prevent slashing that would push scale below hard floor (20%)
         if (newScale < MIN_SCALE_FLOOR) {
@@ -178,7 +174,7 @@ abstract contract PendingUnstakes is IStakingController {
         }
 
         // Calculate slash amount
-        slashedAmount = (proverTotalUnstaking * factor) / SLASH_FACTOR_DENOMINATOR;
+        slashedAmount = (proverTotalUnstaking * bps) / BPS_DENOMINATOR;
         if (slashedAmount == 0) {
             return (0, shouldDeactivate); // Nothing to slash
         }
@@ -207,10 +203,10 @@ abstract contract PendingUnstakes is IStakingController {
     ) internal pure returns (uint256 effectiveAmount) {
         // Defensive checks - scales should be initialized when this is called, but ensure safety
         if (currentSlashingScale == 0) {
-            currentSlashingScale = SLASH_FACTOR_DENOMINATOR;
+            currentSlashingScale = BPS_DENOMINATOR;
         }
         if (requestScaleSnapshot == 0) {
-            requestScaleSnapshot = SLASH_FACTOR_DENOMINATOR;
+            requestScaleSnapshot = BPS_DENOMINATOR;
         }
 
         // Effective amount = original * (current_scale / snapshot_scale)
@@ -283,9 +279,9 @@ abstract contract PendingUnstakes is IStakingController {
     /**
      * @notice Get the cumulative slashing scale for a prover
      * @param prover The prover address to query
-     * @return scale The current slashing scale in basis points (10000 = 100%, 8000 = 80%)
+     * @return scale The current cumulative slashing scale in basis points (10000 = no slashing, 8000 = 20% slashed)
      */
-    function getProverSlashingFactor(address prover) external view override returns (uint256 scale) {
+    function getProverSlashingScale(address prover) external view override returns (uint256 scale) {
         return pendingUnstakes[prover].slashingScale;
     }
 

@@ -20,6 +20,7 @@ contract BrevisMarketTest is Test {
     address public prover1 = address(0x3);
     address public prover2 = address(0x4);
     address public prover3 = address(0x5);
+    address public user1 = address(0x6);
 
     uint64 public constant BIDDING_DURATION = 1 hours;
     uint64 public constant REVEAL_DURATION = 30 minutes;
@@ -413,8 +414,17 @@ contract BrevisMarketTest is Test {
         vm.prank(requester);
         market.requestProof(req);
 
+        // Should fail with MarketCannotRefundYet since we're still in bidding phase with no early refund conditions met
+        uint256 biddingEndTime = block.timestamp + BIDDING_DURATION;
+        uint256 revealEndTime = biddingEndTime + REVEAL_DURATION;
         vm.expectRevert(
-            abi.encodeWithSelector(IBrevisMarket.MarketBeforeDeadline.selector, block.timestamp, req.fee.deadline)
+            abi.encodeWithSelector(
+                IBrevisMarket.MarketCannotRefundYet.selector,
+                block.timestamp,
+                req.fee.deadline,
+                biddingEndTime,
+                revealEndTime
+            )
         );
         market.refund(reqid);
     }
@@ -658,5 +668,797 @@ contract BrevisMarketTest is Test {
         (IBrevisMarket.ReqStatus status,,,,,,,) = market.getRequest(reqid);
         assertEq(uint256(status), uint256(IBrevisMarket.ReqStatus.Refunded));
         assertEq(feeToken.balanceOf(requester), requesterBalanceBefore + MAX_FEE);
+    }
+
+    // =========================================================================
+    // EARLY REFUND TESTS
+    // =========================================================================
+
+    function test_EarlyRefund_NoBidsAfterBiddingPhase() public {
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        // Fast forward past bidding phase but before deadline
+        vm.warp(block.timestamp + BIDDING_DURATION + 1);
+
+        uint256 requesterBalanceBefore = feeToken.balanceOf(requester);
+
+        vm.expectEmit(true, true, false, true);
+        emit Refunded(reqid, requester, MAX_FEE);
+
+        // Should be able to refund early since no bids were placed
+        market.refund(reqid);
+
+        // Verify refund processed correctly
+        (IBrevisMarket.ReqStatus status,,,,,,,) = market.getRequest(reqid);
+        assertEq(uint256(status), uint256(IBrevisMarket.ReqStatus.Refunded));
+        assertEq(feeToken.balanceOf(requester), requesterBalanceBefore + MAX_FEE);
+    }
+
+    function test_EarlyRefund_BidsSubmittedButNoneRevealed() public {
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        uint256 fee = 5e17;
+        uint256 nonce = 123;
+        bytes32 bidHash = _createBidHash(fee, nonce);
+
+        // Place bid but don't reveal
+        vm.prank(prover1);
+        market.bid(reqid, bidHash);
+
+        // Fast forward past reveal phase but before deadline
+        vm.warp(block.timestamp + BIDDING_DURATION + REVEAL_DURATION + 1);
+
+        uint256 requesterBalanceBefore = feeToken.balanceOf(requester);
+
+        vm.expectEmit(true, true, false, true);
+        emit Refunded(reqid, requester, MAX_FEE);
+
+        // Should be able to refund early since no bids were revealed (no winner)
+        market.refund(reqid);
+
+        // Verify refund processed correctly
+        (IBrevisMarket.ReqStatus status,,,,,,,) = market.getRequest(reqid);
+        assertEq(uint256(status), uint256(IBrevisMarket.ReqStatus.Refunded));
+        assertEq(feeToken.balanceOf(requester), requesterBalanceBefore + MAX_FEE);
+    }
+
+    function test_EarlyRefund_CannotRefundDuringBiddingPhase() public {
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        // Try to refund during bidding phase (should fail)
+        uint256 biddingEndTime = block.timestamp + BIDDING_DURATION;
+        uint256 revealEndTime = biddingEndTime + REVEAL_DURATION;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IBrevisMarket.MarketCannotRefundYet.selector,
+                block.timestamp,
+                req.fee.deadline,
+                biddingEndTime,
+                revealEndTime
+            )
+        );
+        market.refund(reqid);
+    }
+
+    function test_EarlyRefund_CannotRefundDuringRevealPhaseWithBids() public {
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        uint256 requestTime = block.timestamp;
+        uint256 fee = 5e17;
+        uint256 nonce = 123;
+        bytes32 bidHash = _createBidHash(fee, nonce);
+
+        // Place bid
+        vm.prank(prover1);
+        market.bid(reqid, bidHash);
+
+        // Fast forward to reveal phase but don't reveal
+        vm.warp(requestTime + BIDDING_DURATION + 1);
+
+        uint256 biddingEndTime = requestTime + BIDDING_DURATION;
+        uint256 revealEndTime = requestTime + BIDDING_DURATION + REVEAL_DURATION;
+
+        // Try to refund during reveal phase (should fail - still have time for reveals)
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IBrevisMarket.MarketCannotRefundYet.selector,
+                block.timestamp,
+                req.fee.deadline,
+                biddingEndTime,
+                revealEndTime
+            )
+        );
+        market.refund(reqid);
+    }
+
+    function test_EarlyRefund_CannotRefundWhenWinnerExists() public {
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        uint256 requestTime = block.timestamp;
+        uint256 fee = 5e17;
+        uint256 nonce = 123;
+        bytes32 bidHash = _createBidHash(fee, nonce);
+
+        // Place and reveal bid (creates a winner)
+        vm.prank(prover1);
+        market.bid(reqid, bidHash);
+
+        vm.warp(requestTime + BIDDING_DURATION + 1);
+        vm.prank(prover1);
+        market.reveal(reqid, fee, nonce);
+
+        // Fast forward past reveal phase but before deadline
+        vm.warp(requestTime + BIDDING_DURATION + REVEAL_DURATION + 1);
+
+        uint256 biddingEndTime = requestTime + BIDDING_DURATION;
+        uint256 revealEndTime = requestTime + BIDDING_DURATION + REVEAL_DURATION;
+
+        // Should NOT be able to refund early since there's a winner
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IBrevisMarket.MarketCannotRefundYet.selector,
+                block.timestamp,
+                req.fee.deadline,
+                biddingEndTime,
+                revealEndTime
+            )
+        );
+        market.refund(reqid);
+    }
+
+    function test_EarlyRefund_TracksBidCountCorrectly() public {
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        uint256 requestTime = block.timestamp;
+        uint256 fee = 5e17;
+        uint256 nonce = 123;
+        bytes32 bidHash = _createBidHash(fee, nonce);
+
+        // Place bid from prover1
+        vm.prank(prover1);
+        market.bid(reqid, bidHash);
+
+        // Replace bid from same prover (should not increase count)
+        bytes32 newBidHash = _createBidHash(4e17, 456);
+        vm.prank(prover1);
+        market.bid(reqid, newBidHash);
+
+        // Add bid from different prover
+        vm.prank(prover2);
+        market.bid(reqid, bidHash);
+
+        // Fast forward past bidding phase
+        vm.warp(requestTime + BIDDING_DURATION + 1);
+
+        // Should NOT be able to refund since we have 2 bids (from 2 provers)
+        uint256 biddingEndTime = requestTime + BIDDING_DURATION;
+        uint256 revealEndTime = requestTime + BIDDING_DURATION + REVEAL_DURATION;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IBrevisMarket.MarketCannotRefundYet.selector,
+                block.timestamp,
+                req.fee.deadline,
+                biddingEndTime,
+                revealEndTime
+            )
+        );
+        market.refund(reqid);
+    }
+
+    function test_EarlyRefund_WorksWithMultipleBidsButNoReveals() public {
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        uint256 fee = 5e17;
+        uint256 nonce = 123;
+        bytes32 bidHash = _createBidHash(fee, nonce);
+
+        // Place bids from multiple provers
+        vm.prank(prover1);
+        market.bid(reqid, bidHash);
+        vm.prank(prover2);
+        market.bid(reqid, bidHash);
+
+        // Fast forward past reveal phase without revealing any bids
+        vm.warp(block.timestamp + BIDDING_DURATION + REVEAL_DURATION + 1);
+
+        uint256 requesterBalanceBefore = feeToken.balanceOf(requester);
+
+        // Should be able to refund since no winner was determined
+        market.refund(reqid);
+
+        // Verify refund processed correctly
+        (IBrevisMarket.ReqStatus status,,,,,,,) = market.getRequest(reqid);
+        assertEq(uint256(status), uint256(IBrevisMarket.ReqStatus.Refunded));
+        assertEq(feeToken.balanceOf(requester), requesterBalanceBefore + MAX_FEE);
+    }
+
+    // =========================================================================
+    // SLASH INTEGRATION TESTS
+    // =========================================================================
+
+    function test_RefundNoLongerSlashes() public {
+        // Test that refund no longer performs slashing - it's now separated
+        uint256 slashBps = 2000; // 20%
+        uint256 slashWindow = 1 days;
+
+        vm.startPrank(owner);
+        market.setSlashBps(slashBps);
+        market.setSlashWindow(slashWindow);
+        vm.stopPrank();
+
+        stakingController.setProverStake(prover1, MIN_STAKE * 2);
+
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        _completeAuctionWithWinner(reqid, prover1, MAX_FEE / 2);
+
+        // Fast forward past deadline but within slash window
+        vm.warp(req.fee.deadline + 1);
+
+        // Refund should NOT trigger slash anymore (it's separated)
+        market.refund(reqid);
+
+        // Verify no slash was called during refund
+        assertFalse(stakingController.wasAnySlashCalled(), "Refund should no longer trigger slashing");
+
+        // Verify refund worked correctly
+        (IBrevisMarket.ReqStatus status,,,,,,,) = market.getRequest(reqid);
+        assertEq(uint256(status), uint256(IBrevisMarket.ReqStatus.Refunded));
+    }
+
+    function test_Slash_usesRequestMinStakeNotProverAssets() public {
+        // Setup: Test that slash calculation always uses req.fee.minStake regardless of prover's actual assets
+        // This is the key behavior - slashing is based on the request's requirements, not prover's holdings
+        uint256 slashBps = 2000; // 20%
+        uint256 slashWindow = 1 days;
+
+        vm.startPrank(owner);
+        market.setSlashBps(slashBps);
+        market.setSlashWindow(slashWindow);
+        vm.stopPrank();
+
+        // Set prover with assets much higher than the request's minStake
+        stakingController.setProverStake(prover1, MIN_STAKE * 10); // 10x the minStake
+
+        // Create a request with a specific minStake
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+        // req.fee.minStake = MIN_STAKE (1e18)
+
+        // Complete auction with prover1 as winner
+        vm.prank(requester);
+        market.requestProof(req);
+
+        _completeAuctionWithWinner(reqid, prover1, MAX_FEE / 2);
+
+        // Fast forward past deadline but within slash window
+        vm.warp(req.fee.deadline + 1);
+
+        // Refund first (no slashing)
+        market.refund(reqid);
+
+        // Expected slash should be based on req.fee.minStake (1e18), NOT prover's actual assets (10e18)
+        // This shows the market uses the request's minStake parameter for slash calculation
+        uint256 expectedSlashAmount = (req.fee.minStake * slashBps) / market.BPS_DENOMINATOR();
+        // expectedSlashAmount = (1e18 * 2000) / 10000 = 0.2e18
+
+        // Now call slash separately
+        market.slash(reqid);
+
+        // Verify slash was called with amount based on req.fee.minStake, not prover's actual assets
+        assertTrue(
+            stakingController.wasSlashByAmountCalled(prover1, expectedSlashAmount),
+            "slashByAmount should use req.fee.minStake for calculation, not prover's actual assets"
+        );
+    }
+
+    function test_Slash_onlyWithinSlashWindow() public {
+        uint256 slashBps = 1000; // 10%
+        uint256 slashWindow = 1 days;
+
+        vm.startPrank(owner);
+        market.setSlashBps(slashBps);
+        market.setSlashWindow(slashWindow);
+        vm.stopPrank();
+
+        stakingController.setProverStake(prover1, MIN_STAKE * 2);
+
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        _completeAuctionWithWinner(reqid, prover1, MAX_FEE / 2);
+
+        // Fast forward past deadline AND slash window
+        vm.warp(req.fee.deadline + slashWindow + 1);
+
+        // Refund first
+        market.refund(reqid);
+
+        // Slash should revert (outside window)
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IBrevisMarket.MarketSlashWindowExpired.selector, block.timestamp, req.fee.deadline + slashWindow
+            )
+        );
+        market.slash(reqid);
+
+        // Verify no slash was called
+        assertFalse(stakingController.wasAnySlashCalled(), "No slash should occur outside slash window");
+    }
+
+    function test_Slash_noAssignedProver() public {
+        uint256 slashBps = 1000; // 10%
+        uint256 slashWindow = 1 days;
+
+        vm.startPrank(owner);
+        market.setSlashBps(slashBps);
+        market.setSlashWindow(slashWindow);
+        vm.stopPrank();
+
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        // No bids placed - no assigned prover
+        vm.warp(req.fee.deadline + 1);
+
+        // Refund first
+        market.refund(reqid);
+
+        // Slash should revert (no assigned prover)
+        vm.expectRevert(abi.encodeWithSelector(IBrevisMarket.MarketNoAssignedProverToSlash.selector, reqid));
+        market.slash(reqid);
+
+        // Verify no slash was called
+        assertFalse(stakingController.wasAnySlashCalled(), "No slash should occur when no assigned prover");
+    }
+
+    function test_Slash_zeroSlashBps() public {
+        uint256 slashBps = 0; // No slashing
+        uint256 slashWindow = 1 days;
+
+        vm.startPrank(owner);
+        market.setSlashBps(slashBps);
+        market.setSlashWindow(slashWindow);
+        vm.stopPrank();
+
+        stakingController.setProverStake(prover1, MIN_STAKE * 2);
+
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        _completeAuctionWithWinner(reqid, prover1, MAX_FEE / 2);
+
+        vm.warp(req.fee.deadline + 1);
+
+        // Refund first
+        market.refund(reqid);
+
+        // Slash should call slashByAmount but with amount = 0 (due to slashBps = 0)
+        market.slash(reqid);
+
+        // Calculate expected slash amount (should be 0)
+        uint256 expectedSlashAmount = (req.fee.minStake * slashBps) / market.BPS_DENOMINATOR(); // = 0
+
+        // Verify slash was called with 0 amount
+        assertTrue(
+            stakingController.wasSlashByAmountCalled(prover1, expectedSlashAmount),
+            "slashByAmount should be called with 0 amount when slashBps = 0"
+        );
+    }
+
+    function test_Slash_integrationWithActualController() public {
+        // This test would require integration with a real StakingController
+        // For now, we rely on the mock to verify the integration pattern
+
+        uint256 slashBps = 1500; // 15%
+        uint256 slashWindow = 2 days;
+
+        vm.startPrank(owner);
+        market.setSlashBps(slashBps);
+        market.setSlashWindow(slashWindow);
+        vm.stopPrank();
+
+        stakingController.setProverStake(prover1, MIN_STAKE * 3);
+
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        _completeAuctionWithWinner(reqid, prover1, MAX_FEE / 3);
+
+        vm.warp(req.fee.deadline + 1);
+
+        // Refund first
+        market.refund(reqid);
+
+        // Then slash
+        market.slash(reqid);
+
+        // Calculate expected values
+        uint256 expectedSlashAmount = (req.fee.minStake * slashBps) / market.BPS_DENOMINATOR();
+
+        // Verify integration - mock should have received correct parameters
+        assertTrue(
+            stakingController.wasSlashByAmountCalled(prover1, expectedSlashAmount),
+            "Integration should call slashByAmount correctly"
+        );
+    }
+
+    function test_Slash_beforeDeadline() public {
+        uint256 slashBps = 1000;
+        uint256 slashWindow = 1 days;
+
+        vm.startPrank(owner);
+        market.setSlashBps(slashBps);
+        market.setSlashWindow(slashWindow);
+        vm.stopPrank();
+
+        stakingController.setProverStake(prover1, MIN_STAKE * 2);
+
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        _completeAuctionWithWinner(reqid, prover1, MAX_FEE / 2);
+
+        // Try to slash before deadline passes - should fail because request needs to be refunded first
+        vm.expectRevert(
+            abi.encodeWithSelector(IBrevisMarket.MarketInvalidRequestStatus.selector, IBrevisMarket.ReqStatus.Pending)
+        );
+        market.slash(reqid);
+    }
+
+    function test_Slash_requiresRefundedStatus() public {
+        uint256 slashBps = 1000;
+        uint256 slashWindow = 1 days;
+
+        vm.startPrank(owner);
+        market.setSlashBps(slashBps);
+        market.setSlashWindow(slashWindow);
+        vm.stopPrank();
+
+        stakingController.setProverStake(prover1, MIN_STAKE * 2);
+
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        _completeAuctionWithWinner(reqid, prover1, MAX_FEE / 2);
+
+        vm.warp(req.fee.deadline + 1);
+
+        // Try to slash before refunding
+        vm.expectRevert(
+            abi.encodeWithSelector(IBrevisMarket.MarketInvalidRequestStatus.selector, IBrevisMarket.ReqStatus.Pending)
+        );
+        market.slash(reqid);
+    }
+
+    function test_Slash_emitsEvent() public {
+        uint256 slashBps = 1500;
+        uint256 slashWindow = 1 days;
+
+        vm.startPrank(owner);
+        market.setSlashBps(slashBps);
+        market.setSlashWindow(slashWindow);
+        vm.stopPrank();
+
+        stakingController.setProverStake(prover1, MIN_STAKE * 2);
+
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        _completeAuctionWithWinner(reqid, prover1, MAX_FEE / 2);
+
+        vm.warp(req.fee.deadline + 1);
+
+        // Refund first
+        market.refund(reqid);
+
+        // Calculate expected slash amount
+        uint256 expectedSlashAmount = (req.fee.minStake * slashBps) / market.BPS_DENOMINATOR();
+
+        // Expect event to be emitted
+        vm.expectEmit(true, true, false, true);
+        emit IBrevisMarket.ProverSlashed(reqid, prover1, expectedSlashAmount);
+
+        // Slash
+        market.slash(reqid);
+    }
+
+    function test_Slash_preventsDoubleSlashing() public {
+        uint256 slashBps = 1500;
+        uint256 slashWindow = 1 days;
+
+        vm.startPrank(owner);
+        market.setSlashBps(slashBps);
+        market.setSlashWindow(slashWindow);
+        vm.stopPrank();
+
+        stakingController.setProverStake(prover1, MIN_STAKE * 2);
+
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        _completeAuctionWithWinner(reqid, prover1, MAX_FEE / 2);
+
+        vm.warp(req.fee.deadline + 1);
+
+        // Refund first
+        market.refund(reqid);
+
+        // First slash should succeed
+        market.slash(reqid);
+
+        // Verify request is now in Slashed status
+        (IBrevisMarket.ReqStatus status,,,,,,,) = market.getRequest(reqid);
+        assertEq(uint256(status), uint256(IBrevisMarket.ReqStatus.Slashed));
+
+        // Second slash attempt should fail with invalid status
+        vm.expectRevert(
+            abi.encodeWithSelector(IBrevisMarket.MarketInvalidRequestStatus.selector, IBrevisMarket.ReqStatus.Slashed)
+        );
+        market.slash(reqid);
+
+        // Verify the original slash occurred correctly
+        uint256 expectedSlashAmount = (req.fee.minStake * slashBps) / market.BPS_DENOMINATOR();
+        assertTrue(
+            stakingController.wasSlashByAmountCalled(prover1, expectedSlashAmount), "First slash should have occurred"
+        );
+    }
+
+    // =========================================================================
+    // HELPER FUNCTIONS FOR SLASH TESTS
+    // =========================================================================
+
+    function _completeAuctionWithWinner(bytes32 reqid, address winner, uint256 fee) internal {
+        // Skip to reveal phase
+        vm.warp(block.timestamp + BIDDING_DURATION + 1);
+
+        // Submit and reveal winning bid
+        bytes32 bidHash = keccak256(abi.encodePacked(fee, uint256(1)));
+
+        // Go back to bidding phase to submit bid
+        vm.warp(block.timestamp - BIDDING_DURATION - 1);
+
+        vm.prank(winner);
+        market.bid(reqid, bidHash);
+
+        // Move to reveal phase
+        vm.warp(block.timestamp + BIDDING_DURATION + 1);
+
+        vm.prank(winner);
+        market.reveal(reqid, fee, 1);
+    }
+
+    // =========================================================================
+    // PROTOCOL FEE TESTS
+    // =========================================================================
+
+    function test_ProtocolFee_basicFunctionality() public {
+        uint256 protocolFeeBps = 1000; // 10%
+        uint256 expectedFee = MAX_FEE / 2; // prover1 wins with this fee
+
+        // Set protocol fee
+        vm.prank(owner);
+        market.setProtocolFeeBps(protocolFeeBps);
+
+        // Verify fee was set
+        (uint256 feeBps, uint256 balance) = market.getProtocolFeeInfo();
+        assertEq(feeBps, protocolFeeBps);
+        assertEq(balance, 0);
+
+        stakingController.setProverStake(prover1, MIN_STAKE * 2);
+
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        _completeAuctionWithWinner(reqid, prover1, expectedFee);
+
+        // Submit proof
+        vm.warp(req.fee.deadline - 1);
+        uint256[8] memory proof = VALID_PROOF;
+        picoVerifier.setValidProof(req.vk, req.publicValuesDigest, proof);
+
+        vm.prank(prover1);
+        market.submitProof(reqid, proof);
+
+        // Calculate expected protocol fee and prover reward
+        uint256 expectedProtocolFee = (expectedFee * protocolFeeBps) / 10000;
+        uint256 expectedProverReward = expectedFee - expectedProtocolFee;
+
+        // Check protocol fee balance
+        (, uint256 newBalance) = market.getProtocolFeeInfo();
+        assertEq(newBalance, expectedProtocolFee);
+
+        // Check that prover received the reduced reward
+        assertTrue(
+            stakingController.wasAddRewardsCalled(prover1, expectedProverReward),
+            "Prover should receive reward minus protocol fee"
+        );
+    }
+
+    function test_ProtocolFee_zeroFee() public {
+        uint256 protocolFeeBps = 0; // 0%
+        uint256 expectedFee = MAX_FEE / 2;
+
+        // Set zero protocol fee
+        vm.prank(owner);
+        market.setProtocolFeeBps(protocolFeeBps);
+
+        stakingController.setProverStake(prover1, MIN_STAKE * 2);
+
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        _completeAuctionWithWinner(reqid, prover1, expectedFee);
+
+        // Submit proof
+        vm.warp(req.fee.deadline - 1);
+        uint256[8] memory proof = VALID_PROOF;
+        picoVerifier.setValidProof(req.vk, req.publicValuesDigest, proof);
+
+        vm.prank(prover1);
+        market.submitProof(reqid, proof);
+
+        // Check no protocol fee was collected
+        (, uint256 balance) = market.getProtocolFeeInfo();
+        assertEq(balance, 0);
+
+        // Check that prover received full reward
+        assertTrue(
+            stakingController.wasAddRewardsCalled(prover1, expectedFee),
+            "Prover should receive full reward when protocol fee is 0"
+        );
+    }
+
+    function test_ProtocolFee_maxFee() public {
+        uint256 protocolFeeBps = 10000; // 100%
+        uint256 expectedFee = MAX_FEE / 2;
+
+        // Set maximum protocol fee
+        vm.prank(owner);
+        market.setProtocolFeeBps(protocolFeeBps);
+
+        stakingController.setProverStake(prover1, MIN_STAKE * 2);
+
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        _completeAuctionWithWinner(reqid, prover1, expectedFee);
+
+        // Submit proof
+        vm.warp(req.fee.deadline - 1);
+        uint256[8] memory proof = VALID_PROOF;
+        picoVerifier.setValidProof(req.vk, req.publicValuesDigest, proof);
+
+        vm.prank(prover1);
+        market.submitProof(reqid, proof);
+
+        // Check all fee went to protocol
+        (, uint256 balance) = market.getProtocolFeeInfo();
+        assertEq(balance, expectedFee);
+
+        // Check that prover received no reward
+        assertFalse(
+            stakingController.wasAnyAddRewardsCalled(), "No rewards should be distributed when protocol fee is 100%"
+        );
+    }
+
+    function test_ProtocolFee_withdraw() public {
+        uint256 protocolFeeBps = 2000; // 20%
+        uint256 expectedFee = MAX_FEE / 2;
+
+        // Set protocol fee and complete a transaction
+        vm.prank(owner);
+        market.setProtocolFeeBps(protocolFeeBps);
+
+        stakingController.setProverStake(prover1, MIN_STAKE * 2);
+
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        _completeAuctionWithWinner(reqid, prover1, expectedFee);
+
+        vm.warp(req.fee.deadline - 1);
+        uint256[8] memory proof = VALID_PROOF;
+        picoVerifier.setValidProof(req.vk, req.publicValuesDigest, proof);
+
+        vm.prank(prover1);
+        market.submitProof(reqid, proof);
+
+        uint256 expectedProtocolFee = (expectedFee * protocolFeeBps) / 10000;
+
+        // Check protocol fee accumulated
+        (, uint256 balance) = market.getProtocolFeeInfo();
+        assertEq(balance, expectedProtocolFee);
+
+        // Withdraw protocol fee
+        address treasury = address(0x999);
+        uint256 treasuryBalanceBefore = feeToken.balanceOf(treasury);
+
+        vm.expectEmit(true, false, false, true);
+        emit IBrevisMarket.ProtocolFeeWithdrawn(treasury, expectedProtocolFee);
+
+        vm.prank(owner);
+        market.withdrawProtocolFee(treasury);
+
+        // Check treasury received the fee
+        assertEq(feeToken.balanceOf(treasury), treasuryBalanceBefore + expectedProtocolFee);
+
+        // Check protocol fee balance is now zero
+        (, uint256 newBalance) = market.getProtocolFeeInfo();
+        assertEq(newBalance, 0);
+    }
+
+    function test_ProtocolFee_withdrawZeroBalance() public {
+        address treasury = address(0x999);
+
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(IBrevisMarket.MarketNoProtocolFeeToWithdraw.selector));
+        market.withdrawProtocolFee(treasury);
+    }
+
+    function test_ProtocolFee_withdrawToZeroAddress() public {
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(IBrevisMarket.MarketZeroAddress.selector));
+        market.withdrawProtocolFee(address(0));
+    }
+
+    function test_ProtocolFee_emitsEventOnUpdate() public {
+        uint256 oldBps = 0;
+        uint256 newBps = 1500;
+
+        vm.expectEmit(false, false, false, true);
+        emit IBrevisMarket.ProtocolFeeBpsUpdated(oldBps, newBps);
+
+        vm.prank(owner);
+        market.setProtocolFeeBps(newBps);
     }
 }

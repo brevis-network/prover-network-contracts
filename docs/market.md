@@ -16,21 +16,16 @@ A sealed-bid reverse auction marketplace for zero-knowledge proof generation wit
 ## 1. System Overview
 
 **BrevisMarket** orchestrates sealed-bid reverse auctions for ZK proof requests:
-- **Sealed-Bid Reverse Auctions:** Provers compete by bidding lower fees to win (procurement style)
-- **Reverse Second-Price Mechanism:** Winner (lowest bidder) pays second-lowest bid
-- **Staking Integration:** Only eligible staked provers can participate
-- **Automatic Rewards:** Winner fees distributed through staking system
+- **Sealed-Bid Reverse Auctions:** Provers submit hidden bids competing by lower fees
+- **Reverse Second-Price:** Winner (lowest bidder) gets paid second-lowest bid
+- **Staking Integration:** Prover eligibility, fee distribution as rewards, and slashing enforcement
+- **Protocol Fee Cut:** Takes configurable cut before distributing rewards to provers
 
 ### **Request Flow**
 ```
 Request → Bidding Phase → Reveal Phase → Proof Submission → Payment
+                                       ↘ Refund (if no bid or deadline missed) → Slash (optional)
 ```
-
-### **Key Properties**
-- Reverse auction: Lower fee bids have better chance of winning
-- Integrated with StakingController for prover eligibility
-- Uses staking token automatically for all fees
-- Winner payments become staking rewards via `addRewards()`
 
 ---
 
@@ -42,8 +37,9 @@ Request → Bidding Phase → Reveal Phase → Proof Submission → Payment
 - `requestProof()` - Submit request with fee escrow
 - `bid()` - Submit sealed bid hash (lower fees preferred)
 - `reveal()` - Reveal actual bid amount
-- `submitProof()` - Submit ZK proof (winner only)
+- `submitProof()` - Submit ZK proof (bid winner only)
 - `refund()` - Refund expired requests
+- `slash()` - Penalize non-performing assigned prover (after refund)
 
 ---
 
@@ -78,9 +74,7 @@ struct FeeParams {
 ### **Phase 1: Bidding**
 - Duration: `biddingPhaseDuration` seconds from request time
 - Provers submit `keccak256(fee, nonce)` to hide bids
-- **Key:** Lower fee bids are more competitive (reverse auction)
-- Eligibility checked: must meet `minStake` requirement
-- Can overwrite previous bids
+- Eligibility: must be active prover meet `minStake` requirement
 
 ### **Phase 2: Revealing** 
 - Duration: `revealPhaseDuration` seconds after bidding ends
@@ -89,15 +83,12 @@ struct FeeParams {
 - Eligibility re-verified
 
 ### **Phase 3: Proof Submission**
-- Winner submits ZK proof before request deadline
-- Proof verified by PicoVerifier contract
-- **Payment:** Winner pays second-lowest bid (reverse second-price auction)
-- **Fallback:** If only one bidder, winner pays their own bid
-- **Distribution:** Fee → staking rewards, excess → requester
+- Winner submits ZK proof (verified by PicoVerifier) before request deadline
+- Winner gets paid second-lowest bid or their own bid if only one bidder
+- Distribution: Fee -> staking rewards after protocol cut, excess -> requester
 
-### **Refund Mechanism**
-- If deadline passes without fulfillment, anyone can trigger refund
-- Full `maxFee` returned to original requester
+### **Refund**
+- If no bid or deadline missed, anyone can trigger refund full `maxFee` to original requester
 
 ---
 
@@ -112,9 +103,15 @@ stakingController.isProverEligible(prover, minimumStake)
 
 ### **Fee Distribution**
 - Winner fee automatically sent via `stakingController.addRewards()`
-- **Amount:** Second-lowest bid in reverse auction (or winner's bid if only one bidder)
-- Subject to prover commission rates in staking system
-- Marketplace uses `stakingController.stakingToken()` automatically
+- Amount: Second-lowest bid in reverse auction (or the only bidder's bid), subject to protocol fee cut
+
+### **Slashing**
+- Penalizes assigned provers who fail to deliver after winning auction
+- Prerequisites:
+  - Request must be refunded first
+  - Must be within slash window after deadline
+- Calculation: `slashAmount = (request.minStake × slashBps) / 10000`
+  - Uses request's required minStake (not prover's total assets) for consistent penalties
 
 ---
 
@@ -124,16 +121,17 @@ stakingController.isProverEligible(prover, minimumStake)
 - `biddingPhaseDuration` - Sealed bid submission window
 - `revealPhaseDuration` - Bid reveal window  
 - `minMaxFee` - Minimum maxFee for spam protection
-- `MAX_DEADLINE_DURATION` - Maximum request lifetime (30 days)
+- `slashBps` - Slashing percentage in basis points (0-10000)
+- `slashWindow` - Time window for slashing after deadline
+- `protocolFeeBps` - Protocol fee percentage in basis points (0-10000)
 
 ### **Admin Functions**
-- Update timing parameters
-- Update minMaxFee
+- Update parameters
 - Change PicoVerifier address
 
 ### **Constants**
 - Fee token automatically synced with staking system
-- No pause or emergency recovery mechanisms
+- `MAX_DEADLINE_DURATION` - Maximum request lifetime (30 days)
 
 ---
 

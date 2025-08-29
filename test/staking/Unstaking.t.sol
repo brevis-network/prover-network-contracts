@@ -38,12 +38,12 @@ contract UnstakingTest is Test {
             address(factory),
             UNSTAKE_DELAY,
             1e18, // minSelfStake: 1 token
-            5000 // maxSlashFactor: 50%
+            5000 // maxSlashBps: 50%
         );
 
         // Grant vault creator role to controller
         factory.init(address(controller));
-        
+
         // Grant slasher role to admin for testing
         controller.grantRole(controller.SLASHER_ROLE(), admin);
 
@@ -81,7 +81,7 @@ contract UnstakingTest is Test {
         assertEq(address(controller.stakingToken()), address(stakingToken));
         assertEq(controller.unstakeDelay(), UNSTAKE_DELAY);
         assertEq(controller.MAX_PENDING_UNSTAKES(), 10);
-        assertEq(controller.SLASH_FACTOR_DENOMINATOR(), 10000);
+        assertEq(controller.BPS_DENOMINATOR(), 10000);
     }
 
     function testReceiveUnstake() public {
@@ -374,18 +374,18 @@ contract UnstakingTest is Test {
         controller.requestUnstake(prover1, 1000e18);
     }
 
-    function testGetProverSlashingFactor() public {
+    function testGetProverSlashingScale() public {
         vm.prank(prover1);
         address vault = controller.initializeProver(500);
 
         // Initially should be 100%
-        assertEq(controller.getProverSlashingFactor(prover1), 10000);
+        assertEq(controller.getProverSlashingScale(prover1), 10000);
 
         // After 20% slash should be 80%
         vm.prank(staker1);
         uint256 shares = controller.stake(prover1, 1000e18);
 
-        // Setup vault approval and make unstake request (slashing factor might only apply with pending unstakes)
+        // Setup vault approval and make unstake request (slashBps might only apply with pending unstakes)
         _setupVaultApproval(staker1, vault);
         vm.prank(staker1);
         controller.requestUnstake(prover1, shares);
@@ -393,7 +393,7 @@ contract UnstakingTest is Test {
         vm.prank(admin);
         controller.slash(prover1, 2000);
 
-        assertEq(controller.getProverSlashingFactor(prover1), 8000);
+        assertEq(controller.getProverSlashingScale(prover1), 8000);
     }
 
     function testGetUnstakingInfo() public {

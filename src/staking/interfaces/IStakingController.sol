@@ -56,7 +56,7 @@ interface IStakingController {
     event RewardsAdded(
         address indexed prover, address indexed source, uint256 amount, uint256 commission, uint256 toStakers
     );
-    event ProverSlashed(address indexed prover, uint256 amount, uint256 factor);
+    event ProverSlashed(address indexed prover, uint256 amount, uint256 bps);
     event ProverStateChanged(address indexed prover, ProverState oldState, ProverState newState);
     event ProverRetired(address indexed prover);
     event CommissionClaimed(address indexed prover, uint256 amount);
@@ -65,7 +65,7 @@ interface IStakingController {
     );
     event TreasuryWithdrawn(address indexed to, uint256 amount);
     event MinSelfStakeUpdated(uint256 oldValue, uint256 newValue);
-    event MaxSlashFactorUpdated(uint256 oldValue, uint256 newValue);
+    event MaxSlashBpsUpdated(uint256 oldValue, uint256 newValue);
     event AuthorizationRequiredUpdated(bool enabled);
     event EmergencyRecovered(address to, uint256 amount);
 
@@ -198,12 +198,23 @@ interface IStakingController {
     // =========================================================================
 
     /**
-     * @notice Slash a prover's vault (admin/slasher only)
+     * @notice Slash a prover by a percentage of total slashable assets (admin/slasher only)
      * @param prover The prover to slash
-     * @param factor The factor to slash (in basis points)
-     * @return slashedAmount The amount of assets slashed
+     * @param bps Slashing percentage in basis points (0 – 10000); must be <= maxSlashBps
+     * @return slashedAmount Total assets removed (vault portion + pending unstake portion)
      */
-    function slash(address prover, uint256 factor) external returns (uint256 slashedAmount);
+    function slash(address prover, uint256 bps) external returns (uint256 slashedAmount);
+
+    /**
+     * @notice Slash an absolute amount from a prover's total slashable assets (admin/slasher only)
+     * @dev Converts the requested absolute amount into an equivalent percentage:
+     *      Derived percentage = (requestedAmount / totalSlashable) * BPS_DENOMINATOR
+     *      Caps the derived percentage at maxSlashBps (so actual slashed may be < requested)
+     * @param prover The prover to slash
+     * @param amount Requested absolute amount to remove (in underlying asset units)
+     * @return slashedAmount Actual amount removed (may be lower due to cap, rounding, or insufficient assets)
+     */
+    function slashByAmount(address prover, uint256 amount) external returns (uint256 slashedAmount);
 
     // =========================================================================
     // VIEW FUNCTIONS - PROVER INFO
@@ -248,6 +259,13 @@ interface IStakingController {
      * @return vault The vault address
      */
     function getProverVault(address prover) external view returns (address vault);
+
+    /**
+     * @notice Get total slashable assets for a prover (vault + unstaking)
+     * @param prover The prover address
+     * @return totalAssets The total slashable assets (vault assets + pending unstaking assets)
+     */
+    function getProverTotalAssets(address prover) external view returns (uint256 totalAssets);
 
     /**
      * @notice Get the list of all registered provers
@@ -324,10 +342,10 @@ interface IStakingController {
     function minSelfStake() external view returns (uint256 amount);
 
     /**
-     * @notice Get the maximum slash factor for a prover
-     * @return factor The maximum slash factor (in basis points)
+     * @notice Get the maximum slash percentage for a prover
+     * @return bps The maximum slash percentage (in basis points)
      */
-    function maxSlashFactor() external view returns (uint256 factor);
+    function maxSlashBps() external view returns (uint256 bps);
 
     // =========================================================================
     // VIEW FUNCTIONS - STAKING INFO
@@ -379,11 +397,11 @@ interface IStakingController {
     function getProverTotalUnstaking(address prover) external view returns (uint256 totalAmount);
 
     /**
-     * @notice Get prover slashing scale
+     * @notice Get the cumulative slashing scale for a prover
      * @param prover The prover address
-     * @return scale The slashing scale for the prover (in basis points)
+     * @return scale The current cumulative slashing scale in basis points (10000 = no slashing, 8000 = 20% slashed)
      */
-    function getProverSlashingFactor(address prover) external view returns (uint256 scale);
+    function getProverSlashingScale(address prover) external view returns (uint256 scale);
 
     /**
      * @notice Get all stakers with pending unstakes for a prover
@@ -472,10 +490,10 @@ interface IStakingController {
     function setMinSelfStake(uint256 value) external;
 
     /**
-     * @notice Set maximum slash factor (admin only)
-     * @param value The new maximum slash factor value (in basis points)
+     * @notice Set maximum slash percentage (admin only)
+     * @param value The new maximum slash percentage value (in basis points)
      */
-    function setMaxSlashFactor(uint256 value) external;
+    function setMaxSlashBps(uint256 value) external;
 
     /**
      * @notice Toggle whether authorization (role gating) is required for initializing a prover (admin only)

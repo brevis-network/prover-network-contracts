@@ -28,7 +28,7 @@ contract DeployStakingController is Script {
             vm.envAddress("VAULT_FACTORY_ADDRESS"),
             vm.envUint("UNSTAKE_DELAY"),
             vm.envUint("MIN_SELF_STAKE"),
-            vm.envUint("MAX_SLASH_FACTOR")
+            vm.envUint("MAX_SLASH_BPS")
         );
 
         // Deploy transparent proxy

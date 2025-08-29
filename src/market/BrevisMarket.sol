@@ -11,9 +11,7 @@ import "./IBrevisMarket.sol";
 
 /**
  * @title BrevisMarket
- * @notice Decentralized proof marketplace using sealed-bid reverse auctions for ZK proof generation
- * @dev Implements reverse auction (procurement style) where provers compete by bidding lower fees
- *      TODO: slashing
+ * @notice Decentralized proof marketplace using sealed-bid reverse second-price auctions for ZK proof generation
  */
 contract BrevisMarket is IBrevisMarket, AccessControl, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -32,12 +30,15 @@ contract BrevisMarket is IBrevisMarket, AccessControl, ReentrancyGuard {
         bytes32 vk;
         bytes32 publicValuesDigest; // sha256(publicValues) & bytes32(uint256((1 << 253) - 1))
         mapping(address => bytes32) bids; // received sealed bids by provers
+        uint256 bidCount; // number of bids submitted (to track if any bids were made)
         Bidder winner; // winning bidder (lowest fee)
         Bidder second; // second-lowest bidder (for reverse second-price auction - winner pays second-lowest bid)
         uint256[8] proof;
     }
 
     uint256 public constant MAX_DEADLINE_DURATION = 30 days; // maximum deadline duration from request time
+
+    uint256 public constant BPS_DENOMINATOR = 10000; // 100.00%
 
     // =========================================================================
     // STORAGE
@@ -47,6 +48,12 @@ contract BrevisMarket is IBrevisMarket, AccessControl, ReentrancyGuard {
     uint64 public biddingPhaseDuration; // duration of bidding phase in seconds
     uint64 public revealPhaseDuration; // duration of reveal phase in seconds
     uint256 public minMaxFee; // minimum maxFee for spam protection
+    uint256 public slashBps; // slashing percentage for penalties in basis points
+    uint256 public slashWindow; // time window for slashing after deadline (e.g., 7 days)
+    uint256 public protocolFeeBps; // protocol fee percentage in basis points (0-10000)
+
+    // Protocol treasury
+    uint256 public protocolFeeBalance; // accumulated protocol fees
 
     // External contracts
     IPicoVerifier public picoVerifier; // address of the PicoVerifier contract
@@ -204,8 +211,16 @@ contract BrevisMarket is IBrevisMarket, AccessControl, ReentrancyGuard {
         // Check if prover is eligible (must meet minimum stake requirement)
         _requireProverEligible(msg.sender, req.fee.minStake);
 
+        // Track if this is a new bid (not overwriting existing)
+        bool isNewBid = req.bids[msg.sender] == bytes32(0);
+
         // Store the sealed bid
         req.bids[msg.sender] = bidHash;
+
+        // Increment bid count only for new bids
+        if (isNewBid) {
+            req.bidCount++;
+        }
 
         emit NewBid(reqid, msg.sender, bidHash);
     }
@@ -281,8 +296,19 @@ contract BrevisMarket is IBrevisMarket, AccessControl, ReentrancyGuard {
             actualFee = req.winner.fee;
         }
 
-        // Send fee to staking controller as reward for the prover
-        stakingController.addRewards(req.winner.prover, actualFee);
+        // Calculate protocol fee
+        uint256 protocolFee = (actualFee * protocolFeeBps) / BPS_DENOMINATOR;
+        uint256 proverReward = actualFee - protocolFee;
+
+        // Accumulate protocol fee
+        if (protocolFee > 0) {
+            protocolFeeBalance += protocolFee;
+        }
+
+        // Send remaining fee to staking controller as reward for the prover
+        if (proverReward > 0) {
+            stakingController.addRewards(req.winner.prover, proverReward);
+        }
 
         // Refund remaining fee to requester
         feeToken.safeTransfer(req.sender, req.fee.maxFee - actualFee);
@@ -291,20 +317,66 @@ contract BrevisMarket is IBrevisMarket, AccessControl, ReentrancyGuard {
     }
 
     /**
-     * @notice Refund a request that passed its deadline without fulfillment
-     * @dev Can be called by anyone after deadline passes, returns maxFee to original requester
+     * @notice Refund a request that cannot be fulfilled
+     * @dev Can be called by anyone in these scenarios:
+     *      1. After deadline passes without fulfillment
+     *      2. After bidding phase ends with no bids submitted
+     *      3. After reveal phase ends with no bids revealed (winner not set)
      * @param reqid The request ID to refund
      */
     function refund(bytes32 reqid) external override nonReentrant {
         ReqState storage req = requests[reqid];
 
-        if (block.timestamp <= req.fee.deadline) revert MarketBeforeDeadline(block.timestamp, req.fee.deadline);
         if (req.status != ReqStatus.Pending) revert MarketInvalidRequestStatus(req.status);
+
+        uint256 biddingEndTime = req.timestamp + biddingPhaseDuration;
+        uint256 revealEndTime = biddingEndTime + revealPhaseDuration;
+
+        bool canRefund = false;
+
+        if (block.timestamp > req.fee.deadline) {
+            canRefund = true; // Case 1: Deadline has passed
+        } else if (block.timestamp > biddingEndTime && req.bidCount == 0) {
+            canRefund = true; // Case 2: Bidding phase ended with no bids submitted
+        } else if (block.timestamp > revealEndTime && req.winner.prover == address(0)) {
+            canRefund = true; // Case 3: Reveal phase ended with no winner (no bids revealed)
+        }
+        if (!canRefund) {
+            revert MarketCannotRefundYet(block.timestamp, req.fee.deadline, biddingEndTime, revealEndTime);
+        }
 
         req.status = ReqStatus.Refunded;
         feeToken.safeTransfer(req.sender, req.fee.maxFee);
 
         emit Refunded(reqid, req.sender, req.fee.maxFee);
+    }
+
+    /**
+     * @notice Slash the assigned prover for failing to submit proof within deadline
+     * @dev Can be called by anyone within slash window after deadline passes and refunded.
+     * @param reqid The request ID for which to slash the assigned prover
+     */
+    function slash(bytes32 reqid) external override {
+        ReqState storage req = requests[reqid];
+
+        // Must be refunded state
+        if (req.status != ReqStatus.Refunded) revert MarketInvalidRequestStatus(req.status);
+        // Must be after deadline
+        if (block.timestamp <= req.fee.deadline) revert MarketBeforeDeadline(block.timestamp, req.fee.deadline);
+        // Must have an assigned prover to slash
+        if (req.winner.prover == address(0)) revert MarketNoAssignedProverToSlash(reqid);
+        // Must be within slash window
+        if (block.timestamp > req.fee.deadline + slashWindow) {
+            revert MarketSlashWindowExpired(block.timestamp, req.fee.deadline + slashWindow);
+        }
+
+        // Calculate slash amount
+        uint256 slashAmount = (req.fee.minStake * slashBps) / BPS_DENOMINATOR;
+        // Perform the slash
+        stakingController.slashByAmount(req.winner.prover, slashAmount);
+        // Update status to prevent double slashing
+        req.status = ReqStatus.Slashed;
+        emit ProverSlashed(reqid, req.winner.prover, slashAmount);
     }
 
     // =========================================================================
@@ -354,6 +426,57 @@ contract BrevisMarket is IBrevisMarket, AccessControl, ReentrancyGuard {
         uint256 oldFee = minMaxFee;
         minMaxFee = newMinFee;
         emit MinMaxFeeUpdated(oldFee, newMinFee);
+    }
+
+    /**
+     * @notice Update the slash percentage for penalizing non-performing provers
+     * @dev Only owner can call this function
+     * @param newBps New slash percentage in basis points (0-10000)
+     */
+    function setSlashBps(uint256 newBps) external override onlyOwner {
+        if (newBps > BPS_DENOMINATOR) revert MarketInvalidSlashBps();
+        uint256 oldBps = slashBps;
+        slashBps = newBps;
+        emit SlashBpsUpdated(oldBps, newBps);
+    }
+
+    /**
+     * @notice Update the slash window duration
+     * @dev Only owner can call this function
+     * @param newWindow New slash window duration in seconds
+     */
+    function setSlashWindow(uint256 newWindow) external override onlyOwner {
+        uint256 oldWindow = slashWindow;
+        slashWindow = newWindow;
+        emit SlashWindowUpdated(oldWindow, newWindow);
+    }
+
+    /**
+     * @notice Update the protocol fee percentage
+     * @dev Only owner can call this function
+     * @param newBps New protocol fee percentage in basis points (0-10000)
+     */
+    function setProtocolFeeBps(uint256 newBps) external override onlyOwner {
+        if (newBps > BPS_DENOMINATOR) revert MarketInvalidProtocolFeeBps();
+        uint256 oldBps = protocolFeeBps;
+        protocolFeeBps = newBps;
+        emit ProtocolFeeBpsUpdated(oldBps, newBps);
+    }
+
+    /**
+     * @notice Withdraw accumulated protocol fees
+     * @dev Only owner can call this function
+     * @param to Address to send the fees to
+     */
+    function withdrawProtocolFee(address to) external override onlyOwner {
+        if (to == address(0)) revert MarketZeroAddress();
+        if (protocolFeeBalance == 0) revert MarketNoProtocolFeeToWithdraw();
+
+        uint256 amount = protocolFeeBalance;
+        protocolFeeBalance = 0;
+
+        feeToken.safeTransfer(to, amount);
+        emit ProtocolFeeWithdrawn(to, amount);
     }
 
     // =========================================================================
@@ -435,6 +558,15 @@ contract BrevisMarket is IBrevisMarket, AccessControl, ReentrancyGuard {
      */
     function getBidHash(bytes32 reqid, address prover) external view override returns (bytes32 bidHash) {
         return requests[reqid].bids[prover];
+    }
+
+    /**
+     * @notice Get the protocol fee percentage and balance
+     * @return feeBps Protocol fee percentage in basis points
+     * @return balance Accumulated protocol fee balance
+     */
+    function getProtocolFeeInfo() external view override returns (uint256 feeBps, uint256 balance) {
+        return (protocolFeeBps, protocolFeeBalance);
     }
 
     // =========================================================================
