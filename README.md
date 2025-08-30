@@ -12,9 +12,9 @@ Smart contracts for the Brevis Prover Network: decentralized Brevis ZK VM proof 
 *See [docs/staking.md](docs/staking.md) for detailed architecture and mechanics.*
 
 ### Marketplace
-- **BrevisMarket**: Reverse second-price sealed‑bid (commit–reveal) auction assigning a prover for ZK proof generation.
-- **Verification**: Proofs validated on‑chain through PicoVerifier (Brevis ZK VM).
-- **Staking Integration**: Handles prover eligibility, fee distribution, and slashing on non‑delivery or misconduct.
+- **BrevisMarket**: Sealed‑bid reverse second-price auction marketplace for ZK proof generation.
+  - Integrated with `Staking` to handle prover eligibility, fee distribution, and slashing.
+  - Proofs validated on‑chain through `PicoVerifier` (Brevis ZK VM).
 
 *See [docs/market.md](docs/market.md) for auction mechanics and settlement process.*
 
