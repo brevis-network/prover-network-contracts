@@ -110,6 +110,30 @@ contract DeployProverNetwork is Script {
         );
         console.log("Slasher role granted to BrevisMarket:", brevisMarketProxy);
 
+        // Step 3b: Configure optional BrevisMarket parameters
+        console.log("\n3b. Configuring optional BrevisMarket parameters...");
+        BrevisMarket market = BrevisMarket(payable(brevisMarketProxy));
+
+        // Set slashing parameters (if specified)
+        uint256 slashBps = vm.envOr("MARKET_SLASH_BPS", uint256(0));
+        if (slashBps > 0) {
+            console.log("Setting slashBps:", slashBps);
+            market.setSlashBps(slashBps);
+        }
+
+        uint256 slashWindow = vm.envOr("MARKET_SLASH_WINDOW", uint256(0));
+        if (slashWindow > 0) {
+            console.log("Setting slashWindow:", slashWindow);
+            market.setSlashWindow(slashWindow);
+        }
+
+        // Set protocol fee (if specified)
+        uint256 protocolFeeBps = vm.envOr("MARKET_PROTOCOL_FEE_BPS", uint256(0));
+        if (protocolFeeBps > 0) {
+            console.log("Setting protocolFeeBps:", protocolFeeBps);
+            market.setProtocolFeeBps(protocolFeeBps);
+        }
+
         vm.stopBroadcast();
 
         // Summary
@@ -134,6 +158,11 @@ contract DeployProverNetwork is Script {
         console.log("Bidding Phase Duration:", vm.envUint("BIDDING_PHASE_DURATION"));
         console.log("Reveal Phase Duration:", vm.envUint("REVEAL_PHASE_DURATION"));
         console.log("Min Max Fee:", vm.envUint("MIN_MAX_FEE"));
+
+        // Log configured optional parameters
+        if (slashBps > 0) console.log("Market Slash BPS:", slashBps);
+        if (slashWindow > 0) console.log("Market Slash Window:", slashWindow);
+        if (protocolFeeBps > 0) console.log("Market Protocol Fee BPS:", protocolFeeBps);
 
         console.log("\n=== NEXT STEPS ===");
         console.log("1. Brevis Prover Network is ready for operation!");

@@ -2,29 +2,63 @@
 
 This directory contains deployment scripts for the Brevis Prover Network contracts including both the staking system and market contracts.
 
-## Scripts Overview
+> **⚠️ TODO**: Migrate to OpenZeppelin v4 upgradeable deployment to enable shared ProxyAdmin across all proxy contracts.
 
-### 1. `DeployProverNetwork.s.sol` ✨ 
-**Recommended**: Comprehensive deployment script that deploys the entire Brevis Prover Network in the correct order.
+## Table of Contents
 
-**Deploys:**
-- **Staking System**: VaultFactory (upgradeable with transparent proxy), StakingController (upgradeable with transparent proxy)
-- **Market System**: BrevisMarket (upgradeable with transparent proxy) 
-- **Connects all components**: Links StakingController to VaultFactory and grants BrevisMarket the slasher role using AccessControl
-- **Storage gaps included**: All contracts have proper storage gaps for safe future upgrades
+- [1. Overview](#1-overview)
+- [2. Setup](#2-setup)
+- [3. Verification](#3-verification)
+- [4. Upgrade](#4-upgrade)
+- [5. Example Flow](#5-example-flow)
+- [6. Testing](#6-testing)
 
-### 2. `StakingController.s.sol`
-Deploys only the StakingController as an upgradeable contract using transparent proxy pattern.
+## 1. Overview
 
-### 3. `VaultFactory.s.sol`
-Deploys only the VaultFactory as an upgradeable contract using transparent proxy pattern.
+### Deploy Complete Prover Network (Recommended)
 
-### 4. `BrevisMarket.s.sol`  
-Deploys only the BrevisMarket as an upgradeable contract using transparent proxy pattern.
+**`DeployProverNetwork.s.sol`** ✨ - Comprehensive deployment script that deploys the entire Brevis Prover Network: VaultFactory, StakingController, BrevisMarket (all upgradeable with transparent proxy), connects all components, and grants proper roles.
 
-**Note:** Individual ProverVaults are automatically deployed via CREATE2 through the VaultFactory when provers are registered by the backend.
+```bash
+# Deploy to local testnet
+forge script script/DeployProverNetwork.s.sol --rpc-url http://localhost:8545 --broadcast
 
-## Setup
+# Deploy to testnet (e.g., Sepolia)
+forge script script/DeployProverNetwork.s.sol --rpc-url $SEPOLIA_RPC_URL --broadcast --verify
+
+# Deploy to mainnet
+forge script script/DeployProverNetwork.s.sol --rpc-url $MAINNET_RPC_URL --broadcast --verify
+```
+
+### Deploy Individual Components
+
+For specialized deployments, you can deploy individual components:
+
+**`StakingController.s.sol`** - Deploys only the StakingController as an upgradeable contract:
+```bash
+forge script script/StakingController.s.sol --rpc-url $RPC_URL --broadcast
+```
+
+**`VaultFactory.s.sol`** - Deploys only the VaultFactory as an upgradeable contract:
+```bash
+forge script script/VaultFactory.s.sol --rpc-url $RPC_URL --broadcast
+```
+
+**`BrevisMarket.s.sol`** - Deploys only the BrevisMarket as an upgradeable contract:
+```bash
+forge script script/BrevisMarket.s.sol --rpc-url $RPC_URL --broadcast
+```
+
+**`MockPicoVerifier.s.sol`** - Deploys a mock PicoVerifier for testing:
+```bash
+forge script script/MockPicoVerifier.s.sol --rpc-url $RPC_URL --broadcast
+```
+
+> **Note:** Individual ProverVaults are automatically deployed via CREATE2 through the VaultFactory when provers are registered.
+
+**All deployment scripts automatically configure optional parameters if specified in your `.env` file. After successful deployment, the complete Brevis Prover Network is ready for operation with all system integrations handled automatically.**
+
+## 2. Setup
 
 1. **Copy environment template:**
    ```bash
@@ -47,49 +81,16 @@ Deploys only the BrevisMarket as an upgradeable contract using transparent proxy
    BIDDING_PHASE_DURATION=300           # 5 minutes
    REVEAL_PHASE_DURATION=600            # 10 minutes
    MIN_MAX_FEE=1000000000000000         # 0.001 ETH spam protection
+   
+   # Market System - Optional Parameters (set to 0 to skip)
+   MARKET_SLASH_BPS=1000                # 10% slashing percentage for penalties (0 to disable)
+   MARKET_SLASH_WINDOW=604800           # 7 days slashing window after deadline (0 to disable)
+   MARKET_PROTOCOL_FEE_BPS=100          # 1% protocol fee (0-10000, 0 to disable)
    ```
 
-**Note:** The deployer becomes the initial owner of all contracts. For production, transfer ownership to a multisig after deployment (see "Ownership Transfer" section below).
+**Note:** The deployer becomes the initial owner of all contracts. For production, transfer ownership to a multisig after deployment.
 
-## Deployment Commands
-
-### Deploy Complete Prover Network (Recommended)
-
-```bash
-# Deploy to local testnet
-forge script script/DeployProverNetwork.s.sol --rpc-url http://localhost:8545 --broadcast
-
-# Deploy to testnet (e.g., Sepolia)
-forge script script/DeployProverNetwork.s.sol --rpc-url $SEPOLIA_RPC_URL --broadcast --verify
-
-# Deploy to mainnet
-forge script script/DeployProverNetwork.s.sol --rpc-url $MAINNET_RPC_URL --broadcast --verify
-```
-
-### Deploy Individual Components
-
-```bash
-# Deploy VaultFactory only
-forge script script/VaultFactory.s.sol --rpc-url $RPC_URL --broadcast
-
-# Deploy StakingController only
-forge script script/StakingController.s.sol --rpc-url $RPC_URL --broadcast
-
-# Deploy BrevisMarket only
-forge script script/BrevisMarket.s.sol --rpc-url $RPC_URL --broadcast
-```
-
-## Configuration Parameters
-
-### Core Parameters
-- **STAKING_TOKEN_ADDRESS**: ERC20 token used for staking (e.g., WETH, USDC)
-- **PICO_VERIFIER_ADDRESS**: PicoVerifier contract for proof verification
-- **UNSTAKE_DELAY**: Time delay for unstaking in seconds (e.g., 604800 = 7 days)
-## Post-Deployment Steps
-
-After successful deployment, the complete Brevis Prover Network is ready for operation. The deployment script handles all system integrations automatically.
-
-## Verification
+## 3. Verification
 
 After deployment, you can verify contracts are properly connected:
 
@@ -113,12 +114,17 @@ cast call $BREVIS_MARKET_PROXY "picoVerifier()" --rpc-url $RPC_URL
 cast call $BREVIS_MARKET_PROXY "stakingController()" --rpc-url $RPC_URL
 cast call $BREVIS_MARKET_PROXY "biddingPhaseDuration()" --rpc-url $RPC_URL
 
+# Verify optional market parameters (if configured)
+cast call $BREVIS_MARKET_PROXY "slashBps()" --rpc-url $RPC_URL
+cast call $BREVIS_MARKET_PROXY "slashWindow()" --rpc-url $RPC_URL  
+cast call $BREVIS_MARKET_PROXY "protocolFeeBps()" --rpc-url $RPC_URL
+
 # Verify slasher role granted
 cast call $STAKING_CONTROLLER_PROXY "hasRole(bytes32,address)" \
   $(cast keccak "SLASHER_ROLE") $BREVIS_MARKET_PROXY --rpc-url $RPC_URL
 ```
 
-## Upgrade Management
+## 4. Upgrade
 
 ### Who Can Upgrade?
 
@@ -153,16 +159,7 @@ cast send $PROXY_ADMIN "upgrade(address,address)" \
 cast call $STAKING_CONTROLLER_PROXY "implementation()" --rpc-url $RPC_URL
 ```
 
-## Security Considerations
-
-- **Private Key Management**: Never commit private keys to version control
-- **Owner Address**: Use a multisig wallet for mainnet deployments (recommended: 3/5 or 4/7 threshold)
-- **Upgrade Authority**: The owner controls proxy upgrades for all three core contracts
-- **Storage Safety**: All contracts include storage gaps for safe future upgrades
-- **Role Management**: Only grant SLASHER_ROLE to trusted entities
-- **Parameter Validation**: Carefully review all configuration parameters before mainnet deployment
-
-## Example Deployment Flow
+## 5. Example Flow
 
 ```bash
 # 1. Set up environment
@@ -203,4 +200,16 @@ cast send $STAKING_CONTROLLER_PROXY "revokeRole(bytes32,address)" \
 # Check role membership
 cast call $STAKING_CONTROLLER_PROXY "hasRole(bytes32,address)" \
   $(cast keccak "SLASHER_ROLE") $ADDRESS --rpc-url $RPC_URL
+```
+
+## 6. Testing
+
+The deployment scripts are thoroughly tested to ensure reliability:
+
+```bash
+# Run deployment script tests
+forge test --match-contract DeployProverNetworkTest
+
+# Run full test suite (includes deployment tests)
+forge test
 ```
