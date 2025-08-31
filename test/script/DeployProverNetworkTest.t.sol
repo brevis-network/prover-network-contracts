@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import "../../lib/forge-std/src/Test.sol";
 import {UnsafeUpgrades} from "../../lib/openzeppelin-foundry-upgrades/src/Upgrades.sol";
-import "../../script/DeployProverNetwork.s.sol";
+import "../../scripts/DeployProverNetwork.s.sol";
 import "../../src/staking/controller/StakingController.sol";
 import "../../src/staking/vault/VaultFactory.sol";
 import "../../src/market/BrevisMarket.sol";

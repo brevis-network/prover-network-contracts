@@ -1,6 +1,6 @@
 # ZK Proof Marketplace
 
-A sealed-bid reverse auction marketplace for zero-knowledge proof generation with staking-based prover eligibility.
+A sealed-bid reverse auction marketplace for zero-knowledge proof generation, with staking governing prover eligibility, fee distribution, and slashing.
 
 ## Table of Contents
 
@@ -16,15 +16,15 @@ A sealed-bid reverse auction marketplace for zero-knowledge proof generation wit
 ## 1. System Overview
 
 **BrevisMarket** orchestrates sealed-bid reverse auctions for ZK proof requests:
-- **Sealed-Bid Reverse Auctions:** Provers submit hidden bids competing by lower fees
-- **Reverse Second-Price:** Winner (lowest bidder) gets paid second-lowest bid
+- **Sealed-Bid Reverse Auctions:** Provers submit hidden bids, competing to offer the lowest fee
+- **Reverse Second-Price:** The winner (lowest bidder) is paid the amount of the second-lowest bid
 - **Staking Integration:** Prover eligibility, fee distribution as rewards, and slashing enforcement
-- **Protocol Fee Cut:** Takes configurable cut before distributing rewards to provers
+- **Protocol Fee Cut:** Takes a configurable cut from the final payment to the prover
 
 ### **Request Flow**
 ```
 Request → Bidding Phase → Reveal Phase → Proof Submission → Payment
-                                       ↘ Refund (if no bid or deadline missed) → Slash (optional)
+                                       ↘ Refund (if no bid or deadline missed) → Slash (if applicable)
 ```
 
 ---
@@ -38,7 +38,7 @@ Request → Bidding Phase → Reveal Phase → Proof Submission → Payment
 - `bid()` - Submit sealed bid hash (lower fees preferred)
 - `reveal()` - Reveal actual bid amount
 - `submitProof()` - Submit ZK proof (bid winner only)
-- `refund()` - Refund expired requests
+- `refund()` - Trigger refund to requester if no valid bid or deadline missed
 - `slash()` - Penalize non-performing assigned prover (after refund)
 
 ---
@@ -61,7 +61,7 @@ struct ProofRequest {
 ### **FeeParams**
 ```solidity
 struct FeeParams {
-    uint256 maxFee;    // Maximum fee willing to pay
+    uint256 maxFee;    // Maximum fee requester is willing to pay
     uint256 minStake;  // Required prover minimum stake
     uint64 deadline;   // Proof submission deadline
 }
@@ -74,7 +74,7 @@ struct FeeParams {
 ### **Phase 1: Bidding**
 - Duration: `biddingPhaseDuration` seconds from request time
 - Provers submit `keccak256(fee, nonce)` to hide bids
-- Eligibility: must be active prover meet `minStake` requirement
+- Eligibility: must be an active prover with at least `minStake` assets
 
 ### **Phase 2: Revealing** 
 - Duration: `revealPhaseDuration` seconds after bidding ends
@@ -88,7 +88,7 @@ struct FeeParams {
 - Distribution: Fee -> staking rewards after protocol cut, excess -> requester
 
 ### **Refund**
-- If no bid or deadline missed, anyone can trigger refund full `maxFee` to original requester
+- If no bid or deadline missed, anyone can trigger a full refund of `maxFee` to the requester
 
 ---
 
@@ -106,12 +106,12 @@ stakingController.isProverEligible(prover, minimumStake)
 - Amount: Second-lowest bid in reverse auction (or the only bidder's bid), subject to protocol fee cut
 
 ### **Slashing**
-- Penalizes assigned provers who fail to deliver after winning auction
+- Penalizes assigned provers who fail to deliver after winning an auction.
 - Prerequisites:
   - Request must be refunded first
   - Must be within slash window after deadline
 - Calculation: `slashAmount = (request.minStake × slashBps) / 10000`
-  - Uses request's required minStake (not prover's total assets) for consistent penalties
+  - Uses request's required minStake (not prover's total assets) for and predictable and consistent penalties
 
 ---
 
@@ -120,10 +120,10 @@ stakingController.isProverEligible(prover, minimumStake)
 ### **Parameters**
 - `biddingPhaseDuration` - Sealed bid submission window
 - `revealPhaseDuration` - Bid reveal window  
-- `minMaxFee` - Minimum maxFee for spam protection
+- `minMaxFee` - Minimum allowed maxFee to prevent spam requests
 - `slashBps` - Slashing percentage in basis points (0-10000)
 - `slashWindow` - Time window for slashing after deadline
-- `protocolFeeBps` - Protocol fee percentage in basis points (0-10000)
+- `protocolFeeBps` - Protocol’s cut of prover payment in basis points (0-10000)
 
 ### **Admin Functions**
 - Update parameters
@@ -135,4 +135,4 @@ stakingController.isProverEligible(prover, minimumStake)
 
 ---
 
-**For detailed function signatures:** [`IBrevisMarket.sol`](../src/market/IBrevisMarket.sol)**
+**For exact function signatures and interface definitions, see [`IBrevisMarket.sol`](../src/market/IBrevisMarket.sol)**

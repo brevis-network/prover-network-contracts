@@ -41,7 +41,7 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
     // Parameter storage
     uint256 public minSelfStake;
     uint256 public maxSlashBps;
-    bool public authorizationRequired;
+    bool public requireAuthorization;
 
     // Core data structures
     mapping(address => ProverInfo) private _proverInfo;
@@ -62,7 +62,7 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
 
     // Enforce authorization when flag enabled
     modifier onlyAuthorized() {
-        if (authorizationRequired && !hasRole(AUTHORIZED_PROVER_ROLE, msg.sender)) {
+        if (requireAuthorization && !hasRole(AUTHORIZED_PROVER_ROLE, msg.sender)) {
             revert ControllerNotAuthorized();
         }
         _;
@@ -1038,9 +1038,9 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
      * @notice Toggle whether authorization (role gating) is required for initializing a prover
      * @param required True to enforce AUTHORIZED_PROVER_ROLE, false to allow open registration
      */
-    function setAuthorizationRequired(bool required) external override onlyOwner {
-        authorizationRequired = required;
-        emit AuthorizationRequiredUpdated(required);
+    function setRequireAuthorization(bool required) external override onlyOwner {
+        requireAuthorization = required;
+        emit RequireAuthorizationUpdated(required);
     }
 
     /**

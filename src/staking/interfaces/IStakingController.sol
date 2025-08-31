@@ -66,7 +66,7 @@ interface IStakingController {
     event TreasuryWithdrawn(address indexed to, uint256 amount);
     event MinSelfStakeUpdated(uint256 oldValue, uint256 newValue);
     event MaxSlashBpsUpdated(uint256 oldValue, uint256 newValue);
-    event AuthorizationRequiredUpdated(bool enabled);
+    event RequireAuthorizationUpdated(bool required);
     event EmergencyRecovered(address to, uint256 amount);
 
     // =========================================================================
@@ -499,7 +499,7 @@ interface IStakingController {
      * @notice Toggle whether authorization (role gating) is required for initializing a prover (admin only)
      * @param required True to enforce AUTHORIZED_PROVER_ROLE, false to allow open registration
      */
-    function setAuthorizationRequired(bool required) external;
+    function setRequireAuthorization(bool required) external;
 
     /**
      * @notice Update the unstake delay period (admin only)

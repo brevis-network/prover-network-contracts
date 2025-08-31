@@ -1,6 +1,6 @@
 # Vault-Based Staking System
 
-A staking system with isolated per-prover vaults, time-delayed unstaking, slashing protection, and reward distribution.
+A staking system with isolated per-prover vaults, time-delayed unstaking, proportional slashing, and reward distribution.
 
 ## Table of Contents
 
@@ -21,14 +21,14 @@ A staking system with isolated per-prover vaults, time-delayed unstaking, slashi
 The staking system consists of three main components:
 
 ### **StakingController** (Central Orchestrator)
-- Orchestrates lifecycle: delegation, rewards, slashing, state transitions
-- Custodies pending unstakes and slashed funds (treasury)
+- Manages prover lifecycle: delegation, rewards, slashing, and state transitions
+- Holds pending unstakes and slashed funds in treasury
 - Provides O(1) share accounting and enforces minimum self-stake
 
 ### **ProverVault** (Per-Prover Isolation)
 - Per-prover ERC4626 vault; only controller can deposit/withdraw underlying
 - Shares are transferable ERC20 (minimum self-stake portion non‑transferable)
-- Rewards are donated (no new shares), raising share price for all
+- Rewards are added without minting shares, increasing share value for all holders
 
 ### **VaultFactory** (Deterministic Deployment)
 - Creates predictable vault addresses using CREATE2 (supports pre-registration & off-chain discovery)
@@ -54,8 +54,8 @@ The staking system consists of three main components:
 ### **Self-Stake Policy**
 
 - **Minimum Enforcement:** Provers must maintain `MinSelfStake` in active vault shares
-- **Exit Policy:** Cannot reduce to (0, MinSelfStake) range; full exit permitted (triggers deactivation)
-- **Pending Exclusion:** Only vault shares count, not assets in pending unstakes
+- **Exit Policy:** No partial exit below `MinSelfStake`; only full exit is allowed (triggers deactivation)
+- **Pending Exclusion:** Only vault shares count, assets in pending unstakes do not
 - **Dynamic Enforcement:** Changes to `MinSelfStake` don't force immediate deactivation
 
 ---
@@ -64,19 +64,19 @@ The staking system consists of three main components:
 
 ### **Staking Flow**
 1. **Validation:** Prover exists and (if delegator) state is Active.
-2. **Deposit:** Controller pulls user tokens and deposits into the prover's vault, receiving shares.
-3. **Accounting:** Share balances updated via hooks; emit `Staked` (prover, staker, assets, shares).
+2. **Deposit:** Controller pulls user tokens and deposits into the prover's vault, receiving shares
+3. **Accounting:** Share balances updated via hooks; emit `Staked` (prover, staker, assets, shares)
 
 ### **Two-Phase Unstaking**
 
 **Phase 1: Request (`requestUnstake`)**
-- Shares immediately burned, stop accruing rewards; records `UnstakeRequest`
+- Shares are immediately burned and stop accruing rewards; an `UnstakeRequest`is recorded
 - Enforces minimum self-stake requirements; maximum 10 pending requests per (prover, staker) pair
 
 **Phase 2: Completion (`completeUnstake`)**  
 - Must wait at least `unstakeDelay` seconds
 - Effective amount computed via current slashing scale; transfers assets to user
-- Ready requests continue affected by slashing until completion; no "freezing" of value at maturity
+- Ready requests remain slashable until completion; no "freezing" of value at maturity
 
 ---
 
@@ -87,11 +87,11 @@ The staking system consists of three main components:
 - Lookup rate: `rate = getCommissionRate(prover, msg.sender)` (basis points)
 - Split: `commission = totalAmount * rate / 10000`; `remainder = totalAmount - commission`
 - Accrue & Donate: add `commission` to `pendingCommission`; send `remainder` to the vault
-- Effect: vault share price increases for all existing holders; reverts if vault has zero shares (windfall guard)
+- Effect: increases vault share price for all holders; reverts if vault has no shares (windfall guard)
 
 ### **Commission Rate**
 - **Resolution:** `rate = commissionRates[msg.sender] if set else commissionRates[address(0)]` (basis points)
-- **Rationale:** Aligns commission with heterogeneous source cost profiles (heavy proof fees vs baseline)
+- **Rationale:** Allows flexible commission rates per reward source (e.g., high-cost proofs vs baseline sources)
 
 ---
 
@@ -101,7 +101,7 @@ The staking system consists of three main components:
 The system provides two slashing interfaces that both use the same dual-target mechanism:
 
 **Percentage-Based Slashing:**
-- Function: `slash(prover, bps)` (percentage in basis points 0-10000) - default primary slash function
+- Function: `slash(prover, bps)` (percentage in basis points 0-10000) - primary slash function
 - Uses the provided percentage to slash both targets proportionally
 
 **Amount-Based Slashing:**
@@ -110,14 +110,14 @@ The system provides two slashing interfaces that both use the same dual-target m
 - Result: may slash less than requested due to cap or rounding
 
 ### **Dual-Target Mechanism**
-Both slashing functions apply the determined percentage to two targets, and move slashed assets to controller treasury.
+Both slashing methods apply the percentage to two targets, transferring the slashed assets to the controller treasury.
 - **Vault Assets:** Proportional removal via `vault.controllerSlash()`
 - **Pending Unstakes:** Apply percentage to slashingScale, reduce totalUnstaking
 
 ### **Slashing Scale & Application**
-- **Scale Management:** Starts at 100%; each slash reduces the scale proportionally with a floor at 20% to prevent total value wipeout
-- **Deactivation Triggers:** Scale below 40% or self-stake below minimum automatically deactivates prover
-- **Pending Unstake Impact:** New requests snapshot current scale; existing requests are adjusted proportionally until completion
+- Scale starts at 100%; each slash reduces it proportionally, with a 20% floor to prevent complete value loss
+- Provers are automatically deactivated if scale falls below 40% or self-stake drops below minimum
+- New unstake requests snapshot the current scale; existing requests adjust proportionally until completion
 
 ---
 
@@ -126,24 +126,24 @@ Both slashing functions apply the determined percentage to two targets, and move
 ### **Economic Parameters**
 | Parameter | Units / Format | Description |
 |-----------|----------------|-------------|
-| `MinSelfStake` | tokens | Minimum self-stake a prover must maintain to stay Active |
-| `MaxSlashBps` | bps (0–10000) | Max fraction removable in a single slashing event |
-| `UnstakeDelay` | seconds | Minimum wait between request and completion of unstake |
-| `AuthorizationRequired` | bool | If true, `initializeProver` requires `AUTHORIZED_PROVER_ROLE` |
+| `minSelfStake` | tokens | Minimum self-stake a prover must maintain to stay Active |
+| `maxSlashBps` | bps (0–10000) | Max fraction removable in a single slashing event |
+| `unstakeDelay` | seconds | Minimum wait between request and completion of unstake |
+| `requireAuthorization` | bool | If true, `initializeProver` requires `AUTHORIZED_PROVER_ROLE` |
 
 ### **Authorization**
-- **Toggle:** When `authorizationRequired = true`, `initializeProver` requires `AUTHORIZED_PROVER_ROLE`
+- **Toggle:** When `requireAuthorization = true`, `initializeProver` requires `AUTHORIZED_PROVER_ROLE`
 - **Role Lifecycle:** Admin grants/revokes `AUTHORIZED_PROVER_ROLE` independently of the toggle
 
 ### **Admin Capabilities**
 - **Parameter Updates:** All economic parameters adjustable by owner
 - **Treasury Management:** Withdraw accumulated slashed funds
-- **Emergency Powers:** Pause protocol, recover tokens (when paused)
+- **Emergency Powers:** Pause the protocol and recover stuck tokens (only while paused)
 - **Role Management:** Grant/revoke slasher and authorized prover roles
 - **Prover Control:** Force deactivation, jailing, and retirement
 
 ### **Trust Model**
-- **Owner Privileges:** Significant economic control, no built-in timelock
+- **Owner Privileges:** Owner has significant economic control; no on-chain timelock is built in
 - **Assumptions:** Governance/multisig provides off-chain assurances
 - **Emergency Recovery:** Requires paused state, used for stuck tokens
 
@@ -169,7 +169,7 @@ Both slashing functions apply the determined percentage to two targets, and move
 - Governance process (off‑chain) needed for parameter change review
 
 **Commission Front‑Running**
-- Provers may raise per‑source commission just before large reward distributions (monitor recent changes)
+- Provers may raise per‑source commission just before large reward distributions
 
 **Implementation Drift**
 - Future vault/controller code changes could desynchronize accounting assumptions
