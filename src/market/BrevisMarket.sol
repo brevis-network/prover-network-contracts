@@ -209,22 +209,22 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         if (block.timestamp > biddingEndTime) revert MarketBiddingPhaseEnded(block.timestamp, biddingEndTime);
 
         // Get the effective prover (the prover the caller is acting on behalf of)
-        address effectiveProver = _getEffectiveProver(msg.sender);
+        address prover = _getEffectiveProver(msg.sender);
         // Check if effective prover is eligible (must meet minimum stake requirement)
-        _requireProverEligible(effectiveProver, req.fee.minStake);
+        _requireProverEligible(prover, req.fee.minStake);
 
         // Track if this is a new bid (not overwriting existing)
-        bool isNewBid = req.bids[effectiveProver] == bytes32(0);
+        bool isNewBid = req.bids[prover] == bytes32(0);
 
         // Store the sealed bid under the effective prover address
-        req.bids[effectiveProver] = bidHash;
+        req.bids[prover] = bidHash;
 
         // Increment bid count only for new bids
         if (isNewBid) {
             req.bidCount++;
         }
 
-        emit NewBid(reqid, effectiveProver, bidHash);
+        emit NewBid(reqid, prover, bidHash);
     }
 
     /**
@@ -253,21 +253,21 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         }
 
         // Get the effective prover (the prover the caller is acting on behalf of)
-        address effectiveProver = _getEffectiveProver(msg.sender);
+        address prover = _getEffectiveProver(msg.sender);
         // Check if effective prover is still eligible during reveal (re-validate minimum stake requirement)
-        _requireProverEligible(effectiveProver, req.fee.minStake);
+        _requireProverEligible(prover, req.fee.minStake);
 
         // Verify the revealed bid matches the hash
         bytes32 expectedHash = keccak256(abi.encodePacked(fee, nonce));
-        if (req.bids[effectiveProver] != expectedHash) {
-            revert MarketBidRevealMismatch(expectedHash, req.bids[effectiveProver]);
+        if (req.bids[prover] != expectedHash) {
+            revert MarketBidRevealMismatch(expectedHash, req.bids[prover]);
         }
         if (fee > req.fee.maxFee) revert MarketFeeExceedsMaximum(fee, req.fee.maxFee);
 
         // Update lowest and second lowest bidders
-        _updateBidders(req, effectiveProver, fee);
+        _updateBidders(req, prover, fee);
 
-        emit BidRevealed(reqid, effectiveProver, fee);
+        emit BidRevealed(reqid, prover, fee);
     }
 
     /**
@@ -287,9 +287,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         if (block.timestamp > req.fee.deadline) revert MarketDeadlinePassed(block.timestamp, req.fee.deadline);
 
         // Check if msg.sender is authorized to act on behalf of the winning prover
-        if (!_isAuthorizedForProver(msg.sender, req.winner.prover)) {
-            revert MarketNotExpectedProver(req.winner.prover, msg.sender);
-        }
+        address prover = _getEffectiveProver(msg.sender);
+        if (prover != req.winner.prover) revert MarketNotExpectedProver(req.winner.prover, msg.sender);
 
         if (req.status != ReqStatus.Pending) revert MarketInvalidRequestStatus(req.status);
 
@@ -318,13 +317,13 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
         // Send remaining fee to staking controller as reward for the prover
         if (proverReward > 0) {
-            stakingController.addRewards(req.winner.prover, proverReward);
+            stakingController.addRewards(prover, proverReward);
         }
 
         // Refund remaining fee to requester
         feeToken.safeTransfer(req.sender, req.fee.maxFee - actualFee);
 
-        emit ProofSubmitted(reqid, req.winner.prover, proof, actualFee);
+        emit ProofSubmitted(reqid, prover, proof, actualFee);
     }
 
     /**

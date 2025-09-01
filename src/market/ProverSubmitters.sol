@@ -129,21 +129,4 @@ abstract contract ProverSubmitters is IBrevisMarket {
         // Otherwise, caller is acting as themselves (direct prover)
         return caller;
     }
-
-    /**
-     * @notice Internal utility to check if caller is authorized to act on behalf of a prover
-     * @dev Caller can be either the prover themselves or a registered submitter for the prover
-     * @param caller Address of the caller (msg.sender)
-     * @param prover Address of the prover
-     * @return isAuthorized True if caller is authorized to act for the prover
-     */
-    function _isAuthorizedForProver(address caller, address prover) internal view returns (bool isAuthorized) {
-        if (caller == prover) {
-            return true;
-        }
-
-        // Check if caller is a registered submitter for this prover
-        address registeredProver = submitterToProver[caller];
-        return (registeredProver == prover);
-    }
 }

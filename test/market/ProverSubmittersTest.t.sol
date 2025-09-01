@@ -448,18 +448,6 @@ contract ProverSubmittersTest is Test {
         assertEq(market.getBidHash(reqid, prover1), bidHash);
     }
 
-    function test_isAuthorizedForProver_DirectProver() public view {
-        // This is tested implicitly through bid/reveal/submitProof functionality
-        // If prover1 can bid directly, then _isAuthorizedForProver(prover1, prover1) returns true
-        assertTrue(true); // Placeholder - actual testing happens in bid tests
-    }
-
-    function test_isAuthorizedForProver_RegisteredSubmitter() public view {
-        // This is tested implicitly through bid/reveal/submitProof functionality
-        // If registered submitter can bid for prover, then _isAuthorizedForProver(submitter, prover) returns true
-        assertTrue(true); // Placeholder - actual testing happens in submitter bid tests
-    }
-
     // =======================================================================
     // EDGE CASE TESTS
     // =======================================================================
