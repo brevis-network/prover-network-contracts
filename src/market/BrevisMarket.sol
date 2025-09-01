@@ -324,7 +324,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         // Refund remaining fee to requester
         feeToken.safeTransfer(req.sender, req.fee.maxFee - actualFee);
 
-        emit ProofSubmitted(reqid, msg.sender, proof, actualFee);
+        emit ProofSubmitted(reqid, req.winner.prover, proof, actualFee);
     }
 
     /**
