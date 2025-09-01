@@ -59,10 +59,15 @@ contract BrevisMarketTest is Test {
         feeToken.mint(requester, 10e18);
         feeToken.mint(address(market), 10e18); // For refunds
 
-        // Setup prover stakes
+        // Setup prover stakes and eligibility
         stakingController.setProverStake(prover1, MIN_STAKE);
         stakingController.setProverStake(prover2, MIN_STAKE);
         stakingController.setProverStake(prover3, MIN_STAKE / 2); // Insufficient stake
+
+        // Set prover eligibility (required for new MockStakingController)
+        stakingController.setProverEligible(prover1, true, MIN_STAKE);
+        stakingController.setProverEligible(prover2, true, MIN_STAKE);
+        stakingController.setProverEligible(prover3, false, MIN_STAKE / 2); // Make prover3 ineligible due to insufficient stake
 
         // Configure mock verifier to accept our test proof
         picoVerifier.setValidProof(VK, PUBLIC_VALUES_DIGEST, VALID_PROOF);

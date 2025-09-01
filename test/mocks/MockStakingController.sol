@@ -2,10 +2,14 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "../../src/staking/interfaces/IStakingController.sol";
 
 contract MockStakingController {
     IERC20 public stakingToken;
     mapping(address => uint256) public proverStakes;
+    mapping(address => IStakingController.ProverState) public proverStates;
+    mapping(address => bool) public proverEligibility;
+    mapping(address => uint256) public proverCurrentStakes;
     uint256 public minSelfStake = 1e17; // 0.1 token, less than test MIN_STAKE
 
     // Slash tracking for tests
@@ -21,8 +25,23 @@ contract MockStakingController {
         stakingToken = _stakingToken;
     }
 
+    function setProverState(address prover, IStakingController.ProverState state) external {
+        proverStates[prover] = state;
+    }
+
+    function setProverEligible(address prover, bool eligible, uint256 stake) external {
+        proverEligibility[prover] = eligible;
+        proverCurrentStakes[prover] = stake;
+        proverStakes[prover] = stake;
+    }
+
+    function getProverState(address prover) external view returns (IStakingController.ProverState state) {
+        return proverStates[prover];
+    }
+
     function setProverStake(address prover, uint256 stake) external {
         proverStakes[prover] = stake;
+        proverCurrentStakes[prover] = stake; // Also update current stakes used for eligibility
     }
 
     function isProverEligible(address prover, uint256 minimumStake)
@@ -30,8 +49,8 @@ contract MockStakingController {
         view
         returns (bool eligible, uint256 currentStake)
     {
-        currentStake = proverStakes[prover];
-        eligible = currentStake >= minimumStake;
+        currentStake = proverCurrentStakes[prover];
+        eligible = proverEligibility[prover] && currentStake >= minimumStake;
     }
 
     function addRewards(address prover, uint256 amount) external returns (uint256 commission, uint256 toStakers) {

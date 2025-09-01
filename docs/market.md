@@ -9,7 +9,8 @@ A sealed-bid reverse auction marketplace for zero-knowledge proof generation, wi
 - [3. Core Data Structures](#3-core-data-structures)
 - [4. Reverse Auction Process](#4-reverse-auction-process)
 - [5. Integration with Staking](#5-integration-with-staking)
-- [6. Configuration & Admin](#6-configuration--admin)
+- [6. Prover Submitters](#6-prover-submitters)
+- [7. Configuration & Admin](#7-configuration--admin)
 
 ---
 
@@ -115,7 +116,40 @@ stakingController.isProverEligible(prover, minimumStake)
 
 ---
 
-## 6. Configuration & Admin
+## 6. Prover Submitters
+
+The marketplace supports **submitter authorization** where provers can register submitter addresses to act on their behalf. This enables provers managed by multisig wallets or HD wallets to use dedicated "hot" keys for bidding and proof submission while keeping their main prover keys secure.
+
+### **Two-Step Registration Process**
+```
+1. Submitter grants consent: setSubmitterConsent(proverAddress)
+2. Prover registers submitter: registerSubmitter(submitterAddress)
+```
+
+### **Security Protections**
+- **Consent Required:** Prevents front-running by requiring submitter's explicit consent
+- **Prover Verification:** Only registered provers in staking system can register submitters
+- **Hijacking Prevention:** Existing provers cannot be registered as submitters for other provers
+
+### **Operations**
+```solidity
+// Grant/revoke consent (submitter calls this)
+setSubmitterConsent(proverAddress)  // Grant consent to prover
+setSubmitterConsent(address(0))     // Revoke consent
+
+// Register/unregister (prover calls this)
+registerSubmitter(submitterAddress)    // Register consenting submitter
+unregisterSubmitter(submitterAddress)  // Remove submitter
+```
+
+### **Data Access**
+- `submitterToProver[submitter]` - Returns the prover a submitter is registered to
+- `submitterConsent[submitter]` - Returns the prover a submitter has consented to
+- `getSubmittersForProver(prover)` - Returns array of all submitters for a prover
+
+---
+
+## 7. Configuration & Admin
 
 ### **Parameters**
 - `biddingPhaseDuration` - Sealed bid submission window
