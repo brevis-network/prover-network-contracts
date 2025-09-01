@@ -67,6 +67,11 @@ interface IBrevisMarket {
     event ProtocolFeeBpsUpdated(uint256 oldBps, uint256 newBps);
     event ProtocolFeeWithdrawn(address indexed to, uint256 amount);
 
+    // Prover submitter management events
+    event SubmitterRegistered(address indexed prover, address indexed submitter);
+    event SubmitterUnregistered(address indexed prover, address indexed submitter);
+    event SubmitterConsentUpdated(address indexed submitter, address indexed oldProver, address indexed newProver);
+
     // =========================================================================
     // ERRORS
     // =========================================================================
@@ -97,6 +102,15 @@ interface IBrevisMarket {
     error MarketNoAssignedProverToSlash(bytes32 reqid);
     error MarketInvalidProtocolFeeBps();
     error MarketNoProtocolFeeToWithdraw();
+
+    // Prover submitter management errors
+    error MarketCannotRegisterSelf();
+    error MarketProverNotRegistered();
+    error MarketSubmitterAlreadyRegistered(address submitter, address prover);
+    error MarketSubmitterNotRegistered(address submitter);
+    error MarketNotAuthorized();
+    error MarketCannotRegisterProverAsSubmitter(address prover);
+    error MarketSubmitterConsentRequired(address submitter);
 
     // =========================================================================
     // PROOF REQUEST MANAGEMENT
@@ -321,4 +335,42 @@ interface IBrevisMarket {
      * @return bidHash The sealed bid hash (empty if no bid submitted)
      */
     function getBidHash(bytes32 reqid, address prover) external view returns (bytes32 bidHash);
+
+    // =========================================================================
+    // PROVER SUBMITTER MANAGEMENT
+    // =========================================================================
+
+    /**
+     * @notice Register a submitter address that can submit proofs on behalf of the prover
+     * @dev Only the prover can register submitters for themselves
+     * @param submitter The address to register as a submitter
+     */
+    function registerSubmitter(address submitter) external;
+
+    /**
+     * @notice Unregister a submitter address
+     * @dev Only the prover can unregister their own submitters
+     * @param submitter The address to unregister
+     */
+    function unregisterSubmitter(address submitter) external;
+
+    /**
+     * @notice Get the prover address for a given submitter
+     * @param submitter The submitter address
+     * @return prover The prover address, or address(0) if not registered
+     */
+    function submitterToProver(address submitter) external view returns (address prover);
+
+    /**
+     * @notice Get all registered submitters for a prover
+     * @param prover The prover address
+     * @return submitters Array of submitter addresses
+     */
+    function getSubmittersForProver(address prover) external view returns (address[] memory submitters);
+
+    /**
+     * @notice Set consent to be registered as a submitter by a specific prover
+     * @param prover The prover address to grant consent to, or address(0) to revoke consent
+     */
+    function setSubmitterConsent(address prover) external;
 }

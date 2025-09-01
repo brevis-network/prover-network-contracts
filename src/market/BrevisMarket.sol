@@ -8,12 +8,13 @@ import "@security/access/AccessControl.sol";
 import "../pico/IPicoVerifier.sol";
 import "../staking/interfaces/IStakingController.sol";
 import "./IBrevisMarket.sol";
+import "./ProverSubmitters.sol";
 
 /**
  * @title BrevisMarket
  * @notice Decentralized proof marketplace using sealed-bid reverse second-price auctions for ZK proof generation
  */
-contract BrevisMarket is IBrevisMarket, AccessControl, ReentrancyGuard {
+contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // =========================================================================
@@ -58,7 +59,6 @@ contract BrevisMarket is IBrevisMarket, AccessControl, ReentrancyGuard {
     // External contracts
     IPicoVerifier public picoVerifier; // address of the PicoVerifier contract
     IERC20 public feeToken; // ERC20 token used for fees
-    IStakingController public stakingController; // StakingController for prover eligibility checks
 
     // Core data structures
     mapping(bytes32 => ReqState) public requests; // proof req id -> state
@@ -208,21 +208,23 @@ contract BrevisMarket is IBrevisMarket, AccessControl, ReentrancyGuard {
         uint256 biddingEndTime = req.timestamp + biddingPhaseDuration;
         if (block.timestamp > biddingEndTime) revert MarketBiddingPhaseEnded(block.timestamp, biddingEndTime);
 
-        // Check if prover is eligible (must meet minimum stake requirement)
-        _requireProverEligible(msg.sender, req.fee.minStake);
+        // Get the effective prover (the prover the caller is acting on behalf of)
+        address effectiveProver = _getEffectiveProver(msg.sender);
+        // Check if effective prover is eligible (must meet minimum stake requirement)
+        _requireProverEligible(effectiveProver, req.fee.minStake);
 
         // Track if this is a new bid (not overwriting existing)
-        bool isNewBid = req.bids[msg.sender] == bytes32(0);
+        bool isNewBid = req.bids[effectiveProver] == bytes32(0);
 
-        // Store the sealed bid
-        req.bids[msg.sender] = bidHash;
+        // Store the sealed bid under the effective prover address
+        req.bids[effectiveProver] = bidHash;
 
         // Increment bid count only for new bids
         if (isNewBid) {
             req.bidCount++;
         }
 
-        emit NewBid(reqid, msg.sender, bidHash);
+        emit NewBid(reqid, effectiveProver, bidHash);
     }
 
     /**
@@ -250,18 +252,22 @@ contract BrevisMarket is IBrevisMarket, AccessControl, ReentrancyGuard {
             revert MarketRevealPhaseEnded(block.timestamp, revealEndTime);
         }
 
+        // Get the effective prover (the prover the caller is acting on behalf of)
+        address effectiveProver = _getEffectiveProver(msg.sender);
+        // Check if effective prover is still eligible during reveal (re-validate minimum stake requirement)
+        _requireProverEligible(effectiveProver, req.fee.minStake);
+
         // Verify the revealed bid matches the hash
         bytes32 expectedHash = keccak256(abi.encodePacked(fee, nonce));
-        if (req.bids[msg.sender] != expectedHash) revert MarketBidRevealMismatch(expectedHash, req.bids[msg.sender]);
+        if (req.bids[effectiveProver] != expectedHash) {
+            revert MarketBidRevealMismatch(expectedHash, req.bids[effectiveProver]);
+        }
         if (fee > req.fee.maxFee) revert MarketFeeExceedsMaximum(fee, req.fee.maxFee);
 
-        // Check if prover is still eligible during reveal (re-validate minimum stake requirement)
-        _requireProverEligible(msg.sender, req.fee.minStake);
-
         // Update lowest and second lowest bidders
-        _updateBidders(req, msg.sender, fee);
+        _updateBidders(req, effectiveProver, fee);
 
-        emit BidRevealed(reqid, msg.sender, fee);
+        emit BidRevealed(reqid, effectiveProver, fee);
     }
 
     /**
@@ -279,7 +285,12 @@ contract BrevisMarket is IBrevisMarket, AccessControl, ReentrancyGuard {
             revert MarketRevealPhaseNotEnded(block.timestamp, revealEndTime);
         }
         if (block.timestamp > req.fee.deadline) revert MarketDeadlinePassed(block.timestamp, req.fee.deadline);
-        if (msg.sender != req.winner.prover) revert MarketNotExpectedProver(req.winner.prover, msg.sender);
+
+        // Check if msg.sender is authorized to act on behalf of the winning prover
+        if (!_isAuthorizedForProver(msg.sender, req.winner.prover)) {
+            revert MarketNotExpectedProver(req.winner.prover, msg.sender);
+        }
+
         if (req.status != ReqStatus.Pending) revert MarketInvalidRequestStatus(req.status);
 
         // Verify the proof
