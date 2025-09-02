@@ -123,7 +123,7 @@ The marketplace supports **submitter authorization** where provers can register 
 ### **Two-Step Registration Process**
 ```
 1. Submitter grants consent: setSubmitterConsent(proverAddress)
-2. Prover registers submitter: registerSubmitter(submitterAddress)
+2. Prover registers submitter: registerSubmitter(submitterAddress) or registerSubmitters(submitterArray)
 ```
 
 ### **Security Protections**
@@ -140,6 +140,11 @@ setSubmitterConsent(address(0))     // Revoke consent
 // Register/unregister (prover calls this)
 registerSubmitter(submitterAddress)    // Register consenting submitter
 unregisterSubmitter(submitterAddress)  // Remove submitter
+registerSubmitters(submitterArray)     // Register multiple consenting submitters
+unregisterSubmitters(submitterArray)   // Remove multiple submitters
+
+// Self-unregistration (submitter calls this)
+unregisterSubmitter()  // Submitter removes themselves
 ```
 
 ### **Data Access**

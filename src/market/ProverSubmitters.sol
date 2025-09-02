@@ -12,10 +12,11 @@ import "./IBrevisMarket.sol";
  *      while keeping their main prover keys secure.
  *
  * How to operate:
- * 1. Submitter grants consent: Call `setSubmitterConsent(proverAddress)` from submitter address
- * 2. Prover registers submitter: Call `registerSubmitter(submitterAddress)` from prover address
+ * 1. Submitter grants consent: Call `setSubmitterConsent` from submitter address
+ * 2. Prover registers submitter: Call `registerSubmitter/registerSubmitters` from prover address
  * 3. Submitter can now bid/reveal/submit proofs on behalf of the prover
- * 4. To revoke: Prover calls `unregisterSubmitter(submitterAddress)` or submitter calls `setSubmitterConsent(address(0))`
+ * 4. To unregister: Prover calls `unregisterSubmitter/unregisterSubmitters` or submitter calls `unregisterSubmitter`
+ * 5. To revoke consent: Submitter calls `setSubmitterConsent(address(0))`
  *
  * Security features:
  * - Two-step registration process prevents front-running attacks
@@ -54,7 +55,7 @@ abstract contract ProverSubmitters is IBrevisMarket {
      * @dev Only the prover can register submitters for themselves, requires prior consent from submitter
      * @param submitter The address to register as a submitter
      */
-    function registerSubmitter(address submitter) external {
+    function registerSubmitter(address submitter) public {
         address prover = msg.sender;
         if (submitter == address(0)) revert MarketZeroAddress();
         if (submitter == prover) revert MarketCannotRegisterSelf();
@@ -89,15 +90,56 @@ abstract contract ProverSubmitters is IBrevisMarket {
     }
 
     /**
+     * @notice Register multiple submitter addresses that can submit proofs on behalf of the prover
+     * @dev Batch version of registerSubmitter. All submitters must have prior consent from the caller (prover)
+     * @param submitters Array of addresses to register as submitters
+     */
+    function registerSubmitters(address[] calldata submitters) external {
+        for (uint256 i = 0; i < submitters.length; i++) {
+            registerSubmitter(submitters[i]);
+        }
+    }
+
+    /**
      * @notice Unregister a submitter address
      * @dev Only the prover can unregister their own submitters
      * @param submitter The address to unregister
      */
-    function unregisterSubmitter(address submitter) external {
+    function unregisterSubmitter(address submitter) public {
         address prover = submitterToProver[submitter];
         if (prover == address(0)) revert MarketSubmitterNotRegistered(submitter);
         if (prover != msg.sender) revert MarketNotAuthorized();
 
+        _removeSubmitter(submitter, prover);
+    }
+
+    /**
+     * @notice Unregister multiple submitter addresses
+     * @dev Batch version of unregisterSubmitter. Only the prover can unregister their own submitters
+     * @param submitters Array of addresses to unregister
+     */
+    function unregisterSubmitters(address[] calldata submitters) external {
+        for (uint256 i = 0; i < submitters.length; i++) {
+            unregisterSubmitter(submitters[i]);
+        }
+    }
+
+    /**
+     * @notice Unregister the caller as a submitter
+     * @dev Allows a submitter to unregister themselves without needing prover approval
+     */
+    function unregisterSubmitter() external {
+        address submitter = msg.sender;
+        address prover = submitterToProver[submitter];
+        if (prover == address(0)) revert MarketSubmitterNotRegistered(submitter);
+
+        _removeSubmitter(submitter, prover);
+    }
+
+    /**
+     * @notice Internal helper to remove a submitter from both data structures
+     */
+    function _removeSubmitter(address submitter, address prover) internal {
         // Remove from both data structures
         submitterToProver[submitter] = address(0);
         proverSubmitters[prover].remove(submitter);

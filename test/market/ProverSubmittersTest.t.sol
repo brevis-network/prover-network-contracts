@@ -266,6 +266,94 @@ contract ProverSubmittersTest is Test {
         market.unregisterSubmitter(submitter1);
     }
 
+    function test_submitterCanUnregisterSelf() public {
+        // Setup: register submitter first
+        vm.prank(submitter1);
+        market.setSubmitterConsent(prover1);
+        vm.prank(prover1);
+        market.registerSubmitter(submitter1);
+
+        // Submitter unregisters themselves (no argument version)
+        vm.expectEmit(true, true, true, true);
+        emit SubmitterUnregistered(prover1, submitter1);
+
+        vm.prank(submitter1);
+        market.unregisterSubmitter(); // No argument - self unregister
+
+        // Verify unregistration
+        assertEq(market.submitterToProver(submitter1), address(0));
+        address[] memory submitters = market.getSubmittersForProver(prover1);
+        assertEq(submitters.length, 0);
+    }
+
+    function test_submitterSelfUnregister_NotRegistered() public {
+        vm.expectRevert(abi.encodeWithSelector(IBrevisMarket.MarketSubmitterNotRegistered.selector, submitter1));
+        vm.prank(submitter1);
+        market.unregisterSubmitter(); // Try to self-unregister when not registered
+    }
+
+    // =======================================================================
+    // BATCH OPERATIONS TESTS
+    // =======================================================================
+
+    function test_registerSubmitters_BatchSuccess() public {
+        // Setup: grant consent from multiple submitters
+        vm.prank(submitter1);
+        market.setSubmitterConsent(prover1);
+        vm.prank(submitter2);
+        market.setSubmitterConsent(prover1);
+
+        // Batch register
+        address[] memory submitters = new address[](2);
+        submitters[0] = submitter1;
+        submitters[1] = submitter2;
+
+        vm.expectEmit(true, true, true, true);
+        emit SubmitterRegistered(prover1, submitter1);
+        vm.expectEmit(true, true, true, true);
+        emit SubmitterRegistered(prover1, submitter2);
+
+        vm.prank(prover1);
+        market.registerSubmitters(submitters);
+
+        // Verify both registrations
+        assertEq(market.submitterToProver(submitter1), prover1);
+        assertEq(market.submitterToProver(submitter2), prover1);
+        address[] memory registeredSubmitters = market.getSubmittersForProver(prover1);
+        assertEq(registeredSubmitters.length, 2);
+    }
+
+    function test_unregisterSubmitters_BatchSuccess() public {
+        // Setup: register multiple submitters
+        vm.prank(submitter1);
+        market.setSubmitterConsent(prover1);
+        vm.prank(submitter2);
+        market.setSubmitterConsent(prover1);
+        vm.prank(prover1);
+        market.registerSubmitter(submitter1);
+        vm.prank(prover1);
+        market.registerSubmitter(submitter2);
+
+        // Batch unregister
+        address[] memory submitters = new address[](2);
+        submitters[0] = submitter1;
+        submitters[1] = submitter2;
+
+        vm.expectEmit(true, true, true, true);
+        emit SubmitterUnregistered(prover1, submitter1);
+        vm.expectEmit(true, true, true, true);
+        emit SubmitterUnregistered(prover1, submitter2);
+
+        vm.prank(prover1);
+        market.unregisterSubmitters(submitters);
+
+        // Verify both unregistrations
+        assertEq(market.submitterToProver(submitter1), address(0));
+        assertEq(market.submitterToProver(submitter2), address(0));
+        address[] memory registeredSubmitters = market.getSubmittersForProver(prover1);
+        assertEq(registeredSubmitters.length, 0);
+    }
+
     // =======================================================================
     // MARKETPLACE INTEGRATION TESTS
     // =======================================================================
