@@ -327,7 +327,7 @@ interface IStakingController {
     /**
      * @notice Get all commission rates configured for a prover
      * @param prover The prover address
-     * @return sources Array of reward source addresses with custom rates (excludes address(0))
+     * @return sources Array of source addresses (address(0) first for default rate, then custom rates)
      * @return rates Array of commission rates corresponding to each source (in basis points)
      */
     function getCommissionRates(address prover)
@@ -346,6 +346,12 @@ interface IStakingController {
      * @return bps The maximum slash percentage (in basis points)
      */
     function maxSlashBps() external view returns (uint256 bps);
+
+    /**
+     * @notice Get the unstake delay period
+     * @return delay The unstake delay in seconds
+     */
+    function unstakeDelay() external view returns (uint256 delay);
 
     // =========================================================================
     // VIEW FUNCTIONS - STAKING INFO

@@ -5,6 +5,8 @@ import "../../lib/forge-std/src/Test.sol";
 import {UnsafeUpgrades} from "../../lib/openzeppelin-foundry-upgrades/src/Upgrades.sol";
 import "../../scripts/DeployProverNetwork.s.sol";
 import "../../src/staking/controller/StakingController.sol";
+import "../../src/staking/viewer/StakingViewer.sol";
+import "../../src/staking/interfaces/IStakingViewer.sol";
 import "../../src/staking/vault/VaultFactory.sol";
 import "../../src/market/BrevisMarket.sol";
 import "../../src/pico/MockPicoVerifier.sol";
@@ -176,6 +178,9 @@ contract DeployProverNetworkTest is Test {
         StakingController stakingController = StakingController(stakingControllerProxy);
         stakingController.grantRole(stakingController.SLASHER_ROLE(), brevisMarketProxy);
 
+        // Deploy StakingViewer
+        StakingViewer stakingViewer = new StakingViewer(stakingControllerProxy);
+
         // Verify integration
         assertTrue(stakingController.hasRole(stakingController.SLASHER_ROLE(), brevisMarketProxy));
 
@@ -183,6 +188,54 @@ contract DeployProverNetworkTest is Test {
         assertEq(address(stakingController.vaultFactory()), vaultFactoryProxy);
         assertEq(address(VaultFactory(vaultFactoryProxy).stakingController()), stakingControllerProxy);
         assertEq(address(BrevisMarket(payable(brevisMarketProxy)).stakingController()), stakingControllerProxy);
+        assertEq(address(stakingViewer.stakingController()), stakingControllerProxy);
+
+        // Test StakingViewer basic functionality
+        IStakingViewer.SystemOverview memory overview = stakingViewer.getSystemOverview();
+        assertEq(overview.minSelfStake, TEST_MIN_SELF_STAKE);
+        assertEq(overview.unstakeDelay, TEST_UNSTAKE_DELAY);
+        assertEq(address(overview.stakingToken), address(stakingToken));
+    }
+
+    function test_StakingViewerDeployment() public {
+        // Deploy a complete staking system to test StakingViewer
+        address vaultFactoryImpl = address(new VaultFactory());
+        address vaultFactoryProxy = UnsafeUpgrades.deployTransparentProxy(vaultFactoryImpl, TEST_DEPLOYER, "");
+
+        address stakingControllerImpl = address(new StakingController(address(0), address(0), 0, 0, 0));
+        bytes memory stakingControllerInitData = abi.encodeWithSignature(
+            "init(address,address,uint256,uint256,uint256)",
+            address(stakingToken),
+            vaultFactoryProxy,
+            TEST_UNSTAKE_DELAY,
+            TEST_MIN_SELF_STAKE,
+            TEST_MAX_SLASH_BPS
+        );
+        address stakingControllerProxy =
+            UnsafeUpgrades.deployTransparentProxy(stakingControllerImpl, TEST_DEPLOYER, stakingControllerInitData);
+
+        VaultFactory(vaultFactoryProxy).init(stakingControllerProxy);
+
+        // Deploy StakingViewer
+        StakingViewer stakingViewer = new StakingViewer(stakingControllerProxy);
+
+        // Verify StakingViewer connection
+        assertEq(address(stakingViewer.stakingController()), stakingControllerProxy);
+
+        // Test basic functionality - getSystemOverview should not revert
+        IStakingViewer.SystemOverview memory overview = stakingViewer.getSystemOverview();
+
+        // Verify the overview contains expected data
+        assertEq(overview.minSelfStake, TEST_MIN_SELF_STAKE);
+        assertEq(overview.unstakeDelay, TEST_UNSTAKE_DELAY);
+        assertEq(address(overview.stakingToken), address(stakingToken));
+        assertEq(overview.totalProvers, 0); // No provers registered yet
+        assertEq(overview.activeProvers, 0);
+        assertEq(overview.totalVaultAssets, 0);
+
+        // Test getTopProvers (should return empty array)
+        IStakingViewer.ProverDisplayInfo[] memory topProvers = stakingViewer.getTopProvers(10);
+        assertEq(topProvers.length, 0);
     }
 
     function test_MarketDeploymentWithOptionalParams() public {

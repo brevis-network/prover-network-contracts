@@ -28,6 +28,8 @@ src/
 │   ├── vault/
 │   │   ├── ProverVault.sol       # Isolated staking vault per prover
 │   │   └── VaultFactory.sol      # Deterministic vault deployment factory
+│   ├── viewer/
+│   │   └── StakingViewer.sol     # Read-only helper providing unified data access
 │   └── interfaces/               # Staking interfaces
 │
 ├── market/                     # Auction marketplace contracts

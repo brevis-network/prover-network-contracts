@@ -17,7 +17,7 @@ This directory contains deployment scripts for the Brevis Prover Network contrac
 
 ### Deploy Complete Prover Network (Recommended)
 
-**`DeployProverNetwork.s.sol`** ✨ - Comprehensive deployment script that deploys the entire Brevis Prover Network: VaultFactory, StakingController, BrevisMarket (all upgradeable with transparent proxy), connects all components, and grants proper roles.
+**`DeployProverNetwork.s.sol`** ✨ - Comprehensive deployment script that deploys the entire Brevis Prover Network: VaultFactory, StakingController, StakingViewer, BrevisMarket (upgradeable with transparent proxy), connects all components, and grants proper roles.
 
 ```bash
 # Deploy to local testnet
@@ -49,6 +49,11 @@ forge script script/VaultFactory.s.sol --rpc-url $RPC_URL --broadcast
 forge script script/BrevisMarket.s.sol --rpc-url $RPC_URL --broadcast
 ```
 
+**`StakingViewer.s.sol`** - Deploys only the StakingViewer (read-only contract, no proxy needed):
+```bash
+forge script script/StakingViewer.s.sol --rpc-url $RPC_URL --broadcast
+```
+
 **`MockPicoVerifier.s.sol`** - Deploys a mock PicoVerifier for testing:
 ```bash
 forge script script/MockPicoVerifier.s.sol --rpc-url $RPC_URL --broadcast
@@ -76,6 +81,9 @@ forge script script/MockPicoVerifier.s.sol --rpc-url $RPC_URL --broadcast
    MIN_SELF_STAKE=1000000000000000000   # 1 token minimum
    MAX_SLASH_BPS=5000                   # 50% max slashing
    
+   # For standalone StakingViewer deployment
+   STAKING_CONTROLLER_ADDRESS=0x...     # Deployed StakingController address
+   
    # Market System  
    PICO_VERIFIER_ADDRESS=0x...          # PicoVerifier contract
    BIDDING_PHASE_DURATION=300           # 5 minutes
@@ -97,12 +105,14 @@ After deployment, you can verify contracts are properly connected:
 ```bash
 # Get deployed addresses from deployment logs
 STAKING_CONTROLLER_PROXY=0x...  # From deployment output
-VAULT_FACTORY_PROXY=0x...       # From deployment output  
+VAULT_FACTORY_PROXY=0x...       # From deployment output
+STAKING_VIEWER=0x...            # From deployment output  
 BREVIS_MARKET_PROXY=0x...       # From deployment output
 
 # Verify system integration
 cast call $VAULT_FACTORY_PROXY "stakingController()" --rpc-url $RPC_URL
 cast call $STAKING_CONTROLLER_PROXY "vaultFactory()" --rpc-url $RPC_URL
+cast call $STAKING_VIEWER "stakingController()" --rpc-url $RPC_URL
 
 # Verify configuration
 cast call $STAKING_CONTROLLER_PROXY "stakingToken()" --rpc-url $RPC_URL
@@ -122,6 +132,9 @@ cast call $BREVIS_MARKET_PROXY "protocolFeeBps()" --rpc-url $RPC_URL
 # Verify slasher role granted
 cast call $STAKING_CONTROLLER_PROXY "hasRole(bytes32,address)" \
   $(cast keccak "SLASHER_ROLE") $BREVIS_MARKET_PROXY --rpc-url $RPC_URL
+
+# Test StakingViewer functionality
+cast call $STAKING_VIEWER "getSystemOverview()" --rpc-url $RPC_URL
 ```
 
 ## 4. Upgrade
@@ -158,6 +171,8 @@ cast send $PROXY_ADMIN "upgrade(address,address)" \
 # 3. Verify upgrade
 cast call $STAKING_CONTROLLER_PROXY "implementation()" --rpc-url $RPC_URL
 ```
+
+**Note**: StakingViewer is not upgradeable (deployed as a regular contract, not proxy). To upgrade StakingViewer, simply deploy a new instance with the updated StakingController address and update your frontend configuration.
 
 ## 5. Example Flow
 
@@ -213,3 +228,5 @@ forge test --match-contract DeployProverNetworkTest
 # Run full test suite (includes deployment tests)
 forge test
 ```
+
+**Frontend Integration**: After deployment, use the StakingViewer address in your frontend for optimized read operations. See `docs/frontend_guide.md` for complete integration guidance.

@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "../lib/forge-std/src/Script.sol";
 import {UnsafeUpgrades} from "../lib/openzeppelin-foundry-upgrades/src/Upgrades.sol";
 import "../src/staking/controller/StakingController.sol";
+import "../src/staking/viewer/StakingViewer.sol";
 import "../src/staking/vault/VaultFactory.sol";
 import "../src/market/BrevisMarket.sol";
 import "../src/staking/interfaces/IStakingController.sol";
@@ -12,7 +13,7 @@ import "../src/pico/IPicoVerifier.sol";
 /**
  * @title DeployProverNetwork
  * @notice Comprehensive deployment script for the entire Brevis Prover Network
- * @dev This script deploys the complete system: Staking System (VaultFactory, StakingController) + BrevisMarket
+ * @dev This script deploys the complete system: Staking System (VaultFactory, StakingController, StakingViewer) + BrevisMarket
  */
 contract DeployProverNetwork is Script {
     function run() external {
@@ -71,6 +72,11 @@ contract DeployProverNetwork is Script {
         console.log("\n1e. Initializing VaultFactory with StakingController...");
         vaultFactory.init(stakingControllerProxy);
         console.log("VaultFactory initialized with controller:", stakingControllerProxy);
+
+        // Step 1f: Deploy StakingViewer
+        console.log("\n1f. Deploying StakingViewer...");
+        address stakingViewer = address(new StakingViewer(stakingControllerProxy));
+        console.log("StakingViewer deployed:", stakingViewer);
 
         // STEP 2: DEPLOY BREVIS MARKET
         console.log("\n=== BREVIS MARKET DEPLOYMENT ===");
@@ -142,6 +148,7 @@ contract DeployProverNetwork is Script {
         console.log("VaultFactory:", address(vaultFactory));
         console.log("StakingController Implementation:", stakingControllerImpl);
         console.log("StakingController Proxy:", stakingControllerProxy);
+        console.log("StakingViewer:", stakingViewer);
         console.log("=== Brevis Market ===");
         console.log("BrevisMarket Implementation:", brevisMarketImpl);
         console.log("BrevisMarket Proxy:", brevisMarketProxy);
