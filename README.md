@@ -43,6 +43,6 @@ lib/
 └── security/                   # Shared security utilities
     └── src/access/               # Ownable, AccessControl, PauserControl
 
-scripts/                        # Deployment scripts
+scripts/                        # Deployment instructions and scripts
 test/                           # Forge test suite
 ```
