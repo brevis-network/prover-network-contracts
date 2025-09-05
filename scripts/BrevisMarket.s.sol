@@ -18,10 +18,8 @@ contract DeployBrevisMarket is Script {
         console.log("Deploying BrevisMarket with deployer as initial owner:", deployer);
         console.log("NOTE: Transfer ownership to multisig after deployment for production security");
 
-        // Deploy ProxyAdmin
-        console.log("Deploying ProxyAdmin...");
-        ProxyAdmin proxyAdmin = new ProxyAdmin();
-        console.log("ProxyAdmin:", address(proxyAdmin));
+        // Deploy or use existing ProxyAdmin
+        ProxyAdmin proxyAdmin = _deployOrUseProxyAdmin();
 
         address implementation = address(
             // Zero values for upgradeable deployment
@@ -70,5 +68,24 @@ contract DeployBrevisMarket is Script {
         if (slashBps > 0) console.log("Configured slashBps:", slashBps);
         if (slashWindow > 0) console.log("Configured slashWindow:", slashWindow);
         if (protocolFeeBps > 0) console.log("Configured protocolFeeBps:", protocolFeeBps);
+    }
+
+    /// @notice Deploy new ProxyAdmin or use existing one from PROXY_ADMIN environment variable
+    /// @return proxyAdmin The ProxyAdmin instance to use
+    function _deployOrUseProxyAdmin() internal returns (ProxyAdmin proxyAdmin) {
+        // Try to get existing ProxyAdmin from environment
+        address existingProxyAdmin = vm.envOr("PROXY_ADMIN", address(0));
+        if (existingProxyAdmin != address(0)) {
+            proxyAdmin = ProxyAdmin(existingProxyAdmin);
+            console.log("Using existing ProxyAdmin:", address(proxyAdmin));
+            console.log("ProxyAdmin owner:", proxyAdmin.owner());
+            return proxyAdmin;
+        }
+
+        // Deploy new ProxyAdmin
+        console.log("Deploying new ProxyAdmin...");
+        proxyAdmin = new ProxyAdmin();
+        console.log("New ProxyAdmin deployed:", address(proxyAdmin));
+        return proxyAdmin;
     }
 }

@@ -45,9 +45,21 @@ contract DeployProverNetwork is Script {
     }
 
     function _deploySharedProxyAdmin() internal {
-        console.log("\n0. Deploying shared ProxyAdmin...");
+        console.log("\n0. Configuring ProxyAdmin...");
+
+        // Try to get existing ProxyAdmin from environment
+        address existingProxyAdmin = vm.envOr("PROXY_ADMIN", address(0));
+        if (existingProxyAdmin != address(0)) {
+            sharedProxyAdmin = ProxyAdmin(existingProxyAdmin);
+            console.log("Using existing ProxyAdmin:", address(sharedProxyAdmin));
+            console.log("ProxyAdmin owner:", sharedProxyAdmin.owner());
+            return;
+        }
+
+        // Deploy new ProxyAdmin
+        console.log("Deploying new ProxyAdmin...");
         sharedProxyAdmin = new ProxyAdmin();
-        console.log("Shared ProxyAdmin:", address(sharedProxyAdmin));
+        console.log("New ProxyAdmin deployed:", address(sharedProxyAdmin));
     }
 
     function _deployStakingSystem() internal {
@@ -117,6 +129,42 @@ contract DeployProverNetwork is Script {
             new TransparentUpgradeableProxy(brevisMarketImpl, address(sharedProxyAdmin), brevisMarketInitData);
         brevisMarketProxy = address(brevisMarketProxy_);
         console.log("BrevisMarket proxy:", brevisMarketProxy);
+
+        // Configure optional parameters if provided
+        _configureOptionalMarketParams();
+    }
+
+    function _configureOptionalMarketParams() internal {
+        console.log("\n2d. Configuring optional BrevisMarket parameters...");
+
+        BrevisMarket market = BrevisMarket(brevisMarketProxy);
+
+        // Set slashing parameters if provided
+        uint256 slashBps = vm.envOr("MARKET_SLASH_BPS", uint256(0));
+        uint256 slashWindow = vm.envOr("MARKET_SLASH_WINDOW", uint256(0));
+
+        if (slashBps > 0) {
+            console.log("Setting slash BPS:", slashBps);
+            market.setSlashBps(slashBps);
+        } else {
+            console.log("Slash BPS not configured (disabled)");
+        }
+
+        if (slashWindow > 0) {
+            console.log("Setting slash window:", slashWindow);
+            market.setSlashWindow(slashWindow);
+        } else {
+            console.log("Slash window not configured (disabled)");
+        }
+
+        // Set protocol fee if provided
+        uint256 protocolFeeBps = vm.envOr("MARKET_PROTOCOL_FEE_BPS", uint256(0));
+        if (protocolFeeBps > 0) {
+            console.log("Setting protocol fee BPS:", protocolFeeBps);
+            market.setProtocolFeeBps(protocolFeeBps);
+        } else {
+            console.log("Protocol fee not configured (disabled)");
+        }
     }
 
     function _connectSystems() internal {

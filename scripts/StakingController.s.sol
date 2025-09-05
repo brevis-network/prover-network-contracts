@@ -17,11 +17,11 @@ contract DeployStakingController is Script {
         console.log("Deploying StakingController with deployer as initial owner:", deployer);
         console.log("NOTE: Transfer ownership to multisig after deployment for production security");
 
+        // Deploy or use existing ProxyAdmin
+        ProxyAdmin proxyAdmin = _deployOrUseProxyAdmin();
+
         // Deploy implementation with zero values for upgradeable deployment
-        address implementation = address(
-            // Zero values for upgradeable deployment
-            new StakingController(address(0), address(0), 0, 0, 0)
-        );
+        address implementation = address(new StakingController(address(0), address(0), 0, 0, 0));
 
         // Prepare initialization data
         bytes memory data = abi.encodeWithSignature(
@@ -33,11 +33,6 @@ contract DeployStakingController is Script {
             vm.envUint("MAX_SLASH_BPS")
         );
 
-        // Deploy ProxyAdmin
-        console.log("Deploying ProxyAdmin...");
-        ProxyAdmin proxyAdmin = new ProxyAdmin();
-        console.log("ProxyAdmin:", address(proxyAdmin));
-
         // Deploy transparent proxy
         console.log("Deploying StakingController proxy...");
         TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy(implementation, address(proxyAdmin), data);
@@ -48,5 +43,24 @@ contract DeployStakingController is Script {
         console.log("StakingController proxy:", address(proxy));
         console.log("ProxyAdmin:", address(proxyAdmin));
         console.log("Initial owner:", deployer);
+    }
+
+    /// @notice Deploy new ProxyAdmin or use existing one from PROXY_ADMIN environment variable
+    /// @return proxyAdmin The ProxyAdmin instance to use
+    function _deployOrUseProxyAdmin() internal returns (ProxyAdmin proxyAdmin) {
+        // Try to get existing ProxyAdmin from environment
+        address existingProxyAdmin = vm.envOr("PROXY_ADMIN", address(0));
+        if (existingProxyAdmin != address(0)) {
+            proxyAdmin = ProxyAdmin(existingProxyAdmin);
+            console.log("Using existing ProxyAdmin:", address(proxyAdmin));
+            console.log("ProxyAdmin owner:", proxyAdmin.owner());
+            return proxyAdmin;
+        }
+
+        // Deploy new ProxyAdmin
+        console.log("Deploying new ProxyAdmin...");
+        proxyAdmin = new ProxyAdmin();
+        console.log("New ProxyAdmin deployed:", address(proxyAdmin));
+        return proxyAdmin;
     }
 }
