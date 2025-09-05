@@ -488,7 +488,7 @@ contract ProverSubmittersTest is Test {
             vk: keccak256("test_vk"),
             publicValuesDigest: keccak256("test_public_values"),
             imgURL: "",
-            inputData: new bytes[](0),
+            inputData: "",
             inputURL: "",
             fee: IBrevisMarket.FeeParams({maxFee: MAX_FEE, minStake: MIN_STAKE, deadline: uint64(block.timestamp + 1 days)})
         });

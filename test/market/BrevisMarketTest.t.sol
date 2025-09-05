@@ -83,7 +83,7 @@ contract BrevisMarketTest is Test {
             vk: VK,
             publicValuesDigest: PUBLIC_VALUES_DIGEST,
             imgURL: "",
-            inputData: new bytes[](0),
+            inputData: "",
             inputURL: "",
             fee: IBrevisMarket.FeeParams({maxFee: MAX_FEE, minStake: MIN_STAKE, deadline: uint64(block.timestamp + 2 days)})
         });

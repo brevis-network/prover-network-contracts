@@ -37,7 +37,7 @@ interface IBrevisMarket {
         bytes32 vk; // verify key for binary
         bytes32 publicValuesDigest; // sha256(publicValues) & bytes32(uint256((1 << 253) - 1)))
         string imgURL; // URL to ELF binary, can be empty if vk is already known to the prover network
-        bytes[] inputData; // input data for the binary, can be empty if inputURL is provided
+        bytes inputData; // input data for the binary, can be empty if inputURL is provided
         string inputURL; // URL to input data, if inputData is not provided
         FeeParams fee;
     }

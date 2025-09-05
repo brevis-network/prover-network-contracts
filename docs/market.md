@@ -49,13 +49,13 @@ Request → Bidding Phase → Reveal Phase → Proof Submission → Payment
 ### **ProofRequest**
 ```solidity
 struct ProofRequest {
-    uint64 nonce;                    // Re-submission identifier
-    bytes32 vk;                      // ZK circuit verification key
-    bytes32 publicValuesDigest;      // Public input hash
-    string imgURL;                   // ELF binary URL (optional)
-    bytes[] inputData;               // Input data (alternative to URL)
-    string inputURL;                 // Input data URL (alternative to data)
-    FeeParams fee;                   // Payment parameters
+    uint64 nonce;                // Re-submission identifier
+    bytes32 vk;                  // ZK circuit verification key
+    bytes32 publicValuesDigest;  // Public input hash
+    string imgURL;               // ELF binary URL (optional)
+    bytes inputData;             // Input data (alternative to URL)
+    string inputURL;             // Input data URL (alternative to data)
+    FeeParams fee;               // Payment parameters
 }
 ```
 
