@@ -2,7 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "../lib/forge-std/src/Script.sol";
-import {UnsafeUpgrades} from "../lib/openzeppelin-foundry-upgrades/src/Upgrades.sol";
+// Use v4 proxy contracts for shared ProxyAdmin pattern
+import {ProxyAdmin} from "@openzeppelin/contracts-v4/proxy/transparent/ProxyAdmin.sol";
+import {TransparentUpgradeableProxy} from "@openzeppelin/contracts-v4/proxy/transparent/TransparentUpgradeableProxy.sol";
 import "../src/market/BrevisMarket.sol";
 import "../src/staking/interfaces/IStakingController.sol";
 
@@ -16,6 +18,11 @@ contract DeployBrevisMarket is Script {
         console.log("Deploying BrevisMarket with deployer as initial owner:", deployer);
         console.log("NOTE: Transfer ownership to multisig after deployment for production security");
 
+        // Deploy ProxyAdmin
+        console.log("Deploying ProxyAdmin...");
+        ProxyAdmin proxyAdmin = new ProxyAdmin();
+        console.log("ProxyAdmin:", address(proxyAdmin));
+
         address implementation = address(
             // Zero values for upgradeable deployment
             new BrevisMarket(IPicoVerifier(address(0)), IStakingController(address(0)), 0, 0, 0)
@@ -28,10 +35,10 @@ contract DeployBrevisMarket is Script {
             vm.envUint("REVEAL_PHASE_DURATION"),
             vm.envUint("MIN_MAX_FEE")
         );
-        address proxy = UnsafeUpgrades.deployTransparentProxy(implementation, deployer, data);
+        TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy(implementation, address(proxyAdmin), data);
 
         // Configure optional parameters if non-zero
-        BrevisMarket market = BrevisMarket(payable(proxy));
+        BrevisMarket market = BrevisMarket(payable(address(proxy)));
 
         // Set slashing parameters (if specified)
         uint256 slashBps = vm.envOr("MARKET_SLASH_BPS", uint256(0));
@@ -56,7 +63,7 @@ contract DeployBrevisMarket is Script {
         vm.stopBroadcast();
 
         console.log("BrevisMarket implementation:", implementation);
-        console.log("BrevisMarket proxy:", proxy);
+        console.log("BrevisMarket proxy:", address(proxy));
         console.log("Initial owner:", deployer);
 
         // Log configured parameters

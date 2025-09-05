@@ -2,7 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "../../lib/forge-std/src/Test.sol";
-import {UnsafeUpgrades} from "../../lib/openzeppelin-foundry-upgrades/src/Upgrades.sol";
+// Use v4 proxy contracts for shared ProxyAdmin pattern
+import {ProxyAdmin} from "@openzeppelin/contracts-v4/proxy/transparent/ProxyAdmin.sol";
+import {TransparentUpgradeableProxy} from "@openzeppelin/contracts-v4/proxy/transparent/TransparentUpgradeableProxy.sol";
 import "../../scripts/DeployProverNetwork.s.sol";
 import "../../src/staking/controller/StakingController.sol";
 import "../../src/staking/viewer/StakingViewer.sol";
@@ -19,6 +21,14 @@ import "../../test/mocks/MockERC20.sol";
 contract DeployProverNetworkTest is Test {
     MockERC20 stakingToken;
     MockPicoVerifier picoVerifier;
+
+    // Helper function for consistent proxy deployment
+    function _deployProxy(address implementation, bytes memory initData) internal returns (address) {
+        ProxyAdmin proxyAdmin = new ProxyAdmin();
+        TransparentUpgradeableProxy proxy =
+            new TransparentUpgradeableProxy(implementation, address(proxyAdmin), initData);
+        return address(proxy);
+    }
 
     // Environment variables for testing
     address constant TEST_DEPLOYER = address(0x1234);
@@ -73,8 +83,7 @@ contract DeployProverNetworkTest is Test {
         // Deploy VaultFactory
         address vaultFactoryImpl = address(new VaultFactory());
         bytes memory vaultFactoryInitData = "";
-        address vaultFactoryProxy =
-            UnsafeUpgrades.deployTransparentProxy(vaultFactoryImpl, TEST_DEPLOYER, vaultFactoryInitData);
+        address vaultFactoryProxy = _deployProxy(vaultFactoryImpl, vaultFactoryInitData);
 
         // Deploy StakingController
         address stakingControllerImpl = address(new StakingController(address(0), address(0), 0, 0, 0));
@@ -86,8 +95,7 @@ contract DeployProverNetworkTest is Test {
             TEST_MIN_SELF_STAKE,
             TEST_MAX_SLASH_BPS
         );
-        address stakingControllerProxy =
-            UnsafeUpgrades.deployTransparentProxy(stakingControllerImpl, TEST_DEPLOYER, stakingControllerInitData);
+        address stakingControllerProxy = _deployProxy(stakingControllerImpl, stakingControllerInitData);
 
         // Initialize VaultFactory
         VaultFactory(vaultFactoryProxy).init(stakingControllerProxy);
@@ -116,8 +124,7 @@ contract DeployProverNetworkTest is Test {
             TEST_MIN_SELF_STAKE,
             TEST_MAX_SLASH_BPS
         );
-        address stakingControllerProxy =
-            UnsafeUpgrades.deployTransparentProxy(stakingControllerImpl, TEST_DEPLOYER, stakingControllerInitData);
+        address stakingControllerProxy = _deployProxy(stakingControllerImpl, stakingControllerInitData);
 
         // Deploy BrevisMarket
         address brevisMarketImpl =
@@ -130,8 +137,7 @@ contract DeployProverNetworkTest is Test {
             TEST_REVEAL_PHASE_DURATION,
             TEST_MIN_MAX_FEE
         );
-        address brevisMarketProxy =
-            UnsafeUpgrades.deployTransparentProxy(brevisMarketImpl, TEST_DEPLOYER, brevisMarketInitData);
+        address brevisMarketProxy = _deployProxy(brevisMarketImpl, brevisMarketInitData);
 
         // Verify market configuration
         BrevisMarket market = BrevisMarket(payable(brevisMarketProxy));
@@ -145,7 +151,7 @@ contract DeployProverNetworkTest is Test {
     function _testSystemIntegration() internal {
         // Deploy the complete system to test integration
         address vaultFactoryImpl = address(new VaultFactory());
-        address vaultFactoryProxy = UnsafeUpgrades.deployTransparentProxy(vaultFactoryImpl, TEST_DEPLOYER, "");
+        address vaultFactoryProxy = _deployProxy(vaultFactoryImpl, "");
 
         address stakingControllerImpl = address(new StakingController(address(0), address(0), 0, 0, 0));
         bytes memory stakingControllerInitData = abi.encodeWithSignature(
@@ -156,8 +162,7 @@ contract DeployProverNetworkTest is Test {
             TEST_MIN_SELF_STAKE,
             TEST_MAX_SLASH_BPS
         );
-        address stakingControllerProxy =
-            UnsafeUpgrades.deployTransparentProxy(stakingControllerImpl, TEST_DEPLOYER, stakingControllerInitData);
+        address stakingControllerProxy = _deployProxy(stakingControllerImpl, stakingControllerInitData);
 
         VaultFactory(vaultFactoryProxy).init(stakingControllerProxy);
 
@@ -171,8 +176,7 @@ contract DeployProverNetworkTest is Test {
             TEST_REVEAL_PHASE_DURATION,
             TEST_MIN_MAX_FEE
         );
-        address brevisMarketProxy =
-            UnsafeUpgrades.deployTransparentProxy(brevisMarketImpl, TEST_DEPLOYER, brevisMarketInitData);
+        address brevisMarketProxy = _deployProxy(brevisMarketImpl, brevisMarketInitData);
 
         // Grant slasher role to market
         StakingController stakingController = StakingController(stakingControllerProxy);
@@ -200,7 +204,7 @@ contract DeployProverNetworkTest is Test {
     function test_StakingViewerDeployment() public {
         // Deploy a complete staking system to test StakingViewer
         address vaultFactoryImpl = address(new VaultFactory());
-        address vaultFactoryProxy = UnsafeUpgrades.deployTransparentProxy(vaultFactoryImpl, TEST_DEPLOYER, "");
+        address vaultFactoryProxy = _deployProxy(vaultFactoryImpl, "");
 
         address stakingControllerImpl = address(new StakingController(address(0), address(0), 0, 0, 0));
         bytes memory stakingControllerInitData = abi.encodeWithSignature(
@@ -211,8 +215,7 @@ contract DeployProverNetworkTest is Test {
             TEST_MIN_SELF_STAKE,
             TEST_MAX_SLASH_BPS
         );
-        address stakingControllerProxy =
-            UnsafeUpgrades.deployTransparentProxy(stakingControllerImpl, TEST_DEPLOYER, stakingControllerInitData);
+        address stakingControllerProxy = _deployProxy(stakingControllerImpl, stakingControllerInitData);
 
         VaultFactory(vaultFactoryProxy).init(stakingControllerProxy);
 
@@ -269,8 +272,7 @@ contract DeployProverNetworkTest is Test {
             TEST_MIN_SELF_STAKE,
             TEST_MAX_SLASH_BPS
         );
-        address stakingControllerProxy =
-            UnsafeUpgrades.deployTransparentProxy(stakingControllerImpl, TEST_DEPLOYER, stakingControllerInitData);
+        address stakingControllerProxy = _deployProxy(stakingControllerImpl, stakingControllerInitData);
 
         // Deploy BrevisMarket with optional parameters
         address brevisMarketImpl =
@@ -283,8 +285,7 @@ contract DeployProverNetworkTest is Test {
             TEST_REVEAL_PHASE_DURATION,
             TEST_MIN_MAX_FEE
         );
-        address brevisMarketProxy =
-            UnsafeUpgrades.deployTransparentProxy(brevisMarketImpl, TEST_DEPLOYER, brevisMarketInitData);
+        address brevisMarketProxy = _deployProxy(brevisMarketImpl, brevisMarketInitData);
 
         BrevisMarket market = BrevisMarket(payable(brevisMarketProxy));
 

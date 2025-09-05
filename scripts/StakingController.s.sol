@@ -2,7 +2,9 @@
 pragma solidity ^0.8.20;
 
 import "../lib/forge-std/src/Script.sol";
-import {UnsafeUpgrades} from "../lib/openzeppelin-foundry-upgrades/src/Upgrades.sol";
+// Use v4 proxy contracts for shared ProxyAdmin pattern
+import {ProxyAdmin} from "@openzeppelin/contracts-v4/proxy/transparent/ProxyAdmin.sol";
+import {TransparentUpgradeableProxy} from "@openzeppelin/contracts-v4/proxy/transparent/TransparentUpgradeableProxy.sol";
 import "../src/staking/controller/StakingController.sol";
 
 contract DeployStakingController is Script {
@@ -31,13 +33,20 @@ contract DeployStakingController is Script {
             vm.envUint("MAX_SLASH_BPS")
         );
 
+        // Deploy ProxyAdmin
+        console.log("Deploying ProxyAdmin...");
+        ProxyAdmin proxyAdmin = new ProxyAdmin();
+        console.log("ProxyAdmin:", address(proxyAdmin));
+
         // Deploy transparent proxy
-        address proxy = UnsafeUpgrades.deployTransparentProxy(implementation, deployer, data);
+        console.log("Deploying StakingController proxy...");
+        TransparentUpgradeableProxy proxy = new TransparentUpgradeableProxy(implementation, address(proxyAdmin), data);
 
         vm.stopBroadcast();
 
         console.log("StakingController implementation:", implementation);
-        console.log("StakingController proxy:", proxy);
+        console.log("StakingController proxy:", address(proxy));
+        console.log("ProxyAdmin:", address(proxyAdmin));
         console.log("Initial owner:", deployer);
     }
 }

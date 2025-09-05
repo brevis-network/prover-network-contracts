@@ -2,8 +2,6 @@
 
 This directory contains deployment scripts for the Brevis Prover Network contracts including both the staking system and market contracts.
 
-> **⚠️ TODO**: Migrate to OpenZeppelin v4 upgradeable deployment to enable shared ProxyAdmin across all proxy contracts.
-
 ## Table of Contents
 
 - [1. Overview](#1-overview)
@@ -15,9 +13,11 @@ This directory contains deployment scripts for the Brevis Prover Network contrac
 
 ## 1. Overview
 
+> **Deployment Architecture**: Uses **OpenZeppelin v4 upgradeable contracts** to enable **shared administration** across all proxies for simplified multisig operations.
+
 ### Deploy Complete Prover Network (Recommended)
 
-**`DeployProverNetwork.s.sol`** ✨ - Comprehensive deployment script that deploys the entire Brevis Prover Network: VaultFactory, StakingController, StakingViewer, BrevisMarket (upgradeable with transparent proxy), connects all components, and grants proper roles.
+**`DeployProverNetwork.s.sol`** ✨ - Comprehensive deployment script that deploys the entire Brevis Prover Network: VaultFactory, StakingController, StakingViewer, BrevisMarket (upgradeable with transparent proxy and **shared ProxyAdmin** for simplified administration), connects all components, and grants proper roles.
 
 ```bash
 # Deploy to local testnet
@@ -32,7 +32,9 @@ forge script script/DeployProverNetwork.s.sol --rpc-url $MAINNET_RPC_URL --broad
 
 ### Deploy Individual Components
 
-For specialized deployments, you can deploy individual components:
+For specialized deployments, you can deploy individual components using manual proxy deployment:
+
+> **Note**: Individual scripts use the same **shared ProxyAdmin approach** as the main deployment script. Each creates its own ProxyAdmin, but for production you should transfer ownership to the same multisig account to maintain unified administration.
 
 **`StakingController.s.sol`** - Deploys only the StakingController as an upgradeable contract:
 ```bash
@@ -61,7 +63,7 @@ forge script script/MockPicoVerifier.s.sol --rpc-url $RPC_URL --broadcast
 
 > **Note:** Individual ProverVaults are automatically deployed via CREATE2 through the VaultFactory when provers are registered.
 
-**All deployment scripts automatically configure optional parameters if specified in your `.env` file. After successful deployment, the complete Brevis Prover Network is ready for operation with all system integrations handled automatically.**
+**All deployment scripts use manual proxy deployment with shared ProxyAdmin pattern for simplified administration. After successful deployment, the complete Brevis Prover Network is ready for operation with all system integrations handled automatically.**
 
 ## 2. Setup
 
@@ -141,19 +143,24 @@ cast call $STAKING_VIEWER "getSystemOverview()" --rpc-url $RPC_URL
 
 ### Who Can Upgrade?
 
-The `OWNER_ADDRESS` specified in `.env` controls all proxy upgrades:
+**Shared ProxyAdmin Approach**: All proxy contracts (VaultFactory, StakingController, BrevisMarket) are controlled by a **single shared ProxyAdmin** contract, simplifying administration:
 
 ```bash
-# Get ProxyAdmin addresses (from deployment logs)
-PROXY_ADMIN=0x...  # Controls all three proxies
+# Get the shared ProxyAdmin address (from deployment logs)
+SHARED_PROXY_ADMIN=0x...  # Controls ALL proxy contracts
 
-# Check current ProxyAdmin owner
-cast call $PROXY_ADMIN "owner()" --rpc-url $RPC_URL
+# Check current ProxyAdmin owner  
+cast call $SHARED_PROXY_ADMIN "owner()" --rpc-url $RPC_URL
 
-# Transfer to multisig for production security
-cast send $PROXY_ADMIN "transferOwnership(address)" $MULTISIG_ADDRESS \
+# Transfer to multisig for production security (recommended)
+cast send $SHARED_PROXY_ADMIN "transferOwnership(address)" $MULTISIG_ADDRESS \
   --private-key $OWNER_PRIVATE_KEY --rpc-url $RPC_URL
 ```
+
+**Benefits of Shared ProxyAdmin**:
+- ✅ Single contract controls all proxy upgrades 
+- ✅ Simplified multisig operations
+- ✅ Consistent administration across the entire system
 
 ### Example Upgrade Process
 
@@ -163,9 +170,9 @@ NEW_IMPL=$(forge create src/staking/controller/StakingController.sol:StakingCont
   --constructor-args 0 0 0 0 0 \
   --private-key $DEPLOYER_KEY --rpc-url $RPC_URL --json | jq -r '.deployedTo')
 
-# 2. Upgrade proxy (requires owner/multisig)
-cast send $PROXY_ADMIN "upgrade(address,address)" \
-  $STAKING_CONTROLLER_PROXY $NEW_IMPL \
+# 2. Upgrade proxy using shared ProxyAdmin (requires owner/multisig)
+cast send $SHARED_PROXY_ADMIN "upgradeAndCall(address,address,bytes)" \
+  $STAKING_CONTROLLER_PROXY $NEW_IMPL "0x" \
   --private-key $OWNER_PRIVATE_KEY --rpc-url $RPC_URL
 
 # 3. Verify upgrade
