@@ -9,6 +9,7 @@ pragma solidity ^0.8.0;
 /// to compress proofs.
 /// @notice See <https://2π.com/23/bn254-compression> for further explanation.
 contract Verifier {
+
     /// Some of the provided public input values are larger than the field modulus.
     /// @dev Public input elements are not automatically reduced, as this is can be
     /// a dangerous source of bugs.
@@ -53,34 +54,34 @@ contract Verifier {
     uint256 constant EXP_SQRT_FP = 0xC19139CB84C680A6E14116DA060561765E05AA45A1C72A34F082305B61F3F52; // (P + 1) / 4;
 
     // Groth16 alpha point in G1
-    uint256 constant ALPHA_X = 14276727341213948941139765208140766455340492419549836334726986771119598298376;
-    uint256 constant ALPHA_Y = 15681904353845724132480791202992309903110457115174554831553127021156385152538;
+    uint256 constant ALPHA_X = 2387709920592184083440184305498248923596928447823501187834217907152206095815;
+    uint256 constant ALPHA_Y = 16686835283464898692711987473057532756821822450477229260603483205883234808568;
 
     // Groth16 beta point in G2 in powers of i
-    uint256 constant BETA_NEG_X_0 = 17833849713402452754061397660266610044886800685550569866008029497870485136730;
-    uint256 constant BETA_NEG_X_1 = 21374793209491246528303354782037228846510315792668805797392021101285362744405;
-    uint256 constant BETA_NEG_Y_0 = 3083259401558894757500561832645157523822409812792222398275670089075568564007;
-    uint256 constant BETA_NEG_Y_1 = 10516922049448171323588812856956349905329163353963208370187946404251936069597;
+    uint256 constant BETA_NEG_X_0 = 7494559153497325892045627170966046336166672325896621750350558282396932644674;
+    uint256 constant BETA_NEG_X_1 = 19460410880324300906068073396466272299182785508436074329672385121652777787174;
+    uint256 constant BETA_NEG_Y_0 = 14577117304217101835514219113496688541393521412607681298002371304801323513546;
+    uint256 constant BETA_NEG_Y_1 = 15387827228489212131083561577128866348537587305481193946043600818376163115486;
 
     // Groth16 gamma point in G2 in powers of i
-    uint256 constant GAMMA_NEG_X_0 = 13163762501616507897955865405552221473723606341721035206476056705184968178708;
-    uint256 constant GAMMA_NEG_X_1 = 15971860759831934505728816738787038597636027809532828164140085550795299068792;
-    uint256 constant GAMMA_NEG_Y_0 = 8294456019259153682368323656724384926180216680032976737099658225616452609324;
-    uint256 constant GAMMA_NEG_Y_1 = 8804794409771350011448015689632037518008655200535338979254651289066741720278;
+    uint256 constant GAMMA_NEG_X_0 = 14512406860132349939823521203747839065265857227818496771070772556055588527931;
+    uint256 constant GAMMA_NEG_X_1 = 4966308327417805485464086277584946103432506040208007145149616060952408691251;
+    uint256 constant GAMMA_NEG_Y_0 = 3241757543565136230626773806796689085518185448342070109220598213528121292162;
+    uint256 constant GAMMA_NEG_Y_1 = 5962817364414905811318381373037653103667126665806354554331187139689300328134;
 
     // Groth16 delta point in G2 in powers of i
-    uint256 constant DELTA_NEG_X_0 = 20900756197348583799835410852439136979354030437643639727488005611413659466792;
-    uint256 constant DELTA_NEG_X_1 = 7394570213129180131696919036088004744595463362649273509777474504169723707967;
-    uint256 constant DELTA_NEG_Y_0 = 15874383651995891303991852478621486851976713196345243826177193409183585769867;
-    uint256 constant DELTA_NEG_Y_1 = 1690876759394292243644198049795253873345980629520046335220974715222795520545;
+    uint256 constant DELTA_NEG_X_0 = 21217336168531776567005224004724604559195743901519586247848595992077568080799;
+    uint256 constant DELTA_NEG_X_1 = 15879362912550509366627867945434114595552423953830847398364481836128969335054;
+    uint256 constant DELTA_NEG_Y_0 = 11540609877356913424862790636753914054989469465975963075543318386208461042820;
+    uint256 constant DELTA_NEG_Y_1 = 12459331055386951964144762907628279845298091869204047684751637003338077748385;
 
     // Constant and public input points
-    uint256 constant CONSTANT_X = 15052833143456816442314129653665865997730821736943705375012886302064753190043;
-    uint256 constant CONSTANT_Y = 6356916612091059126117010714119481586246617241826655406744050455453708913382;
-    uint256 constant PUB_0_X = 16233756121747140780942563786287108033390021100416073827092610762966145798495;
-    uint256 constant PUB_0_Y = 5733385664666229240916774023155983224088274707076179714481090651953673331846;
-    uint256 constant PUB_1_X = 11560376997165911408738915692538356560141333446569969219758429702923304881511;
-    uint256 constant PUB_1_Y = 8065430735803582910036589834959015014507800372465106519448855581466624513949;
+    uint256 constant CONSTANT_X = 10372641589178417033734188891882358682388878447230138700714530082853510756831;
+    uint256 constant CONSTANT_Y = 766489151683426586479684031461755325218003430206782683325502978842018132736;
+    uint256 constant PUB_0_X = 1557248352606326426810769133632832035056769273981423293422574201084031233063;
+    uint256 constant PUB_0_Y = 19250353664327455202179678437083287022061320007408601850916845369348511692598;
+    uint256 constant PUB_1_X = 3866107190902558060538340110776331123449029945227315439679708502368968517238;
+    uint256 constant PUB_1_Y = 5609415587610033580100911761576564983021031792697121293864770546937755355575;
 
     /// Negation in Fp.
     /// @notice Returns a number x such that a + x = 0 in Fp.
@@ -184,7 +185,8 @@ contract Verifier {
 
         // Check result to make sure we found a root.
         // Note: this also fails if a0 or a1 is not reduced.
-        if (a0 != addmod(mulmod(x0, x0, P), negate(mulmod(x1, x1, P)), P) || a1 != mulmod(2, mulmod(x0, x1, P), P)) {
+        if (a0 != addmod(mulmod(x0, x0, P), negate(mulmod(x1, x1, P)), P)
+            ||  a1 != mulmod(2, mulmod(x0, x1, P), P)) {
             revert ProofInvalid();
         }
     }
@@ -260,10 +262,7 @@ contract Verifier {
     /// @return c0 The first half of the compresed point (x0 with two signal bits).
     /// @return c1 The second half of the compressed point (x1 unmodified).
     function compress_g2(uint256 x0, uint256 x1, uint256 y0, uint256 y1)
-        internal
-        view
-        returns (uint256 c0, uint256 c1)
-    {
+    internal view returns (uint256 c0, uint256 c1) {
         if (x0 >= P || x1 >= P || y0 >= P || y1 >= P) {
             // G2 point not in field.
             revert ProofInvalid();
@@ -278,11 +277,11 @@ contract Verifier {
         uint256 y0_pos;
         uint256 y1_pos;
         {
-            uint256 n3ab = mulmod(mulmod(x0, x1, P), P - 3, P);
+            uint256 n3ab = mulmod(mulmod(x0, x1, P), P-3, P);
             uint256 a_3 = mulmod(mulmod(x0, x0, P), x0, P);
             uint256 b_3 = mulmod(mulmod(x1, x1, P), x1, P);
             y0_pos = addmod(FRACTION_27_82_FP, addmod(a_3, mulmod(n3ab, x1, P), P), P);
-            y1_pos = negate(addmod(FRACTION_3_82_FP, addmod(b_3, mulmod(n3ab, x0, P), P), P));
+            y1_pos = negate(addmod(FRACTION_3_82_FP,  addmod(b_3, mulmod(n3ab, x0, P), P), P));
         }
 
         // Determine hint bit
@@ -296,10 +295,10 @@ contract Verifier {
         // Recover y
         (y0_pos, y1_pos) = sqrt_Fp2(y0_pos, y1_pos, hint);
         if (y0 == y0_pos && y1 == y1_pos) {
-            c0 = (x0 << 2) | (hint ? 2 : 0) | 0;
+            c0 = (x0 << 2) | (hint ? 2  : 0) | 0;
             c1 = x1;
         } else if (y0 == negate(y0_pos) && y1 == negate(y1_pos)) {
-            c0 = (x0 << 2) | (hint ? 2 : 0) | 1;
+            c0 = (x0 << 2) | (hint ? 2  : 0) | 1;
             c1 = x1;
         } else {
             // G1 point not on curve.
@@ -319,10 +318,7 @@ contract Verifier {
     /// @return y0 The real part of the Y coordinate.
     /// @return y1 The imaginary part of the Y coordinate.
     function decompress_g2(uint256 c0, uint256 c1)
-        internal
-        view
-        returns (uint256 x0, uint256 x1, uint256 y0, uint256 y1)
-    {
+    internal view returns (uint256 x0, uint256 x1, uint256 y0, uint256 y1) {
         // Note that X = (0, 0) is not on the curve since 0³ + 3/(9 + i) is not a square.
         // so we can use it to represent the point at infinity.
         if (c0 == 0 && c1 == 0) {
@@ -338,12 +334,12 @@ contract Verifier {
             revert ProofInvalid();
         }
 
-        uint256 n3ab = mulmod(mulmod(x0, x1, P), P - 3, P);
+        uint256 n3ab = mulmod(mulmod(x0, x1, P), P-3, P);
         uint256 a_3 = mulmod(mulmod(x0, x0, P), x0, P);
         uint256 b_3 = mulmod(mulmod(x1, x1, P), x1, P);
 
         y0 = addmod(FRACTION_27_82_FP, addmod(a_3, mulmod(n3ab, x1, P), P), P);
-        y1 = negate(addmod(FRACTION_3_82_FP, addmod(b_3, mulmod(n3ab, x0, P), P), P));
+        y1 = negate(addmod(FRACTION_3_82_FP,  addmod(b_3, mulmod(n3ab, x0, P), P), P));
 
         // Note: sqrt_Fp2 reverts if there is no solution, i.e. the point is not on the curve.
         // Note: (X³ + 3/(9 + i)) is irreducible in Fp2, so y can not be zero.
@@ -362,7 +358,8 @@ contract Verifier {
     /// @param input The public inputs. These are elements of the scalar field Fr.
     /// @return x The X coordinate of the resulting G1 point.
     /// @return y The Y coordinate of the resulting G1 point.
-    function publicInputMSM(uint256[2] calldata input) internal view returns (uint256 x, uint256 y) {
+    function publicInputMSM(uint256[2] calldata input)
+    internal view returns (uint256 x, uint256 y) {
         // Note: The ECMUL precompile does not reject unreduced values, so we check this.
         // Note: Unrolling this loop does not cost much extra in code-size, the bulk of the
         //       code-size is in the PUB_ constants.
@@ -379,14 +376,14 @@ contract Verifier {
             mstore(add(f, 0x20), CONSTANT_Y)
             mstore(g, PUB_0_X)
             mstore(add(g, 0x20), PUB_0_Y)
-            s := calldataload(input)
+            s :=  calldataload(input)
             mstore(add(g, 0x40), s)
             success := and(success, lt(s, R))
             success := and(success, staticcall(gas(), PRECOMPILE_MUL, g, 0x60, g, 0x40))
             success := and(success, staticcall(gas(), PRECOMPILE_ADD, f, 0x80, f, 0x40))
             mstore(g, PUB_1_X)
             mstore(add(g, 0x20), PUB_1_Y)
-            s := calldataload(add(input, 32))
+            s :=  calldataload(add(input, 32))
             mstore(add(g, 0x40), s)
             success := and(success, lt(s, R))
             success := and(success, staticcall(gas(), PRECOMPILE_MUL, g, 0x60, g, 0x40))
@@ -401,80 +398,6 @@ contract Verifier {
         }
     }
 
-    /// Compress a proof.
-    /// @notice Will revert with InvalidProof if the curve points are invalid,
-    /// but does not verify the proof itself.
-    /// @param proof The uncompressed Groth16 proof. Elements are in the same order as for
-    /// verifyProof. I.e. Groth16 points (A, B, C) encoded as in EIP-197.
-    /// @return compressed The compressed proof. Elements are in the same order as for
-    /// verifyCompressedProof. I.e. points (A, B, C) in compressed format.
-    function compressProof(uint256[8] calldata proof) public view returns (uint256[4] memory compressed) {
-        compressed[0] = compress_g1(proof[0], proof[1]);
-        (compressed[2], compressed[1]) = compress_g2(proof[3], proof[2], proof[5], proof[4]);
-        compressed[3] = compress_g1(proof[6], proof[7]);
-    }
-
-    /// Verify a Groth16 proof with compressed points.
-    /// @notice Reverts with InvalidProof if the proof is invalid or
-    /// with PublicInputNotInField the public input is not reduced.
-    /// @notice There is no return value. If the function does not revert, the
-    /// proof was successfully verified.
-    /// @param compressedProof the points (A, B, C) in compressed format
-    /// matching the output of compressProof.
-    /// @param input the public input field elements in the scalar field Fr.
-    /// Elements must be reduced.
-    function verifyCompressedProof(uint256[4] calldata compressedProof, uint256[2] calldata input) public view {
-        (uint256 Ax, uint256 Ay) = decompress_g1(compressedProof[0]);
-        (uint256 Bx0, uint256 Bx1, uint256 By0, uint256 By1) = decompress_g2(compressedProof[2], compressedProof[1]);
-        (uint256 Cx, uint256 Cy) = decompress_g1(compressedProof[3]);
-        (uint256 Lx, uint256 Ly) = publicInputMSM(input);
-
-        // Verify the pairing
-        // Note: The precompile expects the F2 coefficients in big-endian order.
-        // Note: The pairing precompile rejects unreduced values, so we won't check that here.
-        uint256[24] memory pairings;
-        // e(A, B)
-        pairings[0] = Ax;
-        pairings[1] = Ay;
-        pairings[2] = Bx1;
-        pairings[3] = Bx0;
-        pairings[4] = By1;
-        pairings[5] = By0;
-        // e(C, -δ)
-        pairings[6] = Cx;
-        pairings[7] = Cy;
-        pairings[8] = DELTA_NEG_X_1;
-        pairings[9] = DELTA_NEG_X_0;
-        pairings[10] = DELTA_NEG_Y_1;
-        pairings[11] = DELTA_NEG_Y_0;
-        // e(α, -β)
-        pairings[12] = ALPHA_X;
-        pairings[13] = ALPHA_Y;
-        pairings[14] = BETA_NEG_X_1;
-        pairings[15] = BETA_NEG_X_0;
-        pairings[16] = BETA_NEG_Y_1;
-        pairings[17] = BETA_NEG_Y_0;
-        // e(L_pub, -γ)
-        pairings[18] = Lx;
-        pairings[19] = Ly;
-        pairings[20] = GAMMA_NEG_X_1;
-        pairings[21] = GAMMA_NEG_X_0;
-        pairings[22] = GAMMA_NEG_Y_1;
-        pairings[23] = GAMMA_NEG_Y_0;
-
-        // Check pairing equation.
-        bool success;
-        uint256[1] memory output;
-        assembly ("memory-safe") {
-            success := staticcall(gas(), PRECOMPILE_VERIFY, pairings, 0x300, output, 0x20)
-        }
-        if (!success || output[0] != 1) {
-            // Either proof or verification key invalid.
-            // We assume the contract is correctly generated, so the verification key is valid.
-            revert ProofInvalid();
-        }
-    }
-
     /// Verify an uncompressed Groth16 proof.
     /// @notice Reverts with InvalidProof if the proof is invalid or
     /// with PublicInputNotInField the public input is not reduced.
@@ -484,7 +407,10 @@ contract Verifier {
     /// of compressProof.
     /// @param input the public input field elements in the scalar field Fr.
     /// Elements must be reduced.
-    function verifyProof(uint256[8] calldata proof, uint256[2] calldata input) public view {
+    function verifyProof(
+        uint256[8] calldata proof,
+        uint256[2] calldata input
+    ) public view returns (bool) {
         (uint256 x, uint256 y) = publicInputMSM(input);
 
         // Note: The precompile expects the F2 coefficients in big-endian order.
@@ -494,14 +420,14 @@ contract Verifier {
         assembly ("memory-safe") {
             let f := mload(0x40) // Free memory pointer.
 
-            // Copy points (A, B, C) to memory. They are already in correct encoding.
-            // This is pairing e(A, B) and G1 of e(C, -δ).
+        // Copy points (A, B, C) to memory. They are already in correct encoding.
+        // This is pairing e(A, B) and G1 of e(C, -δ).
             calldatacopy(f, proof, 0x100)
 
-            // Complete e(C, -δ) and write e(α, -β), e(L_pub, -γ) to memory.
-            // OPT: This could be better done using a single codecopy, but
-            //      Solidity (unlike standalone Yul) doesn't provide a way to
-            //      to do this.
+        // Complete e(C, -δ) and write e(α, -β), e(L_pub, -γ) to memory.
+        // OPT: This could be better done using a single codecopy, but
+        //      Solidity (unlike standalone Yul) doesn't provide a way to
+        //      to do this.
             mstore(add(f, 0x100), DELTA_NEG_X_1)
             mstore(add(f, 0x120), DELTA_NEG_X_0)
             mstore(add(f, 0x140), DELTA_NEG_Y_1)
@@ -519,9 +445,9 @@ contract Verifier {
             mstore(add(f, 0x2c0), GAMMA_NEG_Y_1)
             mstore(add(f, 0x2e0), GAMMA_NEG_Y_0)
 
-            // Check pairing equation.
+        // Check pairing equation.
             success := staticcall(gas(), PRECOMPILE_VERIFY, f, 0x300, f, 0x20)
-            // Also check returned value (both are either 1 or 0).
+        // Also check returned value (both are either 1 or 0).
             success := and(success, mload(f))
         }
         if (!success) {
@@ -529,5 +455,6 @@ contract Verifier {
             // We assume the contract is correctly generated, so the verification key is valid.
             revert ProofInvalid();
         }
+        return success;
     }
 }
