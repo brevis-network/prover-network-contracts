@@ -163,6 +163,7 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
         info.vault = vault;
         info.commissionRates.set(address(0), defaultCommissionRate); // Store default rate at address(0)
         info.pendingCommission = 0;
+        info.joinedAt = uint64(block.timestamp);
 
         // Add to prover enumeration
         proverList.add(prover);
@@ -760,7 +761,8 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
             address vault,
             uint64 defaultCommissionRate,
             uint256 pendingCommission,
-            uint256 numStakers
+            uint256 numStakers,
+            uint64 joinedAt
         )
     {
         ProverInfo storage proverInfo = _proverInfo[prover];
@@ -770,7 +772,8 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
             proverInfo.vault,
             uint64(defaultRate),
             proverInfo.pendingCommission,
-            proverInfo.stakers.length()
+            proverInfo.stakers.length(),
+            proverInfo.joinedAt
         );
     }
 

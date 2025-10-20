@@ -29,6 +29,7 @@ interface IStakingController {
         uint256 pendingCommission; // Accumulated commission waiting to be claimed
         // Map of reward source to commission rate in basis points (0-10000). address(0) = default rate
         EnumerableMap.AddressToUintMap commissionRates;
+        uint64 joinedAt; // Timestamp when the prover joined (initialized)
     }
 
     struct ProverPendingUnstakes {
@@ -243,7 +244,8 @@ interface IStakingController {
             address vault,
             uint64 defaultCommissionRate,
             uint256 pendingCommission,
-            uint256 numStakers
+            uint256 numStakers,
+            uint64 joinedAt
         );
 
     /**

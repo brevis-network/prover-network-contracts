@@ -300,7 +300,7 @@ contract MinSelfStakeTest is Test {
         vm.stopPrank();
 
         // Verify commission rate was updated
-        (,, uint64 newCommissionRate,,) = controller.getProverInfo(prover1);
+        (,, uint64 newCommissionRate,,,) = controller.getProverInfo(prover1);
         assertEq(newCommissionRate, 2000, "Commission rate should be updated even when deactivated");
     }
 

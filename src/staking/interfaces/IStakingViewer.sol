@@ -21,6 +21,7 @@ interface IStakingViewer {
         uint256 totalAssets;
         uint256 totalUnstaking;
         uint256 numStakers;
+        uint64 joinedAt;
         uint256 slashingScale;
         uint256 pendingCommission;
         uint64 defaultCommissionRate;

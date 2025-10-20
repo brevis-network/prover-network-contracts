@@ -87,7 +87,8 @@ contract ProverManagementTest is Test {
             address vault,
             uint64 commissionRate,
             uint256 pendingCommission,
-            uint256 numStakers
+            uint256 numStakers,
+            uint64 joinedAt
         ) = controller.getProverInfo(prover1);
 
         assertEq(vault, vaultAddress);
@@ -359,7 +360,8 @@ contract ProverManagementTest is Test {
             address infoVault,
             uint64 infoCommissionRate,
             uint256 infoPendingCommission,
-            uint256 infoNumStakers
+            uint256 infoNumStakers,
+            uint64 joinedAt2
         ) = controller.getProverInfo(prover1);
 
         assertEq(uint256(infoState), uint256(IStakingController.ProverState.Null));

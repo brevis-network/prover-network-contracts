@@ -37,7 +37,7 @@ contract StakingViewer is IStakingViewer {
         address[] memory allProvers = stakingController.getAllProvers();
         uint256 totalStakers = 0;
         for (uint256 i = 0; i < allProvers.length; i++) {
-            (,,,, uint256 numStakers) = stakingController.getProverInfo(allProvers[i]);
+            (,,,, uint256 numStakers,) = stakingController.getProverInfo(allProvers[i]);
             totalStakers += numStakers;
         }
         overview.totalStakers = totalStakers;
@@ -297,7 +297,7 @@ contract StakingViewer is IStakingViewer {
     {
         stakerCounts = new uint256[](provers.length);
         for (uint256 i = 0; i < provers.length; i++) {
-            (,,,, uint256 numStakers) = stakingController.getProverInfo(provers[i]);
+            (,,,, uint256 numStakers,) = stakingController.getProverInfo(provers[i]);
             stakerCounts[i] = numStakers;
         }
     }
@@ -331,7 +331,8 @@ contract StakingViewer is IStakingViewer {
             address vault,
             uint64 defaultCommissionRate,
             uint256 pendingCommission,
-            uint256 numStakers
+            uint256 numStakers,
+            uint64 joinedAt
         ) = stakingController.getProverInfo(prover);
 
         // Set basic fields
@@ -341,6 +342,7 @@ contract StakingViewer is IStakingViewer {
         info.defaultCommissionRate = defaultCommissionRate;
         info.pendingCommission = pendingCommission;
         info.numStakers = numStakers;
+        info.joinedAt = joinedAt;
 
         // Get and set asset information
         if (vault != address(0)) {
