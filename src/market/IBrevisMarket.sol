@@ -47,6 +47,14 @@ interface IBrevisMarket {
         uint256 fee;
     }
 
+    struct ProverStats {
+        uint64 bids; // total bids placed
+        uint64 reveals; // total bids revealed
+        uint64 wins; // total bids won
+        uint64 submissions; // total proofs submitted
+        uint64 lastActiveAt; // timestamp of last tracked activity
+    }
+
     // =========================================================================
     // EVENTS
     // =========================================================================
@@ -66,6 +74,7 @@ interface IBrevisMarket {
     event SlashWindowUpdated(uint256 oldWindow, uint256 newWindow);
     event ProtocolFeeBpsUpdated(uint256 oldBps, uint256 newBps);
     event ProtocolFeeWithdrawn(address indexed to, uint256 amount);
+    event StatsReset(uint64 newEpochId, uint64 statsStartAt);
 
     // Prover submitter management events
     event SubmitterRegistered(address indexed prover, address indexed submitter);
@@ -276,6 +285,46 @@ interface IBrevisMarket {
      * @return balance Accumulated protocol fee balance
      */
     function getProtocolFeeInfo() external view returns (uint256 feeBps, uint256 balance);
+
+    // =========================================================================
+    // STATS VIEW & ADMIN (WINDOWED)
+    // =========================================================================
+
+    /**
+     * @notice Reset stats window start and bump epoch id
+     * @param newStartAt New start timestamp (0 = now)
+     */
+    function resetStats(uint64 newStartAt) external;
+
+    /**
+     * @notice Get lifetime (cumulative) stats for a prover
+     */
+    function getProverStatsTotal(address prover) external view returns (ProverStats memory);
+
+    /**
+     * @notice Get window (since last reset) stats for a prover
+     */
+
+    /**
+     * @notice Get current stats window metadata
+     * @return startAt Window start timestamp
+     * @return epochId Current epoch identifier
+     */
+    // Deprecated: getProverStatsWindow/getStatsWindowInfo removed in favor of recent naming
+
+    /**
+     * @notice Get recent (since last reset) stats for a prover
+     * @dev Alias of getProverStatsWindow for readability
+     */
+    function getProverRecentStats(address prover) external view returns (ProverStats memory);
+
+    /**
+     * @notice Get current recent stats window metadata
+     * @dev Alias of getStatsWindowInfo for readability
+     * @return startAt Window start timestamp
+     * @return epochId Current epoch identifier
+     */
+    function getRecentStatsInfo() external view returns (uint64 startAt, uint64 epochId);
 
     // =========================================================================
     // REQUEST QUERY FUNCTIONS

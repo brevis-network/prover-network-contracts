@@ -413,6 +413,174 @@ contract BrevisMarketTest is Test {
         assertEq(feeToken.balanceOf(requester), requesterBalanceBefore + MAX_FEE);
     }
 
+    // =============================
+    // ProverStats tests
+    // =============================
+
+    function test_ProverStats_TotalsAndRecent_BidRevealSubmit() public {
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        // Bid
+        bytes32 bidHash = _createBidHash(5e17, 123);
+        vm.prank(prover1);
+        market.bid(reqid, bidHash);
+
+        // Reveal
+        vm.warp(block.timestamp + BIDDING_DURATION + 1);
+        vm.prank(prover1);
+        market.reveal(reqid, 5e17, 123);
+
+        // Submit
+        vm.warp(block.timestamp + REVEAL_DURATION + 1);
+        uint64 beforeSubmitTs = uint64(block.timestamp);
+        vm.prank(prover1);
+        market.submitProof(reqid, VALID_PROOF);
+
+        IBrevisMarket.ProverStats memory total = market.getProverStatsTotal(prover1);
+        assertEq(total.bids, 1);
+        assertEq(total.reveals, 1);
+        assertEq(total.wins, 1);
+        assertEq(total.submissions, 1);
+        assertGe(total.lastActiveAt, beforeSubmitTs);
+
+        IBrevisMarket.ProverStats memory recent = market.getProverRecentStats(prover1);
+        assertEq(recent.bids, 1);
+        assertEq(recent.reveals, 1);
+        assertEq(recent.wins, 1);
+        assertEq(recent.submissions, 1);
+        assertGe(recent.lastActiveAt, beforeSubmitTs);
+
+        (uint64 startAt, uint64 epochId) = market.getRecentStatsInfo();
+        assertGt(startAt, 0);
+        assertGt(epochId, 0);
+    }
+
+    function test_ProverStats_WinsMoveOnWinnerChange_LastActiveUnchanged() public {
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        // Both place bids
+        vm.prank(prover1);
+        market.bid(reqid, _createBidHash(6e17, 111));
+        vm.prank(prover2);
+        market.bid(reqid, _createBidHash(4e17, 222));
+
+        // Reveal phase
+        vm.warp(block.timestamp + BIDDING_DURATION + 1);
+
+        // First reveal by prover1 (higher fee) -> temporarily winner
+        vm.prank(prover1);
+        market.reveal(reqid, 6e17, 111);
+        IBrevisMarket.ProverStats memory t1 = market.getProverStatsTotal(prover1);
+        uint64 p1LastActive = t1.lastActiveAt;
+
+        // Advance time and reveal by prover2 (lower fee) -> winner switches
+        vm.warp(block.timestamp + 10);
+        vm.prank(prover2);
+        market.reveal(reqid, 4e17, 222);
+
+        // Wins adjusted: prover1 back to 0, prover2 = 1
+        IBrevisMarket.ProverStats memory t1After = market.getProverStatsTotal(prover1);
+        IBrevisMarket.ProverStats memory t2After = market.getProverStatsTotal(prover2);
+        assertEq(t1After.wins, 0);
+        assertEq(t2After.wins, 1);
+
+        // Prover1 lastActiveAt unchanged by someone else's reveal
+        assertEq(t1After.lastActiveAt, p1LastActive);
+
+        // Recent stats mirror totals
+        IBrevisMarket.ProverStats memory r1 = market.getProverRecentStats(prover1);
+        IBrevisMarket.ProverStats memory r2 = market.getProverRecentStats(prover2);
+        assertEq(r1.wins, 0);
+        assertEq(r2.wins, 1);
+    }
+
+    function test_ProverStats_RecentReset_AndEpochInfo() public {
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+        vm.prank(requester);
+        market.requestProof(req);
+
+        // Some activity for prover1
+        vm.prank(prover1);
+        market.bid(reqid, _createBidHash(5e17, 123));
+
+        (uint64 startAtBefore, uint64 epochBefore) = market.getRecentStatsInfo();
+
+        // Reset as owner
+        vm.prank(owner);
+        market.resetStats(0);
+
+        (uint64 startAtAfter, uint64 epochAfter) = market.getRecentStatsInfo();
+        assertGe(startAtAfter, startAtBefore);
+        assertEq(epochAfter, epochBefore + 1);
+
+        // Recent stats cleared for prover1 until new activity
+        IBrevisMarket.ProverStats memory recent1 = market.getProverRecentStats(prover1);
+        assertEq(recent1.bids, 0);
+        assertEq(recent1.reveals, 0);
+        assertEq(recent1.wins, 0);
+        assertEq(recent1.submissions, 0);
+
+        // Totals remain
+        IBrevisMarket.ProverStats memory total1 = market.getProverStatsTotal(prover1);
+        assertEq(total1.bids, 1);
+        assertEq(total1.reveals, 0);
+        assertEq(total1.wins, 0);
+        assertEq(total1.submissions, 0);
+    }
+
+    function test_ProverStats_RecentZerosForInactiveProver() public {
+        // No activity after reset for prover2
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+        vm.prank(requester);
+        market.requestProof(req);
+
+        // Some activity by prover1 only
+        vm.prank(prover1);
+        market.bid(reqid, _createBidHash(5e17, 123));
+
+        // Reset epoch
+        vm.prank(owner);
+        market.resetStats(0);
+
+        IBrevisMarket.ProverStats memory recent2 = market.getProverRecentStats(prover2);
+        assertEq(recent2.bids, 0);
+        assertEq(recent2.reveals, 0);
+        assertEq(recent2.wins, 0);
+        assertEq(recent2.submissions, 0);
+    }
+
+    function test_ProverStats_MissedDeadline_DerivedWinsMinusSubmissions() public {
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+        vm.prank(requester);
+        market.requestProof(req);
+
+        // Prover1 bids and reveals, becomes winner
+        vm.prank(prover1);
+        market.bid(reqid, _createBidHash(5e17, 123));
+        vm.warp(block.timestamp + BIDDING_DURATION + 1);
+        vm.prank(prover1);
+        market.reveal(reqid, 5e17, 123);
+
+        // Let deadline pass, then refund
+        (,,,, uint256 minStake, uint64 deadline,,) = market.getRequest(reqid);
+        // silence minStake warning
+        minStake;
+        vm.warp(deadline + 1);
+        market.refund(reqid);
+
+        IBrevisMarket.ProverStats memory total1 = market.getProverStatsTotal(prover1);
+        assertEq(total1.wins, 1);
+        assertEq(total1.submissions, 0);
+        // Derived missed = 1
+        assertEq(uint256(total1.wins) - uint256(total1.submissions), 1);
+    }
+
     function test_Refund_RevertBeforeDeadline() public {
         (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
 
