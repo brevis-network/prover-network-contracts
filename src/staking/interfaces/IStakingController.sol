@@ -30,6 +30,9 @@ interface IStakingController {
         // Map of reward source to commission rate in basis points (0-10000). address(0) = default rate
         EnumerableMap.AddressToUintMap commissionRates;
         uint64 joinedAt; // Timestamp when the prover joined (initialized)
+        // Profile fields (display-only, editable by prover/admin)
+        string name; // <= 128 bytes recommended
+        string iconUrl; // <= 512 bytes recommended
     }
 
     struct ProverPendingUnstakes {
@@ -69,6 +72,7 @@ interface IStakingController {
     event MaxSlashBpsUpdated(uint256 oldValue, uint256 newValue);
     event RequireAuthorizationUpdated(bool required);
     event EmergencyRecovered(address to, uint256 amount);
+    event ProverProfileUpdated(address indexed prover, string name, string iconUrl);
 
     // =========================================================================
     // ERRORS
@@ -132,6 +136,22 @@ interface IStakingController {
      * @param prover The prover address to retire
      */
     function retireProver(address prover) external;
+
+    /**
+     * @notice Set or update the caller's prover display profile
+     * @dev Only callable by a registered prover
+     * @param name Display name (<= 128 bytes recommended)
+     * @param iconUrl Icon URL (<= 512 bytes recommended)
+     */
+    function setProverProfile(string calldata name, string calldata iconUrl) external;
+
+    /**
+     * @notice Admin override to set a prover's display profile
+     * @param prover Prover address to update
+     * @param name Display name (<= 128 bytes recommended)
+     * @param iconUrl Icon URL (<= 512 bytes recommended)
+     */
+    function setProverProfileByAdmin(address prover, string calldata name, string calldata iconUrl) external;
 
     // =========================================================================
     // STAKING OPERATIONS
@@ -235,6 +255,7 @@ interface IStakingController {
      * @return defaultCommissionRate Default commission rate in basis points (0-10000)
      * @return pendingCommission Accumulated commission waiting to be claimed
      * @return numStakers Number of stakers for this prover
+     * @return joinedAt Timestamp when the prover joined
      */
     function getProverInfo(address prover)
         external
@@ -245,8 +266,17 @@ interface IStakingController {
             uint64 defaultCommissionRate,
             uint256 pendingCommission,
             uint256 numStakers,
-            uint64 joinedAt
+            uint64 joinedAt,
+            string memory name
         );
+
+    /**
+     * @notice Get prover profile display fields
+     * @param prover The prover address
+     * @return name Prover display name
+     * @return iconUrl Prover icon URL
+     */
+    function getProverProfile(address prover) external view returns (string memory name, string memory iconUrl);
 
     /**
      * @notice Get current state of a prover

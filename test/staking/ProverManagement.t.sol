@@ -43,10 +43,6 @@ contract ProverManagementTest is Test {
         );
 
         factory.init(address(controller));
-
-        // Grant slasher role to admin for testing
-        controller.grantRole(controller.SLASHER_ROLE(), admin);
-
         // Transfer ownership to admin
         controller.transferOwnership(admin);
 
@@ -88,7 +84,7 @@ contract ProverManagementTest is Test {
             uint64 commissionRate,
             uint256 pendingCommission,
             uint256 numStakers,
-            uint64 joinedAt
+            uint64 joinedAt,
         ) = controller.getProverInfo(prover1);
 
         assertEq(vault, vaultAddress);
@@ -362,7 +358,7 @@ contract ProverManagementTest is Test {
             uint64 infoCommissionRate,
             uint256 infoPendingCommission,
             uint256 infoNumStakers,
-            uint64 joinedAt
+            uint64 joinedAt,
         ) = controller.getProverInfo(prover1);
 
         assertEq(uint256(infoState), uint256(IStakingController.ProverState.Null));

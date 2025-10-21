@@ -267,6 +267,35 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
         emit ProverRetired(prover);
     }
 
+    /**
+     * @notice Set or update the caller's prover display profile
+     */
+    function setProverProfile(string calldata name, string calldata iconUrl) external override {
+        _setProverProfile(msg.sender, name, iconUrl);
+    }
+
+    /**
+     * @notice Admin override to set a prover's display profile
+     */
+    function setProverProfileByAdmin(address prover, string calldata name, string calldata iconUrl)
+        external
+        override
+        onlyOwner
+    {
+        _setProverProfile(prover, name, iconUrl);
+    }
+
+    function _setProverProfile(address prover, string calldata name, string calldata iconUrl) internal {
+        ProverInfo storage p = _proverInfo[prover];
+        if (p.state == ProverState.Null) revert ControllerProverNotInitialized();
+        // Input caps: name <= 128 bytes, iconUrl <= 512 bytes
+        if (bytes(name).length > 128) revert ControllerInvalidArg();
+        if (bytes(iconUrl).length > 512) revert ControllerInvalidArg();
+        p.name = name;
+        p.iconUrl = iconUrl;
+        emit ProverProfileUpdated(prover, name, iconUrl);
+    }
+
     // =========================================================================
     // STAKING OPERATIONS
     // =========================================================================
@@ -762,7 +791,8 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
             uint64 defaultCommissionRate,
             uint256 pendingCommission,
             uint256 numStakers,
-            uint64 joinedAt
+            uint64 joinedAt,
+            string memory name
         )
     {
         ProverInfo storage proverInfo = _proverInfo[prover];
@@ -773,7 +803,8 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
             uint64(defaultRate),
             proverInfo.pendingCommission,
             proverInfo.stakers.length(),
-            proverInfo.joinedAt
+            proverInfo.joinedAt,
+            proverInfo.name
         );
     }
 
@@ -824,6 +855,19 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
      */
     function getProverVault(address prover) public view override returns (address vault) {
         return vaultFactory.getVault(prover);
+    }
+
+    /**
+     * @notice Get prover profile display fields
+     */
+    function getProverProfile(address prover)
+        external
+        view
+        override
+        returns (string memory name, string memory iconUrl)
+    {
+        ProverInfo storage p = _proverInfo[prover];
+        return (p.name, p.iconUrl);
     }
 
     /**

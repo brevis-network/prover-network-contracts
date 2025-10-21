@@ -209,7 +209,6 @@ struct ProverDisplayInfo {
     uint64 joinedAt;                          // When the prover joined (controller-level join timestamp)
     string name;                              // Prover's display name (<= 128 bytes)
     string iconUrl;                           // Prover's icon URL (<= 512 bytes)
-    uint64 profileLastUpdated;                // Last updated timestamp for profile fields
 }
 ```
 
