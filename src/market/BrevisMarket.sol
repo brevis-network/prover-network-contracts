@@ -63,6 +63,14 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     // Core data structures
     mapping(bytes32 => ReqState) public requests; // proof req id -> state
 
+    mapping(address => ProverStats) public proverStats; // prover address -> stats
+
+    // Windowed stats (since configurable start)
+    mapping(address => ProverStats) private _proverStatsWindow;
+    mapping(address => uint64) private _proverWindowEpoch;
+    uint64 private _statsStartAt;
+    uint64 private _statsEpochId;
+
     // Storage gap for future upgrades. Reserves 40 slots.
     uint256[40] private __gap;
 
@@ -90,6 +98,9 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         // Only initialize if non-zero values are provided (direct deployment)
         if (address(_picoVerifier) != address(0) && address(_stakingController) != address(0)) {
             _init(_picoVerifier, _stakingController, _biddingPhaseDuration, _revealPhaseDuration, _minMaxFee);
+            // Initialize stats window for direct deployments
+            _statsStartAt = uint64(block.timestamp);
+            _statsEpochId = 1;
         }
         // For upgradeable deployment, pass zero addresses and call init() separately
     }
@@ -112,6 +123,9 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     ) external {
         _init(_picoVerifier, _stakingController, _biddingPhaseDuration, _revealPhaseDuration, _minMaxFee);
         initOwner(); // requires _owner == address(0), which is only possible when it's a delegateCall
+        // Initialize stats window
+        _statsStartAt = uint64(block.timestamp);
+        _statsEpochId = 1;
     }
 
     /**
@@ -224,6 +238,13 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
             req.bidCount++;
         }
 
+        // Update prover activity stats
+        proverStats[prover].bids += 1;
+        proverStats[prover].lastActiveAt = uint64(block.timestamp);
+        ProverStats storage recentStats = _ensureWindow(prover);
+        recentStats.bids += 1;
+        recentStats.lastActiveAt = uint64(block.timestamp);
+
         emit NewBid(reqid, prover, bidHash);
     }
 
@@ -266,6 +287,13 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
         // Update lowest and second lowest bidders
         _updateBidders(req, prover, fee);
+
+        // Update prover activity stats
+        proverStats[prover].reveals += 1;
+        proverStats[prover].lastActiveAt = uint64(block.timestamp);
+        ProverStats storage recentStats = _ensureWindow(prover);
+        recentStats.reveals += 1;
+        recentStats.lastActiveAt = uint64(block.timestamp);
 
         emit BidRevealed(reqid, prover, fee);
     }
@@ -322,6 +350,13 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
         // Refund remaining fee to requester
         feeToken.safeTransfer(req.sender, req.fee.maxFee - actualFee);
+
+        // Update prover performance stats: successful submission only
+        proverStats[prover].submissions += 1;
+        proverStats[prover].lastActiveAt = uint64(block.timestamp);
+        ProverStats storage recentStats = _ensureWindow(prover);
+        recentStats.submissions += 1;
+        recentStats.lastActiveAt = uint64(block.timestamp);
 
         emit ProofSubmitted(reqid, prover, proof, actualFee);
     }
@@ -584,6 +619,18 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     // =========================================================================
 
     /**
+     * @notice Ensure and return the current epoch's window stats for a prover
+     * @dev Lazily resets the prover's window stats when epoch changes
+     */
+    function _ensureWindow(address prover) internal returns (ProverStats storage s) {
+        if (_proverWindowEpoch[prover] != _statsEpochId) {
+            delete _proverStatsWindow[prover];
+            _proverWindowEpoch[prover] = _statsEpochId;
+        }
+        return _proverStatsWindow[prover];
+    }
+
+    /**
      * @notice Update the two lowest bidders for a request
      * @dev Maintains sorted order of winner and second-place bidders
      * @param req Storage reference to the request state
@@ -591,6 +638,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
      * @param fee Fee amount being bid
      */
     function _updateBidders(ReqState storage req, address prover, uint256 fee) internal {
+        address prevWinner = req.winner.prover;
+
         // If no bidders yet, or this is lower than current winner
         if (req.winner.prover == address(0) || fee < req.winner.fee) {
             // Move current winner to second place
@@ -601,6 +650,23 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         // If this is lower than second place (but not winner)
         else if (req.second.prover == address(0) || fee < req.second.fee) {
             req.second = Bidder({prover: prover, fee: fee});
+        }
+
+        // Update wins to reflect current assigned winner
+        address newWinner = req.winner.prover;
+        if (newWinner != prevWinner) {
+            if (prevWinner != address(0)) {
+                ProverStats storage sPrev = proverStats[prevWinner];
+                if (sPrev.wins > 0) sPrev.wins -= 1;
+                ProverStats storage wPrev = _ensureWindow(prevWinner);
+                if (wPrev.wins > 0) wPrev.wins -= 1;
+            }
+            if (newWinner != address(0)) {
+                ProverStats storage sNew = proverStats[newWinner];
+                sNew.wins += 1;
+                ProverStats storage wNew = _ensureWindow(newWinner);
+                wNew.wins += 1;
+            }
         }
     }
 
@@ -613,5 +679,41 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     function _requireProverEligible(address prover, uint256 minimumStake) internal view {
         (bool eligible, uint256 currentStake) = stakingController.isProverEligible(prover, minimumStake);
         if (!eligible) revert MarketProverNotEligible(prover, minimumStake, currentStake);
+    }
+
+    // =========================================================================
+    // STATS VIEW & ADMIN (WINDOWED)
+    // =========================================================================
+
+    /**
+     * @notice Reset stats window start and bump epoch id
+     * @param newStartAt New start timestamp (0 = now)
+     */
+    function resetStats(uint64 newStartAt) external override onlyOwner {
+        _statsEpochId += 1;
+        _statsStartAt = newStartAt == 0 ? uint64(block.timestamp) : newStartAt;
+        emit StatsReset(_statsEpochId, _statsStartAt);
+    }
+
+    /**
+     * @notice Get lifetime (cumulative) stats for a prover
+     */
+    function getProverStatsTotal(address prover) external view override returns (ProverStats memory) {
+        return proverStats[prover];
+    }
+
+    /**
+     * @notice Get window (since last reset) stats for a prover
+     */
+    // Recent stats (formerly “windowed”)
+    function getProverRecentStats(address prover) external view override returns (ProverStats memory) {
+        if (_proverWindowEpoch[prover] != _statsEpochId) {
+            return ProverStats(0, 0, 0, 0, 0);
+        }
+        return _proverStatsWindow[prover];
+    }
+
+    function getRecentStatsInfo() external view override returns (uint64 startAt, uint64 epochId) {
+        return (_statsStartAt, _statsEpochId);
     }
 }

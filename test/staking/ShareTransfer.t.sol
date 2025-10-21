@@ -6,7 +6,6 @@ import {StakingController} from "src/staking/controller/StakingController.sol";
 import {VaultFactory} from "src/staking/vault/VaultFactory.sol";
 import {IProverVault} from "src/staking/interfaces/IProverVault.sol";
 import {IStakingController} from "src/staking/interfaces/IStakingController.sol";
-import {IERC20} from "lib/openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 // Minimal mock ERC20 (use existing MockERC20 if present)
 import {MockERC20} from "test/mocks/MockERC20.sol";

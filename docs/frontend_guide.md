@@ -14,8 +14,9 @@ This guide provides frontend developers with the essential information needed to
    - 2.3 [Two-Phase Unstaking Process](#23-two-phase-unstaking-process)
    - 2.4 [Prover Commission Management](#24-prover-commission-management)
 3. [Data & Queries](#3-data--queries)
-   - 3.1 [Data Structures](#31-data-structures)
-   - 3.2 [Read Functions](#32-read-functions)
+    - 3.1 [Data Structures](#31-data-structures)
+    - 3.2 [Read Functions](#32-read-functions)
+    - 3.3 [BrevisMarket Stats](#33-brevismarket-stats)
 4. [Action Reference](#4-action-reference)
 5. [Integration Patterns](#5-integration-patterns)
 6. [Error Handling & Performance](#6-error-handling--performance)
@@ -204,6 +205,11 @@ struct ProverDisplayInfo {
     uint256 pendingCommission;                // Commission available to claim
     uint64 defaultCommissionRate;             // Default commission rate (basis points)
     ProverCommissionInfo[] commissionRates;   // Per-source commission rates, includes default at source=address(0)
+    // Appended display/profile fields
+    uint64 joinedAt;                          // When the prover joined (controller-level join timestamp)
+    string name;                              // Prover's display name (<= 128 bytes)
+    string iconUrl;                           // Prover's icon URL (<= 512 bytes)
+    uint64 profileLastUpdated;                // Last updated timestamp for profile fields
 }
 ```
 
@@ -303,6 +309,46 @@ function getStakeInfo(address prover, address staker) external view returns (uin
 
 **Note**: Most StakingController read functions are superseded by more efficient StakingViewer alternatives. Use StakingController directly only when you need a specific single value that StakingViewer doesn't provide.
 
+### 3.3 BrevisMarket Stats
+
+BrevisMarket exposes per-prover activity and performance stats tailored for explorer views.
+
+#### Struct
+```solidity
+struct ProverStats {
+    uint64 bids;          // total bids placed
+    uint64 reveals;       // total bids revealed
+    uint64 wins;          // assignments (times the prover was current winner)
+    uint64 submissions;   // successful proof submissions
+    uint64 lastActiveAt;  // last activity timestamp (only on the prover's own actions)
+}
+```
+
+#### APIs
+```solidity
+// Lifetime totals
+function getProverStatsTotal(address prover) external view returns (ProverStats memory);
+
+// Recent stats since last reset (epoch-based, lazy per-prover)
+function getProverRecentStats(address prover) external view returns (ProverStats memory);
+
+// Current recent window metadata
+function getRecentStatsInfo() external view returns (uint64 startAt, uint64 epochId);
+
+// Admin: reset the recent window (startAt=0 uses current block timestamp)
+function resetStats(uint64 newStartAt) external;
+```
+
+#### Semantics
+- wins: incremented on assignment changes during reveal; reflects how many requests a prover was assigned (won).
+- submissions: incremented only on successful proof submission.
+- missed (derived): `wins - submissions`.
+- lastActiveAt: updated on the prover’s own bid/reveal/submit.
+
+#### Recent vs Totals
+- Totals aggregate all-time.
+- Recent is a lazily maintained window keyed by an epoch id; `resetStats()` by admin starts a new epoch and clears recent counters per prover upon their next activity.
+
 ## 4. Action Reference
 
 Quick reference for frontend developers: what functions are needed for each user action.
@@ -380,6 +426,18 @@ const proverInfo = await stakingViewer.getProverInfo(proverAddress);
 // Local conversion for UI display (no additional RPC)
 const sharePrice = proverInfo.vaultShares > 0 
     ? proverInfo.vaultAssets / proverInfo.vaultShares : 1;
+
+// Market stats for this prover (totals + recent)
+const total = await brevisMarket.getProverStatsTotal(proverAddress);
+const recent = await brevisMarket.getProverRecentStats(proverAddress);
+const [recentStartAt, recentEpochId] = await brevisMarket.getRecentStatsInfo();
+
+// UI metrics:
+// - Proofs Won (lifetime): total.wins
+// - Success Rate (lifetime): total.wins > 0 ? total.submissions / total.wins : 0
+// - Missed Deadlines (lifetime): total.wins - total.submissions
+// - Recent window equivalents: use `recent` instead of `total`
+// - Last active: prefer `recent.lastActiveAt` if > 0 else `total.lastActiveAt`
 ```
 
 #### User Portfolio Dashboard 
@@ -405,8 +463,11 @@ const topProvers = await stakingViewer.getTopProvers(20);
 const activeProvers = await stakingViewer.getAllActiveProversInfo();
 
 // Display prover cards with:
+// - Display name and icon (fallbacks if empty)
+// - Joined since (joinedAt)
 // - Total assets and number of stakers
 // - Commission rates and current state
+// - Market stats: proofs won, success rate, last active
 // - Share price and vault utilization
 // - Enable filtering/sorting on retrieved data
 

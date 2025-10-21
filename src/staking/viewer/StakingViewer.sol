@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "@security/access/Ownable.sol";
 import "../interfaces/IStakingViewer.sol";
 import "../interfaces/IStakingController.sol";
 import "../interfaces/IProverVault.sol";
@@ -10,8 +11,19 @@ import "../interfaces/IProverVault.sol";
  * @notice Provides unified view functions for frontend to minimize RPC calls
  * @dev This contract is read-only and gas cost is not a primary concern
  */
-contract StakingViewer is IStakingViewer {
+contract StakingViewer is IStakingViewer, Ownable {
     IStakingController public immutable stakingController;
+
+    // ---------------------------------------------------------------------
+    // Profile storage
+    // ---------------------------------------------------------------------
+    struct ProverProfile {
+        string name;
+        string iconUrl;
+        uint64 lastUpdated;
+    }
+
+    mapping(address => ProverProfile) private _profiles;
 
     constructor(address _stakingController) {
         stakingController = IStakingController(_stakingController);
@@ -37,7 +49,7 @@ contract StakingViewer is IStakingViewer {
         address[] memory allProvers = stakingController.getAllProvers();
         uint256 totalStakers = 0;
         for (uint256 i = 0; i < allProvers.length; i++) {
-            (,,,, uint256 numStakers) = stakingController.getProverInfo(allProvers[i]);
+            (,,,, uint256 numStakers,) = stakingController.getProverInfo(allProvers[i]);
             totalStakers += numStakers;
         }
         overview.totalStakers = totalStakers;
@@ -297,7 +309,7 @@ contract StakingViewer is IStakingViewer {
     {
         stakerCounts = new uint256[](provers.length);
         for (uint256 i = 0; i < provers.length; i++) {
-            (,,,, uint256 numStakers) = stakingController.getProverInfo(provers[i]);
+            (,,,, uint256 numStakers,) = stakingController.getProverInfo(provers[i]);
             stakerCounts[i] = numStakers;
         }
     }
@@ -331,7 +343,8 @@ contract StakingViewer is IStakingViewer {
             address vault,
             uint64 defaultCommissionRate,
             uint256 pendingCommission,
-            uint256 numStakers
+            uint256 numStakers,
+            uint64 joinedAt
         ) = stakingController.getProverInfo(prover);
 
         // Set basic fields
@@ -341,6 +354,7 @@ contract StakingViewer is IStakingViewer {
         info.defaultCommissionRate = defaultCommissionRate;
         info.pendingCommission = pendingCommission;
         info.numStakers = numStakers;
+        info.joinedAt = joinedAt;
 
         // Get and set asset information
         if (vault != address(0)) {
@@ -360,6 +374,12 @@ contract StakingViewer is IStakingViewer {
         for (uint256 j = 0; j < sources.length; j++) {
             info.commissionRates[j] = ProverCommissionInfo({source: sources[j], rate: rates[j]});
         }
+
+        // Attach profile info
+        ProverProfile storage profile = _profiles[prover];
+        info.name = profile.name;
+        info.iconUrl = profile.iconUrl;
+        info.profileLastUpdated = profile.lastUpdated;
     }
 
     /**
@@ -418,5 +438,46 @@ contract StakingViewer is IStakingViewer {
         arr[uint256(right)] = pivotElement;
 
         return i + 1;
+    }
+
+    // =========================================================================
+    // PROVER PROFILE FUNCTIONS
+    // =========================================================================
+
+    /**
+     * @notice Set or update the caller's prover profile
+     * @dev Requires caller to be a registered prover in the StakingController
+     */
+    function setProverProfile(string calldata name, string calldata iconUrl) external override {
+        _setProfile(msg.sender, name, iconUrl);
+    }
+
+    /**
+     * @notice Admin override to set a prover's profile
+     */
+    function setProverProfileByAdmin(address prover, string calldata name, string calldata iconUrl)
+        external
+        override
+        onlyOwner
+    {
+        _setProfile(prover, name, iconUrl);
+    }
+
+    function _setProfile(address prover, string calldata name, string calldata iconUrl) internal {
+        // Require caller is a registered prover (state != Null)
+        if (stakingController.getProverState(prover) == IStakingController.ProverState.Null) {
+            revert("Not a registered prover");
+        }
+
+        // Input caps: name <= 128 bytes, iconUrl <= 512 bytes
+        require(bytes(name).length <= 128, "Name too long");
+        require(bytes(iconUrl).length <= 512, "Icon URL too long");
+
+        ProverProfile storage p = _profiles[prover];
+        p.name = name;
+        p.iconUrl = iconUrl;
+        p.lastUpdated = uint64(block.timestamp);
+
+        emit ProverProfileUpdated(prover, name, iconUrl);
     }
 }

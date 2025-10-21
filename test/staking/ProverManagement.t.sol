@@ -87,7 +87,8 @@ contract ProverManagementTest is Test {
             address vault,
             uint64 commissionRate,
             uint256 pendingCommission,
-            uint256 numStakers
+            uint256 numStakers,
+            uint64 joinedAt
         ) = controller.getProverInfo(prover1);
 
         assertEq(vault, vaultAddress);
@@ -95,6 +96,7 @@ contract ProverManagementTest is Test {
         assertEq(commissionRate, 1000);
         assertEq(pendingCommission, 0);
         assertTrue(numStakers >= 1);
+        assertTrue(joinedAt > 0);
 
         // Verify automatic self-staking occurred
         ProverVault vaultContract = ProverVault(vaultAddress);
@@ -359,7 +361,8 @@ contract ProverManagementTest is Test {
             address infoVault,
             uint64 infoCommissionRate,
             uint256 infoPendingCommission,
-            uint256 infoNumStakers
+            uint256 infoNumStakers,
+            uint64 joinedAt
         ) = controller.getProverInfo(prover1);
 
         assertEq(uint256(infoState), uint256(IStakingController.ProverState.Null));
@@ -367,6 +370,7 @@ contract ProverManagementTest is Test {
         assertEq(infoCommissionRate, 0);
         assertEq(infoPendingCommission, 0);
         assertEq(infoNumStakers, 0);
+        assertEq(joinedAt, 0);
     }
 
     function testCannotRetireProverWithAssets() public {

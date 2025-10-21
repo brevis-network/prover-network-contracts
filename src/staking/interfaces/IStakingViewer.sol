@@ -9,6 +9,15 @@ import "./IStakingController.sol";
  */
 interface IStakingViewer {
     // =========================================================================
+    // EVENTS
+    // =========================================================================
+
+    /**
+     * @notice Emitted when a prover updates their display profile
+     */
+    event ProverProfileUpdated(address indexed prover, string name, string iconUrl);
+
+    // =========================================================================
     // STRUCTS FOR BATCH OPERATIONS
     // =========================================================================
 
@@ -21,10 +30,15 @@ interface IStakingViewer {
         uint256 totalAssets;
         uint256 totalUnstaking;
         uint256 numStakers;
+        uint64 joinedAt;
         uint256 slashingScale;
         uint256 pendingCommission;
         uint64 defaultCommissionRate;
         ProverCommissionInfo[] commissionRates;
+        // Profile fields for explorer display
+        string name;
+        string iconUrl;
+        uint64 profileLastUpdated;
     }
 
     struct UserStakeInfo {
@@ -213,4 +227,20 @@ interface IStakingViewer {
      * @return stakerCounts Array of staker counts for each prover
      */
     function batchGetStakerCounts(address[] calldata provers) external view returns (uint256[] memory stakerCounts);
+
+    // =========================================================================
+    // WRITE APIS - PROVER PROFILE
+    // =========================================================================
+
+    /**
+     * @notice Set or update the caller's prover display profile
+     * @dev Only callable by a registered prover
+     */
+    function setProverProfile(string calldata name, string calldata iconUrl) external;
+
+    /**
+     * @notice Admin override to set a prover's display profile
+     * @dev Only callable by contract owner/admin
+     */
+    function setProverProfileByAdmin(address prover, string calldata name, string calldata iconUrl) external;
 }
