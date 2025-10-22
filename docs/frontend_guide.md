@@ -1,6 +1,6 @@
-# Staking System Frontend Integration Guide
+# Frontend Integration Guide
 
-This guide provides frontend developers with the essential information needed to integrate with the Brevis prover network staking system. The system enables users to become provers or stake with existing provers to earn rewards.
+This guide provides frontend developers with the essential information needed to integrate with the Brevis prover network.
 
 ## Table of Contents
 
