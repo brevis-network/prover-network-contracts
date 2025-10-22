@@ -78,6 +78,7 @@ interface IBrevisMarket {
     event ProtocolFeeWithdrawn(address indexed to, uint256 amount);
     event StatsReset(uint64 newEpochId, uint64 statsStartAt);
     event StatsEpochScheduled(uint64 scheduledStartAt);
+    event StatsEpochPopped(uint64 poppedStartAt);
 
     // Prover submitter management events
     event SubmitterRegistered(address indexed prover, address indexed submitter);
@@ -88,35 +89,44 @@ interface IBrevisMarket {
     // ERRORS
     // =========================================================================
 
+    error MarketInvalidRequestStatus(ReqStatus status);
+    error MarketZeroAddress();
+
+    // Request errors
     error MarketDeadlineMustBeInFuture();
     error MarketDeadlineTooFar(uint256 deadline, uint256 maxAllowed);
     error MarketDeadlineBeforeRevealPhaseEnd();
     error MarketRequestAlreadyExists(bytes32 reqid);
     error MarketRequestNotFound(bytes32 reqid);
+    error MarketMaxFeeTooLow(uint256 provided, uint256 minimum);
+    error MarketMaxFeeTooHigh(uint256 provided, uint256 maximum);
+    error MarketMinStakeTooLow(uint256 provided, uint256 minimum);
+
+    // Bidding & reveal & submission & refund errors
     error MarketBiddingPhaseEnded(uint256 currentTime, uint256 biddingEndTime);
     error MarketBiddingPhaseNotEnded(uint256 currentTime, uint256 biddingEndTime);
     error MarketRevealPhaseEnded(uint256 currentTime, uint256 revealEndTime);
     error MarketRevealPhaseNotEnded(uint256 currentTime, uint256 revealEndTime);
     error MarketBidRevealMismatch(bytes32 expected, bytes32 actual);
     error MarketFeeExceedsMaximum(uint256 fee, uint256 maxFee);
-    error MarketMaxFeeTooLow(uint256 provided, uint256 minimum);
-    error MarketMaxFeeTooHigh(uint256 provided, uint256 maximum);
-    error MarketMinStakeTooLow(uint256 provided, uint256 minimum);
     error MarketDeadlinePassed(uint256 currentTime, uint256 deadline);
     error MarketNotExpectedProver(address expected, address actual);
-    error MarketInvalidRequestStatus(ReqStatus status);
-    error MarketBeforeDeadline(uint256 currentTime, uint256 deadline);
-    error MarketCannotRefundYet(uint256 currentTime, uint256 deadline, uint256 biddingEndTime, uint256 revealEndTime);
     error MarketProverNotEligible(address prover, uint256 requiredStake, uint256 actualStake);
-    error MarketZeroAddress();
+    error MarketCannotRefundYet(uint256 currentTime, uint256 deadline, uint256 biddingEndTime, uint256 revealEndTime);
+
+    // Slashing errors
+    error MarketBeforeDeadline(uint256 currentTime, uint256 deadline);
     error MarketInvalidStakingController();
     error MarketInvalidSlashBps();
     error MarketSlashWindowExpired(uint256 currentTime, uint256 slashWindowEnd);
     error MarketNoAssignedProverToSlash(bytes32 reqid);
+
+    // Admin errors
     error MarketInvalidProtocolFeeBps();
     error MarketNoProtocolFeeToWithdraw();
     error MarketInvalidStatsEpochStart(uint64 lastStartAt, uint64 newStartAt);
-    // (no stats admin errors currently)
+    error MarketNoFutureEpochToPop();
+    error MarketCannotPopStartedEpoch(uint64 startAt, uint64 currentTime);
 
     // Prover submitter management errors
     error MarketCannotRegisterSelf();
@@ -405,6 +415,12 @@ interface IBrevisMarket {
      * @param startAt New epoch start timestamp (0 = now). Must be strictly greater than the last scheduled start.
      */
     function scheduleStatsEpoch(uint64 startAt) external;
+
+    /**
+     * @notice Pop the most recently scheduled stats-epoch if it has not started yet
+     * @dev Only affects the last appended epoch; restores previous epoch's endAt to 0
+     */
+    function popStatsEpoch() external;
 
     /**
      * @notice Get lifetime (cumulative) stats for a prover

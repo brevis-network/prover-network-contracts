@@ -728,6 +728,26 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     }
 
     /**
+     * @notice Pop the last scheduled stats-epoch if it has not started yet
+     * @dev Restores the previous epoch's endAt to 0. Does not modify statsEpochId.
+     */
+    function popStatsEpoch() external override onlyOwner {
+        uint256 len = statsEpochs.length;
+        // Must have at least two epochs to pop a future one; never remove the initial epoch
+        if (len <= 1) revert MarketNoFutureEpochToPop();
+        StatsEpochInfo memory last = statsEpochs[len - 1];
+        // Only pop if the last epoch hasn't started yet
+        if (last.startAt <= uint64(block.timestamp)) {
+            revert MarketCannotPopStartedEpoch(last.startAt, uint64(block.timestamp));
+        }
+        // Restore previous epoch's endAt to 0 (ongoing or pending next future epoch)
+        statsEpochs[len - 2].endAt = 0;
+        // Remove the last epoch
+        statsEpochs.pop();
+        emit StatsEpochPopped(last.startAt);
+    }
+
+    /**
      * @notice Get lifetime (cumulative) stats for a prover
      */
     function getProverStatsTotal(address prover) external view override returns (ProverStats memory) {
@@ -775,8 +795,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         while (statsEpochId + 1 < statsEpochs.length) {
             uint64 nextStart = statsEpochs[statsEpochId + 1].startAt;
             if (uint64(block.timestamp) < nextStart) break;
-            // Close current epoch at nextStart upon rollover
-            statsEpochs[statsEpochId].endAt = nextStart;
+            // Advance to next epoch. Note: previous epoch's endAt is set during scheduling.
             statsEpochId += 1;
             emit StatsReset(statsEpochId, statsEpochs[statsEpochId].startAt);
         }
