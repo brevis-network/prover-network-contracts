@@ -325,54 +325,50 @@ struct ProverStats {
 ```
 
 #### APIs
+
+The two major APIs for explorer frontend to use are:
 ```solidity
 // Lifetime totals
 function getProverStatsTotal(address prover) external view returns (ProverStats memory);
-
-// Recent stats for the CURRENT epoch
-function getProverRecentStats(address prover) external view returns (ProverStats memory);
-
-// Current epoch metadata
-function getRecentStatsInfo() external view returns (uint64 startAt, uint64 epochId);
-
-// Admin: reset the recent window (startAt=0 uses current block timestamp)
-function resetStats(uint64 newStartAt) external;
-
-// Epoch history
-function getStatsEpochInfo(uint64 epochId) external view returns (uint64 startAt, uint64 endAt);
-function getLatestStatsEpochId() external view returns (uint64 epochId);
-function getProverStatsForStatsEpoch(address prover, uint64 epochId) external view returns (ProverStats memory);
+// Recent stats for the current epoch + its start timestamp
+function getProverRecentStats(address prover) external view returns (ProverStats memory stats, uint64 startAt);
 ```
+More stats-related view functions can be found at [IBrevisMarket.sol](../src/market/IBrevisMarket.sol#L425-L473)
 
 #### Semantics
 - wins: incremented on assignment changes during reveal; reflects how many requests a prover was assigned (won).
-- submissions: incremented only on successful proof submission.
-- missed (derived): `wins - submissions`.
+- requestsFulfilled: incremented only on successful proof submission.
+- missed (derived): `wins - requestsFulfilled`.
 - lastActiveAt: updated on the prover’s own bid/reveal/submit.
 
 #### Epochs, Recent, and Totals
-- Totals aggregate all-time activity for each prover.
-- The system keeps an on-chain history of per-epoch stats. Each epoch has:
-    - startAt: the timestamp when the epoch started
-    - endAt: the timestamp when the epoch ended; 0 if the epoch is ongoing
-- Recent is simply the stats of the current (latest) epoch.
-- `resetStats(newStartAt)` closes the previous epoch (sets its endAt to the new epoch's startAt) and opens a new epoch at `newStartAt` (or `block.timestamp` if 0). Per-epoch counters for the new epoch start at zero.
+- Totals: lifetime aggregate per prover.
+- Epochs: time-bounded buckets with startAt and endAt.
+- Recent: the recent (current epoch’s) stats. Use `getProverRecentStats(..)`, `getRecentStatsInfo()`.
 
 #### Example: Browsing Epoch History
 ```typescript
-const latestEpochId = await brevisMarket.getLatestStatsEpochId();
-const [currentStart, currentEnd] = await brevisMarket.getStatsEpochInfo(latestEpochId); // currentEnd = 0 while ongoing
+// Current epoch id and metadata
+const epochId = await brevisMarket.statsEpochId();
+const [currentStart, currentEnd] = await brevisMarket.statsEpochs(epochId); // currentEnd = 0 while ongoing
 
 // Recent == current epoch stats
-const recent = await brevisMarket.getProverRecentStats(proverAddress);
-const currentEpochStats = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, latestEpochId);
-// recent and currentEpochStats match
+const [recentStats, recentStart] = await brevisMarket.getProverRecentStats(proverAddress);
+const [currentEpochStats, curStart, curEnd] = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, epochId);
+// recentStats and currentEpochStats should match; recentStart == currentStart
 
-// Inspect previous epoch
-if (latestEpochId > 1) {
-    const [prevStart, prevEnd] = await brevisMarket.getStatsEpochInfo(latestEpochId - 1);
-    const prevStats = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, latestEpochId - 1);
-    // prevEnd equals currentStart after a reset
+// Inspect previous epoch if any
+if (epochId > 0) {
+    const [prevEpochStart, prevEpochEnd] = await brevisMarket.statsEpochs(epochId - 1);
+    const [prevStats, prevStatsStart, prevStatsEnd] = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, epochId - 1);
+    // prevEpochEnd equals currentStart after a reset
+}
+
+// Optional: iterate all epochs
+const n = await brevisMarket.statsEpochsLength();
+for (let i = 0; i < n; i++) {
+    const [startAt, endAt] = await brevisMarket.statsEpochs(i);
+    // fetch per-epoch stats as needed
 }
 ```
 

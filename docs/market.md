@@ -15,7 +15,7 @@ A sealed-bid reverse auction marketplace for zero-knowledge proof generation, wi
 
 ---
 
-## 1. System Overviewmmmm
+## 1. System Overview
 ## 2. API Reference
 
 **Complete documentation:** [`IBrevisMarket.sol`](../src/market/IBrevisMarket.sol)
@@ -180,19 +180,25 @@ struct ProverStats {
 ### APIs
 - Lifetime totals per prover: immutable aggregates since genesis
   - `getProverStatsTotal(address prover)` → ProverStats
-- Recent (current stats-epoch): rolling window since the last reset
-  - `getProverRecentStats(address prover)` → ProverStats
+- Recent (current stats-epoch): rolling window since the last scheduled epoch started
+  - `getProverRecentStats(address prover)` → (ProverStats stats, uint64 startAt)
   - `getRecentStatsInfo()` → (startAt, epochId)
-- Historical stats-epochs: on-chain time-bounded buckets
-  - `getStatsEpochInfo(uint64 epochId)` → (startAt, endAt) where endAt = 0 while ongoing
-  - `getLatestStatsEpochId()` → epochId
-  - `getProverStatsForStatsEpoch(address prover, uint64 epochId)` → ProverStats
+- Historical stats-epochs: on-chain time-bounded buckets via public getters
+  - `statsEpochId()` → current epoch id
+  - `statsEpochs(uint256 index)` → (startAt, endAt) where endAt = 0 while ongoing
+  - `statsEpochsLength()` → number of epochs
+  - `getProverStatsForStatsEpoch(address prover, uint64 epochId)` → (ProverStats stats, uint64 startAt, uint64 endAt)
 
 ### Semantics
-- ProverStats includes: bids, reveals, wins (assigned), submissions (proofs delivered), lastActiveAt.
-- Derived metric missed = wins − submissions.
+- ProverStats includes: bids, reveals, wins (assigned), requestsFulfilled (proofs delivered), lastActiveAt, feeReceived.
+- Derived metric missed = wins − requestsFulfilled.
 - On bid/reveal/submit, both the lifetime total and current stats-epoch buckets are updated.
-- resetStats(newStartAt) [admin]: closes the previous stats-epoch (sets its endAt to the new epoch’s startAt) and opens a new one at newStartAt (or block.timestamp if 0). Recent == stats for the latest stats-epoch.
+- scheduleStatsEpoch(startAt) [admin, startAt strictly greater than last start]:
+  - Sets the previous epoch’s `endAt` to `startAt` at scheduling time (may be in the future), then appends a new epoch starting at `startAt`.
+  - If `startAt == 0` (interpreted as now), the new epoch becomes current immediately. Otherwise, rollover to the new epoch is lazy on the first stats-changing action at/after `startAt` (emits `StatsReset(newEpochId, startAt)`).
+  - Recent == stats for the current epoch.
+- popStatsEpoch() [admin]:
+  - Removes the last scheduled epoch if it has not started yet and restores the previous epoch’s `endAt` to 0.
 
 ---
 

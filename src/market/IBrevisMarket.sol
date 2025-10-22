@@ -77,6 +77,8 @@ interface IBrevisMarket {
     event ProtocolFeeBpsUpdated(uint256 oldBps, uint256 newBps);
     event ProtocolFeeWithdrawn(address indexed to, uint256 amount);
     event StatsReset(uint64 newEpochId, uint64 statsStartAt);
+    event StatsEpochScheduled(uint64 scheduledStartAt);
+    event StatsEpochPopped(uint64 poppedStartAt);
 
     // Prover submitter management events
     event SubmitterRegistered(address indexed prover, address indexed submitter);
@@ -87,33 +89,44 @@ interface IBrevisMarket {
     // ERRORS
     // =========================================================================
 
+    error MarketInvalidRequestStatus(ReqStatus status);
+    error MarketZeroAddress();
+
+    // Request errors
     error MarketDeadlineMustBeInFuture();
     error MarketDeadlineTooFar(uint256 deadline, uint256 maxAllowed);
     error MarketDeadlineBeforeRevealPhaseEnd();
     error MarketRequestAlreadyExists(bytes32 reqid);
     error MarketRequestNotFound(bytes32 reqid);
+    error MarketMaxFeeTooLow(uint256 provided, uint256 minimum);
+    error MarketMaxFeeTooHigh(uint256 provided, uint256 maximum);
+    error MarketMinStakeTooLow(uint256 provided, uint256 minimum);
+
+    // Bidding & reveal & submission & refund errors
     error MarketBiddingPhaseEnded(uint256 currentTime, uint256 biddingEndTime);
     error MarketBiddingPhaseNotEnded(uint256 currentTime, uint256 biddingEndTime);
     error MarketRevealPhaseEnded(uint256 currentTime, uint256 revealEndTime);
     error MarketRevealPhaseNotEnded(uint256 currentTime, uint256 revealEndTime);
     error MarketBidRevealMismatch(bytes32 expected, bytes32 actual);
     error MarketFeeExceedsMaximum(uint256 fee, uint256 maxFee);
-    error MarketMaxFeeTooLow(uint256 provided, uint256 minimum);
-    error MarketMaxFeeTooHigh(uint256 provided, uint256 maximum);
-    error MarketMinStakeTooLow(uint256 provided, uint256 minimum);
     error MarketDeadlinePassed(uint256 currentTime, uint256 deadline);
     error MarketNotExpectedProver(address expected, address actual);
-    error MarketInvalidRequestStatus(ReqStatus status);
-    error MarketBeforeDeadline(uint256 currentTime, uint256 deadline);
-    error MarketCannotRefundYet(uint256 currentTime, uint256 deadline, uint256 biddingEndTime, uint256 revealEndTime);
     error MarketProverNotEligible(address prover, uint256 requiredStake, uint256 actualStake);
-    error MarketZeroAddress();
+    error MarketCannotRefundYet(uint256 currentTime, uint256 deadline, uint256 biddingEndTime, uint256 revealEndTime);
+
+    // Slashing errors
+    error MarketBeforeDeadline(uint256 currentTime, uint256 deadline);
     error MarketInvalidStakingController();
     error MarketInvalidSlashBps();
     error MarketSlashWindowExpired(uint256 currentTime, uint256 slashWindowEnd);
     error MarketNoAssignedProverToSlash(bytes32 reqid);
+
+    // Admin errors
     error MarketInvalidProtocolFeeBps();
     error MarketNoProtocolFeeToWithdraw();
+    error MarketInvalidStatsEpochStart(uint64 lastStartAt, uint64 newStartAt);
+    error MarketNoFutureEpochToPop();
+    error MarketCannotPopStartedEpoch(uint64 startAt, uint64 currentTime);
 
     // Prover submitter management errors
     error MarketCannotRegisterSelf();
@@ -398,10 +411,16 @@ interface IBrevisMarket {
     // =========================================================================
 
     /**
-     * @notice Reset stats window start and bump epoch id
-     * @param newStartAt New start timestamp (0 = now)
+     * @notice Schedule or start a new stats-epoch
+     * @param startAt New epoch start timestamp (0 = now). Must be strictly greater than the last scheduled start.
      */
-    function resetStats(uint64 newStartAt) external;
+    function scheduleStatsEpoch(uint64 startAt) external;
+
+    /**
+     * @notice Pop the most recently scheduled stats-epoch if it has not started yet
+     * @dev Only affects the last appended epoch; restores previous epoch's endAt to 0
+     */
+    function popStatsEpoch() external;
 
     /**
      * @notice Get lifetime (cumulative) stats for a prover
@@ -410,31 +429,46 @@ interface IBrevisMarket {
 
     /**
      * @notice Get recent (since last reset) stats for a prover
-     * @dev Alias of getProverStatsWindow for readability
+     * @return stats Recent stats for the prover
+     * @return startAt Timestamp when the recent stats epoch started
      */
-    function getProverRecentStats(address prover) external view returns (ProverStats memory);
+    function getProverRecentStats(address prover) external view returns (ProverStats memory stats, uint64 startAt);
 
     /**
-     * @notice Get current recent stats window metadata
-     * @dev Alias of getStatsWindowInfo for readability
-     * @return startAt Window start timestamp
+     * @notice Get current recent stats epoch metadata
+     * @return startAt Epoch start timestamp
      * @return epochId Current epoch identifier
      */
     function getRecentStatsInfo() external view returns (uint64 startAt, uint64 epochId);
 
     /**
-     * @notice Get the start/end timestamps for a past or current epoch
-     * @dev endAt = 0 means the epoch is ongoing (current epoch)
+     * @notice Current epoch id (index into statsEpochs)
+     * @dev Mirrors the public variable in the implementation for interface-only access
      */
-    function getStatsEpochInfo(uint64 epochId) external view returns (uint64 startAt, uint64 endAt);
+    function statsEpochId() external view returns (uint64 epochId);
 
     /**
-     * @notice Get the latest (current) epoch id
+     * @notice Get stats-epoch metadata by index
+     * @dev Mirrors the public array getter in the implementation for interface-only access
+     * @param index Epoch index
+     * @return startAt Epoch start timestamp
+     * @return endAt Epoch end timestamp (0 if ongoing)
      */
-    function getLatestStatsEpochId() external view returns (uint64 epochId);
+    function statsEpochs(uint256 index) external view returns (uint64 startAt, uint64 endAt);
 
     /**
-     * @notice Get a prover's stats for a specific epoch
+     * @notice Get the number of scheduled epochs
      */
-    function getProverStatsForStatsEpoch(address prover, uint64 epochId) external view returns (ProverStats memory);
+    function statsEpochsLength() external view returns (uint256);
+
+    /**
+     * @notice Get a prover's stats for a specific epoch along with epoch start/end
+     * @return stats Prover's stats in the epoch
+     * @return startAt Epoch start timestamp
+     * @return endAt Epoch end timestamp (0 if ongoing)
+     */
+    function getProverStatsForStatsEpoch(address prover, uint64 epochId)
+        external
+        view
+        returns (ProverStats memory stats, uint64 startAt, uint64 endAt);
 }
