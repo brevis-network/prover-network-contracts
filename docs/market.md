@@ -39,7 +39,7 @@ struct ProofRequest {
     bytes32 vk;                  // ZK circuit verification key
     bytes32 publicValuesDigest;  // Public input hash
     string imgURL;               // ELF binary URL (optional)
-    bytem,k,s inputData;             // Input data (alternative to URL)
+    bytes inputData;             // Input data (alternative to URL)
     string inputURL;             // Input data URL (alternative to data)
     FeeParams fee;               // Payment parameters
 }
@@ -168,12 +168,12 @@ BrevisMarket tracks prover activity for explorer/analytics via lifetime totals a
 
 ```solidity
 struct ProverStats {
-    uint64 bids; // total bids placed
-    uint64 reveals; // total bids revealed
-    uint64 wins; // total bids won
-    uint64 requestsFulfilled; // total requests successfully fulfilled (proofs delivered)
-    uint64 lastActiveAt; // timestamp of last tracked activity
-    uint256 feeReceived; // total rewards (after protocol fee) sent to the prover
+    uint64 bids;              // total bids placed
+    uint64 reveals;           // total bids revealed
+    uint64 wins;              // assignments (times the prover was current winner)
+    uint64 requestsFulfilled; // successful request fulfillments (proofs delivered)
+    uint64 lastActiveAt;      // last activity timestamp (only on the prover's own actions)
+    uint256 feeReceived;      // total rewards (after protocol fee) sent to the prover
 }
 ```
 

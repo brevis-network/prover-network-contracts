@@ -287,7 +287,7 @@ function batchPreviewStake(address[] calldata provers, uint256[] calldata assets
 
 #### StakingController - Direct Queries (Use Sparingly)
 
-**Basic System Parameters**
+Basic System Parameters
 ```solidity
 // Get system settings
 function minSelfStake() external view returns (uint256 amount);
@@ -299,7 +299,7 @@ function getActiveProvers() external view returns (address[] memory provers);
 function getAllProvers() external view returns (address[] memory provers);
 ```
 
-**Single Value Queries**
+Single Value Queries
 ```solidity
 // When you only need a specific single value
 function getProverState(address prover) external view returns (ProverState state);
@@ -315,12 +315,12 @@ BrevisMarket exposes per-prover activity and performance stats tailored for expl
 #### Struct
 ```solidity
 struct ProverStats {
-    uint64 bids;          // total bids placed
-    uint64 reveals;       // total bids revealed
-    uint64 wins;          // assignments (times the prover was current winner)
+    uint64 bids;              // total bids placed
+    uint64 reveals;           // total bids revealed
+    uint64 wins;              // assignments (times the prover was current winner)
     uint64 requestsFulfilled; // successful request fulfillments (proofs delivered)
-    uint64 lastActiveAt;  // last activity timestamp (only on the prover's own actions)
-    uint256 feeReceived;  // total rewards (after protocol fee) sent to the prover
+    uint64 lastActiveAt;      // last activity timestamp (only on the prover's own actions)
+    uint256 feeReceived;      // total rewards (after protocol fee) sent to the prover
 }
 ```
 
@@ -370,8 +370,8 @@ const currentEpochStats = await brevisMarket.getProverStatsForStatsEpoch(proverA
 
 // Inspect previous epoch
 if (latestEpochId > 1) {
-        const [prevStart, prevEnd] = await brevisMarket.getStatsEpochInfo(latestEpochId - 1);
-        const prevStats = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, latestEpochId - 1);
+    const [prevStart, prevEnd] = await brevisMarket.getStatsEpochInfo(latestEpochId - 1);
+    const prevStats = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, latestEpochId - 1);
     // prevEnd equals currentStart after a reset
 }
 ```
