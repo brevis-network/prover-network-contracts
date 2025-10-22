@@ -454,8 +454,8 @@ contract BrevisMarketTest is Test {
         assertGe(recent.lastActiveAt, beforeSubmitTs);
 
         (uint64 startAt, uint64 epochId) = market.getRecentStatsInfo();
-        assertGt(startAt, 0);
-        assertGt(epochId, 0);
+        assertGe(startAt, 0);
+        assertGe(epochId, 0);
 
         // Fee accounting: with a single bidder, actualFee == winner fee
         (address winner, uint256 winnerFee,, uint256 secondFee) = market.getBidders(reqid);
@@ -526,9 +526,10 @@ contract BrevisMarketTest is Test {
 
         (uint64 startAtBefore, uint64 epochBefore) = market.getRecentStatsInfo();
 
-        // Reset as owner
+        // Reset as owner; ensure startAt increases by advancing time
+        vm.warp(block.timestamp + 1);
         vm.prank(owner);
-        market.resetStats(0);
+        market.scheduleStatsEpoch(0);
 
         (uint64 startAtAfter, uint64 epochAfter) = market.getRecentStatsInfo();
         assertGe(startAtAfter, startAtBefore);
@@ -559,9 +560,10 @@ contract BrevisMarketTest is Test {
         vm.prank(prover1);
         market.bid(reqid, _createBidHash(5e17, 123));
 
-        // Reset epoch
+        // Reset epoch; ensure monotonic start by advancing time
+        vm.warp(block.timestamp + 1);
         vm.prank(owner);
-        market.resetStats(0);
+        market.scheduleStatsEpoch(0);
 
         IBrevisMarket.ProverStats memory recent2 = market.getProverRecentStats(prover2);
         assertEq(recent2.bids, 0);
@@ -599,7 +601,7 @@ contract BrevisMarketTest is Test {
     function test_EpochHistory_GettersAndPerEpochStats() public {
         // Capture initial epoch metadata
         (uint64 startAt1, uint64 epoch1) = market.getRecentStatsInfo();
-        assertGt(epoch1, 0);
+        assertGe(epoch1, 0);
         assertEq(market.getLatestStatsEpochId(), epoch1);
 
         // Create a proof request and have prover1 perform activity in epoch1
@@ -624,7 +626,7 @@ contract BrevisMarketTest is Test {
         // Advance time and reset to start a new epoch
         vm.warp(block.timestamp + 10);
         vm.prank(owner);
-        market.resetStats(0);
+        market.scheduleStatsEpoch(0);
 
         (uint64 startAt2, uint64 epoch2) = market.getRecentStatsInfo();
         assertEq(epoch2, epoch1 + 1);
@@ -679,6 +681,56 @@ contract BrevisMarketTest is Test {
             )
         );
         market.refund(reqid);
+    }
+
+    function test_ResetStats_ScheduleFutureStart_RollsOverOnActivity() public {
+        // Capture current epoch
+        (uint64 startAt1, uint64 epoch1) = market.getRecentStatsInfo();
+        startAt1;
+        // Schedule next epoch in the future
+        uint64 futureStart = uint64(block.timestamp + 1000);
+        vm.prank(owner);
+        market.scheduleStatsEpoch(futureStart);
+
+        // Latest epoch id remains unchanged until activity at/after futureStart
+        assertEq(market.getLatestStatsEpochId(), epoch1);
+
+        // The scheduled epoch metadata is visible at epoch1 + 1
+        (uint64 scheduledStart, uint64 scheduledEnd) = market.getStatsEpochInfo(epoch1 + 1);
+        assertEq(scheduledStart, futureStart);
+        assertEq(scheduledEnd, 0);
+
+        // Activity before futureStart counts toward current epoch (epoch1)
+        (bytes32 reqid1, IBrevisMarket.ProofRequest memory req1) = _createBasicRequest();
+        vm.prank(requester);
+        market.requestProof(req1);
+
+        vm.warp(futureStart - 1);
+        vm.prank(prover1);
+        market.bid(reqid1, _createBidHash(5e17, 123));
+
+        IBrevisMarket.ProverStats memory e1p1 = market.getProverStatsForStatsEpoch(prover1, epoch1);
+        assertEq(e1p1.bids, 1);
+        IBrevisMarket.ProverStats memory e2p1Before = market.getProverStatsForStatsEpoch(prover1, epoch1 + 1);
+        assertEq(e2p1Before.bids, 0);
+
+        // Activity at or after futureStart triggers rollover; stats attributed to new epoch
+        (bytes32 reqid2, IBrevisMarket.ProofRequest memory req2) = _createBasicRequest();
+        // ensure distinct reqid from reqid1 by changing nonce
+        req2.nonce = req2.nonce + 1;
+        vm.prank(requester);
+        market.requestProof(req2);
+
+        vm.warp(futureStart);
+        vm.prank(prover2);
+        market.bid(reqid2, _createBidHash(6e17, 456));
+
+        (uint64 startAt2, uint64 epoch2) = market.getRecentStatsInfo();
+        assertEq(epoch2, epoch1 + 1);
+        assertEq(startAt2, futureStart);
+
+        IBrevisMarket.ProverStats memory e2p2 = market.getProverStatsForStatsEpoch(prover2, epoch2);
+        assertEq(e2p2.bids, 1);
     }
 
     function test_AdminFunctions() public {

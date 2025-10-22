@@ -180,7 +180,7 @@ struct ProverStats {
 ### APIs
 - Lifetime totals per prover: immutable aggregates since genesis
   - `getProverStatsTotal(address prover)` → ProverStats
-- Recent (current stats-epoch): rolling window since the last reset
+- Recent (current stats-epoch): rolling window since the last scheduled epoch started
   - `getProverRecentStats(address prover)` → ProverStats
   - `getRecentStatsInfo()` → (startAt, epochId)
 - Historical stats-epochs: on-chain time-bounded buckets
@@ -189,10 +189,13 @@ struct ProverStats {
   - `getProverStatsForStatsEpoch(address prover, uint64 epochId)` → ProverStats
 
 ### Semantics
-- ProverStats includes: bids, reveals, wins (assigned), submissions (proofs delivered), lastActiveAt.
-- Derived metric missed = wins − submissions.
+- ProverStats includes: bids, reveals, wins (assigned), requestsFulfilled (proofs delivered), lastActiveAt, feeReceived.
+- Derived metric missed = wins − requestsFulfilled.
 - On bid/reveal/submit, both the lifetime total and current stats-epoch buckets are updated.
-- resetStats(newStartAt) [admin]: closes the previous stats-epoch (sets its endAt to the new epoch’s startAt) and opens a new one at newStartAt (or block.timestamp if 0). Recent == stats for the latest stats-epoch.
+- scheduleStatsEpoch(startAt) [admin, startAt strictly greater than last start]:
+  - Sets the previous epoch’s `endAt` to `startAt` immediately (this may be in the future), then appends a new epoch starting at `startAt`.
+  - If `startAt == 0` (interpreted as now), the new epoch becomes current immediately. Otherwise, the rollover occurs lazily on the first stats-changing action at/after `startAt`, emitting `StatsReset(newEpochId, startAt)`.
+  - Recent == stats for the latest (current) stats-epoch.
 
 ---
 

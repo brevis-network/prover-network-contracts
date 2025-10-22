@@ -77,6 +77,7 @@ interface IBrevisMarket {
     event ProtocolFeeBpsUpdated(uint256 oldBps, uint256 newBps);
     event ProtocolFeeWithdrawn(address indexed to, uint256 amount);
     event StatsReset(uint64 newEpochId, uint64 statsStartAt);
+    event StatsEpochScheduled(uint64 scheduledStartAt);
 
     // Prover submitter management events
     event SubmitterRegistered(address indexed prover, address indexed submitter);
@@ -114,6 +115,8 @@ interface IBrevisMarket {
     error MarketNoAssignedProverToSlash(bytes32 reqid);
     error MarketInvalidProtocolFeeBps();
     error MarketNoProtocolFeeToWithdraw();
+    error MarketInvalidStatsEpochStart(uint64 lastStartAt, uint64 newStartAt);
+    // (no stats admin errors currently)
 
     // Prover submitter management errors
     error MarketCannotRegisterSelf();
@@ -398,10 +401,10 @@ interface IBrevisMarket {
     // =========================================================================
 
     /**
-     * @notice Reset stats window start and bump epoch id
-     * @param newStartAt New start timestamp (0 = now)
+     * @notice Schedule or start a new stats-epoch
+     * @param startAt New epoch start timestamp (0 = now). Must be strictly greater than the last scheduled start.
      */
-    function resetStats(uint64 newStartAt) external;
+    function scheduleStatsEpoch(uint64 startAt) external;
 
     /**
      * @notice Get lifetime (cumulative) stats for a prover

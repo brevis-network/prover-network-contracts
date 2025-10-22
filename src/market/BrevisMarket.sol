@@ -76,11 +76,11 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         uint64 endAt;
     }
 
-    mapping(uint64 => StatsEpochInfo) public statsEpochs;
+    // Stats-epoch metadata history as an ordered array (epochId == index)
+    StatsEpochInfo[] public statsEpochs;
 
-    // Windowed stats are represented by the current epoch entry in proverStatsByEpoch
-    uint64 private _statsStartAt;
-    uint64 private _statsEpochId;
+    // Current epoch id (index into statsEpochs). Advanced lazily on activity.
+    uint64 public statsEpochId;
 
     // Storage gap for future upgrades. Reserves 40 slots.
     uint256[40] private __gap;
@@ -109,10 +109,9 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         // Only initialize if non-zero values are provided (direct deployment)
         if (address(_picoVerifier) != address(0) && address(_stakingController) != address(0)) {
             _init(_picoVerifier, _stakingController, _biddingPhaseDuration, _revealPhaseDuration, _minMaxFee);
-            // Initialize stats window for direct deployments
-            _statsStartAt = uint64(block.timestamp);
-            _statsEpochId = 1;
-            statsEpochs[_statsEpochId].startAt = _statsStartAt;
+            // Initialize stats epochs for direct deployments
+            statsEpochs.push(StatsEpochInfo({startAt: uint64(block.timestamp), endAt: 0}));
+            statsEpochId = 0;
         }
         // For upgradeable deployment, pass zero addresses and call init() separately
     }
@@ -135,10 +134,9 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     ) external {
         _init(_picoVerifier, _stakingController, _biddingPhaseDuration, _revealPhaseDuration, _minMaxFee);
         initOwner(); // requires _owner == address(0), which is only possible when it's a delegateCall
-        // Initialize stats window
-        _statsStartAt = uint64(block.timestamp);
-        _statsEpochId = 1;
-        statsEpochs[_statsEpochId].startAt = _statsStartAt;
+        // Initialize stats epochs
+        statsEpochs.push(StatsEpochInfo({startAt: uint64(block.timestamp), endAt: 0}));
+        statsEpochId = 0;
     }
 
     /**
@@ -224,6 +222,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
      * @param bidHash Keccak256 hash of (fee, nonce) - keeps bid secret until reveal
      */
     function bid(bytes32 reqid, bytes32 bidHash) external override {
+        // Advance epoch id if any scheduled epoch start has passed
+        _syncStatsEpochId();
         ReqState storage req = requests[reqid];
 
         // Validate request exists
@@ -270,6 +270,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
      * @param nonce The nonce that was used in the hash
      */
     function reveal(bytes32 reqid, uint256 fee, uint256 nonce) external override {
+        // Advance epoch id if any scheduled epoch start has passed
+        _syncStatsEpochId();
         ReqState storage req = requests[reqid];
 
         // Validate request exists
@@ -319,6 +321,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
      * @param proof The zk proof as uint256[8] array
      */
     function submitProof(bytes32 reqid, uint256[8] calldata proof) external override nonReentrant {
+        // Advance epoch id if any scheduled epoch start has passed
+        _syncStatsEpochId();
         ReqState storage req = requests[reqid];
 
         // Validate timing and authorization
@@ -647,13 +651,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     // =========================================================================
 
     /**
-     * @notice Return the current epoch's stats storage for a prover
-     */
-    function _epochStats(address prover) internal view returns (ProverStats storage s) {
-        return proverStatsByEpoch[prover][_statsEpochId];
-    }
-
-    /**
      * @notice Update the two lowest bidders for a request
      * @dev Maintains sorted order of winner and second-place bidders
      * @param req Storage reference to the request state
@@ -710,20 +707,24 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
     /**
      * @notice Reset stats window start and bump epoch id
-     * @param newStartAt New start timestamp (0 = now)
+     * @param startAt New start timestamp (0 = now)
      */
-    function resetStats(uint64 newStartAt) external override onlyOwner {
-        uint64 prevId = _statsEpochId;
-        uint64 nextStart = newStartAt == 0 ? uint64(block.timestamp) : newStartAt;
-        // Close previous epoch
-        if (prevId != 0) {
-            statsEpochs[prevId].endAt = nextStart; // end just before the new epoch starts
+    function scheduleStatsEpoch(uint64 startAt) external override onlyOwner {
+        uint64 s = startAt == 0 ? uint64(block.timestamp) : startAt;
+        // Validate strictly increasing start times
+        if (statsEpochs.length > 0) {
+            uint64 lastStart = statsEpochs[statsEpochs.length - 1].startAt;
+            if (s <= lastStart) revert MarketInvalidStatsEpochStart(lastStart, s);
+            // Set previous epoch's endAt immediately to the new start (can be in the future)
+            statsEpochs[statsEpochs.length - 1].endAt = s;
         }
-        // Open new epoch
-        _statsEpochId = prevId + 1;
-        _statsStartAt = nextStart;
-        statsEpochs[_statsEpochId].startAt = _statsStartAt;
-        emit StatsReset(_statsEpochId, _statsStartAt);
+        // Append new epoch with endAt unset (0)
+        statsEpochs.push(StatsEpochInfo({startAt: s, endAt: 0}));
+        emit StatsEpochScheduled(s);
+        // If start is now or earlier (only possible when startAt==0 -> now), advance immediately
+        if (s <= uint64(block.timestamp)) {
+            _syncStatsEpochId();
+        }
     }
 
     /**
@@ -734,26 +735,37 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     }
 
     /**
-     * @notice Get window (since last reset) stats for a prover
+     * @notice Get recent stats (current epoch) for a prover
      */
-    // Recent stats == stats in the current epoch
     function getProverRecentStats(address prover) external view override returns (ProverStats memory) {
-        return proverStatsByEpoch[prover][_statsEpochId];
+        return proverStatsByEpoch[prover][statsEpochId];
     }
 
+    /**
+     * @notice Get recent stats epoch info
+     */
     function getRecentStatsInfo() external view override returns (uint64 startAt, uint64 epochId) {
-        return (_statsStartAt, _statsEpochId);
+        return (statsEpochs[statsEpochId].startAt, statsEpochId);
     }
 
+    /**
+     * @notice Get stats epoch info for a specific epoch id
+     */
     function getStatsEpochInfo(uint64 epochId) external view override returns (uint64 startAt, uint64 endAt) {
         StatsEpochInfo storage info = statsEpochs[epochId];
         return (info.startAt, info.endAt);
     }
 
+    /**
+     * @notice Get the latest stats epoch id
+     */
     function getLatestStatsEpochId() external view override returns (uint64 epochId) {
-        return _statsEpochId;
+        return statsEpochId;
     }
 
+    /**
+     * @notice Get stats for a prover for a specific epoch id
+     */
     function getProverStatsForStatsEpoch(address prover, uint64 epochId)
         external
         view
@@ -761,5 +773,29 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         returns (ProverStats memory)
     {
         return proverStatsByEpoch[prover][epochId];
+    }
+
+    /**
+     * @notice If a future epoch was scheduled and its start time has passed, roll over to the new epoch
+     * @dev This is invoked lazily by stats-mutating functions (bid/reveal/submitProof)
+     */
+    function _syncStatsEpochId() internal {
+        // If a future epoch has been appended and its start time has arrived, advance statsEpochId
+        // Multiple scheduled epochs can be advanced in sequence if time has progressed far
+        while (statsEpochId + 1 < statsEpochs.length) {
+            uint64 nextStart = statsEpochs[statsEpochId + 1].startAt;
+            if (uint64(block.timestamp) < nextStart) break;
+            // Close current epoch at nextStart upon rollover
+            statsEpochs[statsEpochId].endAt = nextStart;
+            statsEpochId += 1;
+            emit StatsReset(statsEpochId, statsEpochs[statsEpochId].startAt);
+        }
+    }
+
+    /**
+     * @notice Return the current epoch's stats storage for a prover
+     */
+    function _epochStats(address prover) internal view returns (ProverStats storage s) {
+        return proverStatsByEpoch[prover][statsEpochId];
     }
 }

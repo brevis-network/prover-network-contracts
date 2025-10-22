@@ -335,8 +335,10 @@ function getProverRecentStats(address prover) external view returns (ProverStats
 // Current epoch metadata
 function getRecentStatsInfo() external view returns (uint64 startAt, uint64 epochId);
 
-// Admin: reset the recent window (startAt=0 uses current block timestamp)
-function resetStats(uint64 newStartAt) external;
+// Admin: schedule or start a new epoch
+// - If startAt == 0: start now and become current immediately
+// - If startAt > now: schedule a future epoch; becomes current lazily on next stats-changing action
+function scheduleStatsEpoch(uint64 startAt) external;
 
 // Epoch history
 function getStatsEpochInfo(uint64 epochId) external view returns (uint64 startAt, uint64 endAt);
@@ -346,8 +348,8 @@ function getProverStatsForStatsEpoch(address prover, uint64 epochId) external vi
 
 #### Semantics
 - wins: incremented on assignment changes during reveal; reflects how many requests a prover was assigned (won).
-- submissions: incremented only on successful proof submission.
-- missed (derived): `wins - submissions`.
+- requestsFulfilled: incremented only on successful proof submission.
+- missed (derived): `wins - requestsFulfilled`.
 - lastActiveAt: updated on the prover’s own bid/reveal/submit.
 
 #### Epochs, Recent, and Totals
@@ -356,7 +358,10 @@ function getProverStatsForStatsEpoch(address prover, uint64 epochId) external vi
     - startAt: the timestamp when the epoch started
     - endAt: the timestamp when the epoch ended; 0 if the epoch is ongoing
 - Recent is simply the stats of the current (latest) epoch.
-- `resetStats(newStartAt)` closes the previous epoch (sets its endAt to the new epoch's startAt) and opens a new epoch at `newStartAt` (or `block.timestamp` if 0). Per-epoch counters for the new epoch start at zero.
+- `scheduleStatsEpoch(startAt)` behavior (startAt must be strictly greater than the last scheduled start):
+        - If `startAt == 0` (interpreted as now), the market sets the previous epoch's `endAt` to now, appends a new epoch that starts now, and becomes current immediately.
+        - If `startAt > block.timestamp`, the market sets the previous epoch's `endAt` to `startAt`, appends a future epoch, and emits `StatsEpochScheduled(startAt)`. The rollover occurs lazily on the first stats-changing action (bid/reveal/submit) at/after `startAt`, emitting `StatsReset(newEpochId, startAt)`.
+    - Note: With scheduling, a previous epoch can have a non-zero `endAt` in the future.
 
 #### Example: Browsing Epoch History
 ```typescript
