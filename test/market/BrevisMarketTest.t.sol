@@ -446,7 +446,7 @@ contract BrevisMarketTest is Test {
         assertEq(total.requestsFulfilled, 1);
         assertGe(total.lastActiveAt, beforeSubmitTs);
 
-        IBrevisMarket.ProverStats memory recent = market.getProverRecentStats(prover1);
+        (IBrevisMarket.ProverStats memory recent,) = market.getProverRecentStats(prover1);
         assertEq(recent.bids, 1);
         assertEq(recent.reveals, 1);
         assertEq(recent.wins, 1);
@@ -468,7 +468,7 @@ contract BrevisMarketTest is Test {
 
         // total and recent should reflect the reward paid to the prover
         total = market.getProverStatsTotal(prover1);
-        recent = market.getProverRecentStats(prover1);
+        (recent,) = market.getProverRecentStats(prover1);
         assertEq(total.feeReceived, expectedReward);
         assertEq(recent.feeReceived, expectedReward);
     }
@@ -509,8 +509,8 @@ contract BrevisMarketTest is Test {
         assertEq(t1After.lastActiveAt, p1LastActive);
 
         // Recent stats mirror totals
-        IBrevisMarket.ProverStats memory r1 = market.getProverRecentStats(prover1);
-        IBrevisMarket.ProverStats memory r2 = market.getProverRecentStats(prover2);
+        (IBrevisMarket.ProverStats memory r1,) = market.getProverRecentStats(prover1);
+        (IBrevisMarket.ProverStats memory r2,) = market.getProverRecentStats(prover2);
         assertEq(r1.wins, 0);
         assertEq(r2.wins, 1);
     }
@@ -536,7 +536,7 @@ contract BrevisMarketTest is Test {
         assertEq(epochAfter, epochBefore + 1);
 
         // Recent stats cleared for prover1 until new activity
-        IBrevisMarket.ProverStats memory recent1 = market.getProverRecentStats(prover1);
+        (IBrevisMarket.ProverStats memory recent1,) = market.getProverRecentStats(prover1);
         assertEq(recent1.bids, 0);
         assertEq(recent1.reveals, 0);
         assertEq(recent1.wins, 0);
@@ -565,7 +565,7 @@ contract BrevisMarketTest is Test {
         vm.prank(owner);
         market.scheduleStatsEpoch(0);
 
-        IBrevisMarket.ProverStats memory recent2 = market.getProverRecentStats(prover2);
+        (IBrevisMarket.ProverStats memory recent2,) = market.getProverRecentStats(prover2);
         assertEq(recent2.bids, 0);
         assertEq(recent2.reveals, 0);
         assertEq(recent2.wins, 0);
@@ -602,7 +602,7 @@ contract BrevisMarketTest is Test {
         // Capture initial epoch metadata
         (uint64 startAt1, uint64 epoch1) = market.getRecentStatsInfo();
         assertGe(epoch1, 0);
-        assertEq(market.getLatestStatsEpochId(), epoch1);
+        assertEq(market.statsEpochId(), epoch1);
 
         // Create a proof request and have prover1 perform activity in epoch1
         (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
@@ -613,7 +613,7 @@ contract BrevisMarketTest is Test {
         market.bid(reqid, _createBidHash(5e17, 123));
 
         // Recent == current epoch stats
-        IBrevisMarket.ProverStats memory recent1e1 = market.getProverRecentStats(prover1);
+        (IBrevisMarket.ProverStats memory recent1e1,) = market.getProverRecentStats(prover1);
         IBrevisMarket.ProverStats memory e1p1 = market.getProverStatsForStatsEpoch(prover1, epoch1);
         assertEq(recent1e1.bids, 1);
         assertEq(e1p1.bids, 1);
@@ -630,11 +630,11 @@ contract BrevisMarketTest is Test {
 
         (uint64 startAt2, uint64 epoch2) = market.getRecentStatsInfo();
         assertEq(epoch2, epoch1 + 1);
-        assertEq(market.getLatestStatsEpochId(), epoch2);
+        assertEq(market.statsEpochId(), epoch2);
 
         // Previous epoch endAt should equal the new epoch startAt; current epoch endAt is 0
-        (uint64 e1Start, uint64 e1End) = market.getStatsEpochInfo(epoch1);
-        (uint64 e2Start, uint64 e2End) = market.getStatsEpochInfo(epoch2);
+        (uint64 e1Start, uint64 e1End) = market.statsEpochs(epoch1);
+        (uint64 e2Start, uint64 e2End) = market.statsEpochs(epoch2);
         assertEq(e1Start, startAt1);
         assertEq(e1End, startAt2);
         assertEq(e2Start, startAt2);
@@ -650,7 +650,7 @@ contract BrevisMarketTest is Test {
         vm.prank(prover2);
         market.bid(reqid, _createBidHash(6e17, 456));
 
-        IBrevisMarket.ProverStats memory recent2e2 = market.getProverRecentStats(prover2);
+        (IBrevisMarket.ProverStats memory recent2e2,) = market.getProverRecentStats(prover2);
         IBrevisMarket.ProverStats memory e2p2 = market.getProverStatsForStatsEpoch(prover2, epoch2);
         assertEq(recent2e2.bids, 1);
         assertEq(e2p2.bids, 1);
@@ -693,10 +693,10 @@ contract BrevisMarketTest is Test {
         market.scheduleStatsEpoch(futureStart);
 
         // Latest epoch id remains unchanged until activity at/after futureStart
-        assertEq(market.getLatestStatsEpochId(), epoch1);
+        assertEq(market.statsEpochId(), epoch1);
 
         // The scheduled epoch metadata is visible at epoch1 + 1
-        (uint64 scheduledStart, uint64 scheduledEnd) = market.getStatsEpochInfo(epoch1 + 1);
+        (uint64 scheduledStart, uint64 scheduledEnd) = market.statsEpochs(epoch1 + 1);
         assertEq(scheduledStart, futureStart);
         assertEq(scheduledEnd, 0);
 

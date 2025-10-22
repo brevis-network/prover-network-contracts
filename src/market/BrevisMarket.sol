@@ -737,8 +737,13 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     /**
      * @notice Get recent stats (current epoch) for a prover
      */
-    function getProverRecentStats(address prover) external view override returns (ProverStats memory) {
-        return proverStatsByEpoch[prover][statsEpochId];
+    function getProverRecentStats(address prover)
+        external
+        view
+        override
+        returns (ProverStats memory stats, uint64 startAt)
+    {
+        return (proverStatsByEpoch[prover][statsEpochId], statsEpochs[statsEpochId].startAt);
     }
 
     /**
@@ -746,21 +751,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
      */
     function getRecentStatsInfo() external view override returns (uint64 startAt, uint64 epochId) {
         return (statsEpochs[statsEpochId].startAt, statsEpochId);
-    }
-
-    /**
-     * @notice Get stats epoch info for a specific epoch id
-     */
-    function getStatsEpochInfo(uint64 epochId) external view override returns (uint64 startAt, uint64 endAt) {
-        StatsEpochInfo storage info = statsEpochs[epochId];
-        return (info.startAt, info.endAt);
-    }
-
-    /**
-     * @notice Get the latest stats epoch id
-     */
-    function getLatestStatsEpochId() external view override returns (uint64 epochId) {
-        return statsEpochId;
     }
 
     /**
