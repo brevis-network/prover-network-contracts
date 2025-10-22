@@ -187,7 +187,7 @@ struct ProverStats {
   - `statsEpochId()` → current epoch id
   - `statsEpochs(uint256 index)` → (startAt, endAt) where endAt = 0 while ongoing
   - `statsEpochsLength()` → number of epochs
-  - `getProverStatsForStatsEpoch(address prover, uint64 epochId)` → ProverStats
+  - `getProverStatsForStatsEpoch(address prover, uint64 epochId)` → (ProverStats stats, uint64 startAt, uint64 endAt)
 
 ### Semantics
 - ProverStats includes: bids, reveals, wins (assigned), requestsFulfilled (proofs delivered), lastActiveAt, feeReceived.

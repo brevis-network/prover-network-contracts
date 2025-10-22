@@ -780,9 +780,9 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         external
         view
         override
-        returns (ProverStats memory)
+        returns (ProverStats memory stats, uint64 startAt, uint64 endAt)
     {
-        return proverStatsByEpoch[prover][epochId];
+        return (proverStatsByEpoch[prover][epochId], statsEpochs[epochId].startAt, statsEpochs[epochId].endAt);
     }
 
     /**

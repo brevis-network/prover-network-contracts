@@ -340,8 +340,9 @@ function statsEpochId() external view returns (uint64 epochId);
 function statsEpochs(uint256 index) external view returns (uint64 startAt, uint64 endAt);
 function statsEpochsLength() external view returns (uint256);
 
-// Per-epoch stats
-function getProverStatsForStatsEpoch(address prover, uint64 epochId) external view returns (ProverStats memory);
+// Per-epoch stats with epoch metadata
+function getProverStatsForStatsEpoch(address prover, uint64 epochId)
+    external view returns (ProverStats memory stats, uint64 startAt, uint64 endAt);
 ```
 
 #### Semantics
@@ -364,13 +365,13 @@ const [currentStart, currentEnd] = await brevisMarket.statsEpochs(epochId); // c
 
 // Recent == current epoch stats
 const [recent, recentStart] = await brevisMarket.getProverRecentStats(proverAddress);
-const currentEpochStats = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, epochId);
+const [currentEpochStats, startAt0, endAt0] = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, epochId);
 // recent and currentEpochStats should match; recentStart == currentStart
 
 // Inspect previous epoch if any
 if (epochId > 0) {
     const [prevStart, prevEnd] = await brevisMarket.statsEpochs(epochId - 1);
-    const prevStats = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, epochId - 1);
+    const [prevStats, prevStart, prevEnd] = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, epochId - 1);
     // prevEnd equals currentStart after a reset
 }
 

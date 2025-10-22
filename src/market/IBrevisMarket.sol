@@ -468,7 +468,13 @@ interface IBrevisMarket {
     // Note: statsEpochId and statsEpochs are public; use those instead of explicit getters.
 
     /**
-     * @notice Get a prover's stats for a specific epoch
+     * @notice Get a prover's stats for a specific epoch along with epoch start/end
+     * @return stats Prover's stats in the epoch
+     * @return startAt Epoch start timestamp
+     * @return endAt Epoch end timestamp (0 if ongoing)
      */
-    function getProverStatsForStatsEpoch(address prover, uint64 epochId) external view returns (ProverStats memory);
+    function getProverStatsForStatsEpoch(address prover, uint64 epochId)
+        external
+        view
+        returns (ProverStats memory stats, uint64 startAt, uint64 endAt);
 }
