@@ -328,22 +328,10 @@ struct ProverStats {
 ```solidity
 // Lifetime totals
 function getProverStatsTotal(address prover) external view returns (ProverStats memory);
-
 // Recent stats for the CURRENT epoch + its start timestamp
 function getProverRecentStats(address prover) external view returns (ProverStats memory stats, uint64 startAt);
-
-// Current epoch metadata
-function getRecentStatsInfo() external view returns (uint64 startAt, uint64 epochId);
-
-// Epoch history accessors (via public getters)
-function statsEpochId() external view returns (uint64 epochId);
-function statsEpochs(uint256 index) external view returns (uint64 startAt, uint64 endAt);
-function statsEpochsLength() external view returns (uint256);
-
-// Per-epoch stats with epoch metadata
-function getProverStatsForStatsEpoch(address prover, uint64 epochId)
-    external view returns (ProverStats memory stats, uint64 startAt, uint64 endAt);
 ```
+More stats related view functions can be found at [IBrevisMarket.sol](../src/market/IBrevisMarket.sol#L425-L473)
 
 #### Semantics
 - wins: incremented on assignment changes during reveal; reflects how many requests a prover was assigned (won).
@@ -354,8 +342,7 @@ function getProverStatsForStatsEpoch(address prover, uint64 epochId)
 #### Epochs, Recent, and Totals
 - Totals: lifetime aggregate per prover.
 - Epochs: time-bounded buckets with startAt and endAt (0 while ongoing). Use `statsEpochId()`, `statsEpochs(i)`, and `statsEpochsLength()`.
-- Recent: the current epoch’s stats. Get startAt via `getProverRecentStats(..)` or `getRecentStatsInfo()`.
-- Rollover: when a new epoch becomes active, the previous epoch’s `endAt` equals the new epoch’s `startAt`. The rollover is applied lazily on the next stats-changing action at/after `startAt`.
+- Recent: the current epoch’s stats. Use `getProverRecentStats(..)`, `getRecentStatsInfo()`.
 
 #### Example: Browsing Epoch History
 ```typescript
