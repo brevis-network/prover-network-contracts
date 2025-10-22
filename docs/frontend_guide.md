@@ -330,7 +330,7 @@ The two major APIs for explorer frontend to use are:
 ```solidity
 // Lifetime totals
 function getProverStatsTotal(address prover) external view returns (ProverStats memory);
-// Recent stats for the CURRENT epoch + its start timestamp
+// Recent stats for the current epoch + its start timestamp
 function getProverRecentStats(address prover) external view returns (ProverStats memory stats, uint64 startAt);
 ```
 More stats-related view functions can be found at [IBrevisMarket.sol](../src/market/IBrevisMarket.sol#L425-L473)
@@ -343,8 +343,8 @@ More stats-related view functions can be found at [IBrevisMarket.sol](../src/mar
 
 #### Epochs, Recent, and Totals
 - Totals: lifetime aggregate per prover.
-- Epochs: time-bounded buckets with startAt and endAt (0 while ongoing). Use `statsEpochId()`, `statsEpochs(i)`, and `statsEpochsLength()`.
-- Recent: the current epoch’s stats. Use `getProverRecentStats(..)`, `getRecentStatsInfo()`.
+- Recent: the recent (current epoch’s) stats. Use `getProverRecentStats(..)`, `getRecentStatsInfo()`.
+- Epochs: time-bounded buckets with startAt and endAt (0 while ongoing).
 
 #### Example: Browsing Epoch History
 ```typescript
