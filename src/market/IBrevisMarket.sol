@@ -287,51 +287,6 @@ interface IBrevisMarket {
     function getProtocolFeeInfo() external view returns (uint256 feeBps, uint256 balance);
 
     // =========================================================================
-    // STATS VIEW & ADMIN (WINDOWED)
-    // =========================================================================
-
-    /**
-     * @notice Reset stats window start and bump epoch id
-     * @param newStartAt New start timestamp (0 = now)
-     */
-    function resetStats(uint64 newStartAt) external;
-
-    /**
-     * @notice Get lifetime (cumulative) stats for a prover
-     */
-    function getProverStatsTotal(address prover) external view returns (ProverStats memory);
-
-    /**
-     * @notice Get recent (since last reset) stats for a prover
-     * @dev Alias of getProverStatsWindow for readability
-     */
-    function getProverRecentStats(address prover) external view returns (ProverStats memory);
-
-    /**
-     * @notice Get current recent stats window metadata
-     * @dev Alias of getStatsWindowInfo for readability
-     * @return startAt Window start timestamp
-     * @return epochId Current epoch identifier
-     */
-    function getRecentStatsInfo() external view returns (uint64 startAt, uint64 epochId);
-
-    /**
-     * @notice Get the start/end timestamps for a past or current epoch
-     * @dev endAt = 0 means the epoch is ongoing (current epoch)
-     */
-    function getEpochInfo(uint64 epochId) external view returns (uint64 startAt, uint64 endAt);
-
-    /**
-     * @notice Get the latest (current) epoch id
-     */
-    function getLatestEpochId() external view returns (uint64 epochId);
-
-    /**
-     * @notice Get a prover's stats for a specific epoch
-     */
-    function getProverStatsForEpoch(address prover, uint64 epochId) external view returns (ProverStats memory);
-
-    // =========================================================================
     // REQUEST QUERY FUNCTIONS
     // =========================================================================
 
@@ -427,4 +382,49 @@ interface IBrevisMarket {
      * @param prover The prover address to grant consent to, or address(0) to revoke consent
      */
     function setSubmitterConsent(address prover) external;
+
+    // =========================================================================
+    // STATS VIEW & ADMIN
+    // =========================================================================
+
+    /**
+     * @notice Reset stats window start and bump epoch id
+     * @param newStartAt New start timestamp (0 = now)
+     */
+    function resetStats(uint64 newStartAt) external;
+
+    /**
+     * @notice Get lifetime (cumulative) stats for a prover
+     */
+    function getProverStatsTotal(address prover) external view returns (ProverStats memory);
+
+    /**
+     * @notice Get recent (since last reset) stats for a prover
+     * @dev Alias of getProverStatsWindow for readability
+     */
+    function getProverRecentStats(address prover) external view returns (ProverStats memory);
+
+    /**
+     * @notice Get current recent stats window metadata
+     * @dev Alias of getStatsWindowInfo for readability
+     * @return startAt Window start timestamp
+     * @return epochId Current epoch identifier
+     */
+    function getRecentStatsInfo() external view returns (uint64 startAt, uint64 epochId);
+
+    /**
+     * @notice Get the start/end timestamps for a past or current epoch
+     * @dev endAt = 0 means the epoch is ongoing (current epoch)
+     */
+    function getStatsEpochInfo(uint64 epochId) external view returns (uint64 startAt, uint64 endAt);
+
+    /**
+     * @notice Get the latest (current) epoch id
+     */
+    function getLatestStatsEpochId() external view returns (uint64 epochId);
+
+    /**
+     * @notice Get a prover's stats for a specific epoch
+     */
+    function getProverStatsForStatsEpoch(address prover, uint64 epochId) external view returns (ProverStats memory);
 }

@@ -65,17 +65,17 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
     mapping(address => ProverStats) public proverStats; // prover address -> stats
 
-    // Historical stats per epoch: prover => epochId => stats snapshot
+    // Historical stats per stats-epoch: prover => epochId => stats snapshot
     // Populated lazily when a prover's window rolls over to a new epoch
     mapping(address => mapping(uint64 => ProverStats)) public proverStatsByEpoch;
 
-    // Epoch metadata (start/end times). endAt = 0 means ongoing epoch.
-    struct EpochInfo {
+    // Stats-epoch metadata (start/end times). endAt = 0 means ongoing epoch.
+    struct StatsEpochInfo {
         uint64 startAt;
         uint64 endAt;
     }
 
-    mapping(uint64 => EpochInfo) public epochs;
+    mapping(uint64 => StatsEpochInfo) public statsEpochs;
 
     // Windowed stats are represented by the current epoch entry in proverStatsByEpoch
     uint64 private _statsStartAt;
@@ -111,7 +111,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
             // Initialize stats window for direct deployments
             _statsStartAt = uint64(block.timestamp);
             _statsEpochId = 1;
-            epochs[_statsEpochId].startAt = _statsStartAt;
+            statsEpochs[_statsEpochId].startAt = _statsStartAt;
         }
         // For upgradeable deployment, pass zero addresses and call init() separately
     }
@@ -137,7 +137,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         // Initialize stats window
         _statsStartAt = uint64(block.timestamp);
         _statsEpochId = 1;
-        epochs[_statsEpochId].startAt = _statsStartAt;
+        statsEpochs[_statsEpochId].startAt = _statsStartAt;
     }
 
     /**
@@ -689,7 +689,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     }
 
     // =========================================================================
-    // STATS VIEW & ADMIN (WINDOWED)
+    // STATS VIEW & ADMIN
     // =========================================================================
 
     /**
@@ -701,12 +701,12 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         uint64 nextStart = newStartAt == 0 ? uint64(block.timestamp) : newStartAt;
         // Close previous epoch
         if (prevId != 0) {
-            epochs[prevId].endAt = nextStart; // end just before the new epoch starts
+            statsEpochs[prevId].endAt = nextStart; // end just before the new epoch starts
         }
         // Open new epoch
         _statsEpochId = prevId + 1;
         _statsStartAt = nextStart;
-        epochs[_statsEpochId].startAt = _statsStartAt;
+        statsEpochs[_statsEpochId].startAt = _statsStartAt;
         emit StatsReset(_statsEpochId, _statsStartAt);
     }
 
@@ -729,20 +729,16 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         return (_statsStartAt, _statsEpochId);
     }
 
-    // =========================================================================
-    // EPOCH HISTORY
-    // =========================================================================
-
-    function getEpochInfo(uint64 epochId) external view override returns (uint64 startAt, uint64 endAt) {
-        EpochInfo storage info = epochs[epochId];
+    function getStatsEpochInfo(uint64 epochId) external view override returns (uint64 startAt, uint64 endAt) {
+        StatsEpochInfo storage info = statsEpochs[epochId];
         return (info.startAt, info.endAt);
     }
 
-    function getLatestEpochId() external view override returns (uint64 epochId) {
+    function getLatestStatsEpochId() external view override returns (uint64 epochId) {
         return _statsEpochId;
     }
 
-    function getProverStatsForEpoch(address prover, uint64 epochId)
+    function getProverStatsForStatsEpoch(address prover, uint64 epochId)
         external
         view
         override

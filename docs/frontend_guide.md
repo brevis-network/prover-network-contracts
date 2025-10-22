@@ -338,9 +338,9 @@ function getRecentStatsInfo() external view returns (uint64 startAt, uint64 epoc
 function resetStats(uint64 newStartAt) external;
 
 // Epoch history
-function getEpochInfo(uint64 epochId) external view returns (uint64 startAt, uint64 endAt);
-function getLatestEpochId() external view returns (uint64 epochId);
-function getProverStatsForEpoch(address prover, uint64 epochId) external view returns (ProverStats memory);
+function getStatsEpochInfo(uint64 epochId) external view returns (uint64 startAt, uint64 endAt);
+function getLatestStatsEpochId() external view returns (uint64 epochId);
+function getProverStatsForStatsEpoch(address prover, uint64 epochId) external view returns (ProverStats memory);
 ```
 
 #### Semantics
@@ -359,18 +359,18 @@ function getProverStatsForEpoch(address prover, uint64 epochId) external view re
 
 #### Example: Browsing Epoch History
 ```typescript
-const latestEpochId = await brevisMarket.getLatestEpochId();
-const [currentStart, currentEnd] = await brevisMarket.getEpochInfo(latestEpochId); // currentEnd = 0 while ongoing
+const latestEpochId = await brevisMarket.getLatestStatsEpochId();
+const [currentStart, currentEnd] = await brevisMarket.getStatsEpochInfo(latestEpochId); // currentEnd = 0 while ongoing
 
 // Recent == current epoch stats
 const recent = await brevisMarket.getProverRecentStats(proverAddress);
-const currentEpochStats = await brevisMarket.getProverStatsForEpoch(proverAddress, latestEpochId);
+const currentEpochStats = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, latestEpochId);
 // recent and currentEpochStats match
 
 // Inspect previous epoch
 if (latestEpochId > 1) {
-    const [prevStart, prevEnd] = await brevisMarket.getEpochInfo(latestEpochId - 1);
-    const prevStats = await brevisMarket.getProverStatsForEpoch(proverAddress, latestEpochId - 1);
+        const [prevStart, prevEnd] = await brevisMarket.getStatsEpochInfo(latestEpochId - 1);
+        const prevStats = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, latestEpochId - 1);
     // prevEnd equals currentStart after a reset
 }
 ```
