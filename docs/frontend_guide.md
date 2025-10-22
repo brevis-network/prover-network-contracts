@@ -318,7 +318,7 @@ struct ProverStats {
     uint64 bids;          // total bids placed
     uint64 reveals;       // total bids revealed
     uint64 wins;          // assignments (times the prover was current winner)
-    uint64 submissions;   // successful proof submissions
+    uint64 requestsFulfilled; // successful request fulfillments (proofs delivered)
     uint64 lastActiveAt;  // last activity timestamp (only on the prover's own actions)
     uint256 feeReceived;  // total rewards (after protocol fee) sent to the prover
 }
@@ -461,8 +461,8 @@ const [recentStartAt, recentEpochId] = await brevisMarket.getRecentStatsInfo();
 
 // UI metrics:
 // - Proofs Won (lifetime): total.wins
-// - Success Rate (lifetime): total.wins > 0 ? total.submissions / total.wins : 0
-// - Missed Deadlines (lifetime): total.wins - total.submissions
+// - Success Rate (lifetime): total.wins > 0 ? total.requestsFulfilled / total.wins : 0
+// - Missed Deadlines (lifetime): total.wins - total.requestsFulfilled
 // - Recent window equivalents: use `recent` instead of `total`
 // - Last active: prefer `recent.lastActiveAt` if > 0 else `total.lastActiveAt`
 ```

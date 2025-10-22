@@ -443,14 +443,14 @@ contract BrevisMarketTest is Test {
         assertEq(total.bids, 1);
         assertEq(total.reveals, 1);
         assertEq(total.wins, 1);
-        assertEq(total.submissions, 1);
+        assertEq(total.requestsFulfilled, 1);
         assertGe(total.lastActiveAt, beforeSubmitTs);
 
         IBrevisMarket.ProverStats memory recent = market.getProverRecentStats(prover1);
         assertEq(recent.bids, 1);
         assertEq(recent.reveals, 1);
         assertEq(recent.wins, 1);
-        assertEq(recent.submissions, 1);
+        assertEq(recent.requestsFulfilled, 1);
         assertGe(recent.lastActiveAt, beforeSubmitTs);
 
         (uint64 startAt, uint64 epochId) = market.getRecentStatsInfo();
@@ -539,14 +539,14 @@ contract BrevisMarketTest is Test {
         assertEq(recent1.bids, 0);
         assertEq(recent1.reveals, 0);
         assertEq(recent1.wins, 0);
-        assertEq(recent1.submissions, 0);
+        assertEq(recent1.requestsFulfilled, 0);
 
         // Totals remain
         IBrevisMarket.ProverStats memory total1 = market.getProverStatsTotal(prover1);
         assertEq(total1.bids, 1);
         assertEq(total1.reveals, 0);
         assertEq(total1.wins, 0);
-        assertEq(total1.submissions, 0);
+        assertEq(total1.requestsFulfilled, 0);
     }
 
     function test_ProverStats_RecentZerosForInactiveProver() public {
@@ -567,7 +567,7 @@ contract BrevisMarketTest is Test {
         assertEq(recent2.bids, 0);
         assertEq(recent2.reveals, 0);
         assertEq(recent2.wins, 0);
-        assertEq(recent2.submissions, 0);
+        assertEq(recent2.requestsFulfilled, 0);
     }
 
     function test_ProverStats_MissedDeadline_DerivedWinsMinusSubmissions() public {
@@ -591,9 +591,9 @@ contract BrevisMarketTest is Test {
 
         IBrevisMarket.ProverStats memory total1 = market.getProverStatsTotal(prover1);
         assertEq(total1.wins, 1);
-        assertEq(total1.submissions, 0);
+        assertEq(total1.requestsFulfilled, 0);
         // Derived missed = 1
-        assertEq(uint256(total1.wins) - uint256(total1.submissions), 1);
+        assertEq(uint256(total1.wins) - uint256(total1.requestsFulfilled), 1);
     }
 
     function test_EpochHistory_GettersAndPerEpochStats() public {

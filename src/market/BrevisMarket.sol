@@ -366,11 +366,11 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         // Refund remaining fee to requester
         feeToken.safeTransfer(req.sender, req.fee.maxFee - actualFee);
 
-        // Update prover performance stats: successful submission only
-        proverStats[prover].submissions += 1;
+        // Update prover performance stats: successful fulfillment only
+        proverStats[prover].requestsFulfilled += 1;
         proverStats[prover].lastActiveAt = uint64(block.timestamp);
         ProverStats storage epochStats = _epochStats(prover);
-        epochStats.submissions += 1;
+        epochStats.requestsFulfilled += 1;
         epochStats.lastActiveAt = uint64(block.timestamp);
 
         emit ProofSubmitted(reqid, prover, proof, actualFee);
