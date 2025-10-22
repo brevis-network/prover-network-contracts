@@ -49,6 +49,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     uint64 public biddingPhaseDuration; // duration of bidding phase in seconds
     uint64 public revealPhaseDuration; // duration of reveal phase in seconds
     uint256 public minMaxFee; // minimum maxFee for spam protection
+    uint256 public maxMaxFee; // maximum maxFee to prevent excessive fees
     uint256 public slashBps; // slashing percentage for penalties in basis points
     uint256 public slashWindow; // time window for slashing after deadline (e.g., 7 days)
     uint256 public protocolFeeBps; // protocol fee percentage in basis points (0-10000)
@@ -191,6 +192,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
             revert MarketDeadlineBeforeRevealPhaseEnd();
         }
         if (req.fee.maxFee < minMaxFee) revert MarketMaxFeeTooLow(req.fee.maxFee, minMaxFee);
+        if (maxMaxFee > 0 && req.fee.maxFee > maxMaxFee) revert MarketMaxFeeTooHigh(req.fee.maxFee, maxMaxFee);
 
         uint256 minSelfStake = stakingController.minSelfStake();
         if (req.fee.minStake < minSelfStake) {
@@ -486,6 +488,17 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         uint256 oldFee = minMaxFee;
         minMaxFee = newMinFee;
         emit MinMaxFeeUpdated(oldFee, newMinFee);
+    }
+
+    /**
+     * @notice Update the maximum fee
+     * @dev Only owner can call this function
+     * @param newMaxFee New maximum fee amount
+     */
+    function setMaxMaxFee(uint256 newMaxFee) external override onlyOwner {
+        uint256 oldFee = maxMaxFee;
+        maxMaxFee = newMaxFee;
+        emit MaxMaxFeeUpdated(oldFee, newMaxFee);
     }
 
     /**

@@ -70,6 +70,7 @@ interface IBrevisMarket {
     event BiddingPhaseDurationUpdated(uint64 oldDuration, uint64 newDuration);
     event RevealPhaseDurationUpdated(uint64 oldDuration, uint64 newDuration);
     event MinMaxFeeUpdated(uint256 oldFee, uint256 newFee);
+    event MaxMaxFeeUpdated(uint256 oldFee, uint256 newFee);
     event FeeTokenUpdated(address indexed oldToken, address indexed newToken);
     event SlashBpsUpdated(uint256 oldBps, uint256 newBps);
     event SlashWindowUpdated(uint256 oldWindow, uint256 newWindow);
@@ -98,6 +99,7 @@ interface IBrevisMarket {
     error MarketBidRevealMismatch(bytes32 expected, bytes32 actual);
     error MarketFeeExceedsMaximum(uint256 fee, uint256 maxFee);
     error MarketMaxFeeTooLow(uint256 provided, uint256 minimum);
+    error MarketMaxFeeTooHigh(uint256 provided, uint256 maximum);
     error MarketMinStakeTooLow(uint256 provided, uint256 minimum);
     error MarketDeadlinePassed(uint256 currentTime, uint256 deadline);
     error MarketNotExpectedProver(address expected, address actual);
@@ -205,6 +207,13 @@ interface IBrevisMarket {
      * @param newMinFee New minimum fee amount
      */
     function setMinMaxFee(uint256 newMinFee) external;
+
+    /**
+     * @notice Update the maximum fee
+     * @dev Only owner can call this function
+     * @param newMaxFee New maximum fee amount
+     */
+    function setMaxMaxFee(uint256 newMaxFee) external;
 
     /**
      * @notice Update the slash percentage for penalizing non-performing provers
