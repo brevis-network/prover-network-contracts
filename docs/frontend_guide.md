@@ -325,13 +325,15 @@ struct ProverStats {
 ```
 
 #### APIs
+
+The two major APIs for explorer frontend to use are:
 ```solidity
 // Lifetime totals
 function getProverStatsTotal(address prover) external view returns (ProverStats memory);
 // Recent stats for the CURRENT epoch + its start timestamp
 function getProverRecentStats(address prover) external view returns (ProverStats memory stats, uint64 startAt);
 ```
-More stats related view functions can be found at [IBrevisMarket.sol](../src/market/IBrevisMarket.sol#L425-L473)
+More stats-related view functions can be found at [IBrevisMarket.sol](../src/market/IBrevisMarket.sol#L425-L473)
 
 #### Semantics
 - wins: incremented on assignment changes during reveal; reflects how many requests a prover was assigned (won).
@@ -351,15 +353,15 @@ const epochId = await brevisMarket.statsEpochId();
 const [currentStart, currentEnd] = await brevisMarket.statsEpochs(epochId); // currentEnd = 0 while ongoing
 
 // Recent == current epoch stats
-const [recent, recentStart] = await brevisMarket.getProverRecentStats(proverAddress);
-const [currentEpochStats, startAt0, endAt0] = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, epochId);
-// recent and currentEpochStats should match; recentStart == currentStart
+const [recentStats, recentStart] = await brevisMarket.getProverRecentStats(proverAddress);
+const [currentEpochStats, curStart, curEnd] = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, epochId);
+// recentStats and currentEpochStats should match; recentStart == currentStart
 
 // Inspect previous epoch if any
 if (epochId > 0) {
-    const [prevStart, prevEnd] = await brevisMarket.statsEpochs(epochId - 1);
-    const [prevStats, prevStart, prevEnd] = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, epochId - 1);
-    // prevEnd equals currentStart after a reset
+    const [prevEpochStart, prevEpochEnd] = await brevisMarket.statsEpochs(epochId - 1);
+    const [prevStats, prevStatsStart, prevStatsEnd] = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, epochId - 1);
+    // prevEpochEnd equals currentStart after a reset
 }
 
 // Optional: iterate all epochs
