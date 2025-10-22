@@ -442,6 +442,26 @@ interface IBrevisMarket {
     function getRecentStatsInfo() external view returns (uint64 startAt, uint64 epochId);
 
     /**
+     * @notice Current epoch id (index into statsEpochs)
+     * @dev Mirrors the public variable in the implementation for interface-only access
+     */
+    function statsEpochId() external view returns (uint64 epochId);
+
+    /**
+     * @notice Get stats-epoch metadata by index
+     * @dev Mirrors the public array getter in the implementation for interface-only access
+     * @param index Epoch index
+     * @return startAt Epoch start timestamp
+     * @return endAt Epoch end timestamp (0 if ongoing)
+     */
+    function statsEpochs(uint256 index) external view returns (uint64 startAt, uint64 endAt);
+
+    /**
+     * @notice Get the number of scheduled epochs
+     */
+    function statsEpochsLength() external view returns (uint256);
+
+    /**
      * @notice Get the start/end timestamps for a past or current epoch
      * @dev endAt = 0 means the epoch is ongoing (current epoch)
      */

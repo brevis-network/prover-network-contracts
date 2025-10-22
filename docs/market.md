@@ -15,7 +15,7 @@ A sealed-bid reverse auction marketplace for zero-knowledge proof generation, wi
 
 ---
 
-## 1. System Overviewmmmm
+## 1. System Overview
 ## 2. API Reference
 
 **Complete documentation:** [`IBrevisMarket.sol`](../src/market/IBrevisMarket.sol)
@@ -181,11 +181,12 @@ struct ProverStats {
 - Lifetime totals per prover: immutable aggregates since genesis
   - `getProverStatsTotal(address prover)` → ProverStats
 - Recent (current stats-epoch): rolling window since the last scheduled epoch started
-  - `getProverRecentStats(address prover)` → ProverStats
+  - `getProverRecentStats(address prover)` → (ProverStats stats, uint64 startAt)
   - `getRecentStatsInfo()` → (startAt, epochId)
-- Historical stats-epochs: on-chain time-bounded buckets
-  - `getStatsEpochInfo(uint64 epochId)` → (startAt, endAt) where endAt = 0 while ongoing
-  - `getLatestStatsEpochId()` → epochId
+- Historical stats-epochs: on-chain time-bounded buckets via public getters
+  - `statsEpochId()` → current epoch id
+  - `statsEpochs(uint256 index)` → (startAt, endAt) where endAt = 0 while ongoing
+  - `statsEpochsLength()` → number of epochs
   - `getProverStatsForStatsEpoch(address prover, uint64 epochId)` → ProverStats
 
 ### Semantics
@@ -193,9 +194,11 @@ struct ProverStats {
 - Derived metric missed = wins − requestsFulfilled.
 - On bid/reveal/submit, both the lifetime total and current stats-epoch buckets are updated.
 - scheduleStatsEpoch(startAt) [admin, startAt strictly greater than last start]:
-  - Sets the previous epoch’s `endAt` to `startAt` immediately (this may be in the future), then appends a new epoch starting at `startAt`.
-  - If `startAt == 0` (interpreted as now), the new epoch becomes current immediately. Otherwise, the rollover occurs lazily on the first stats-changing action at/after `startAt`, emitting `StatsReset(newEpochId, startAt)`.
-  - Recent == stats for the latest (current) stats-epoch.
+  - Sets the previous epoch’s `endAt` to `startAt` at scheduling time (may be in the future), then appends a new epoch starting at `startAt`.
+  - If `startAt == 0` (interpreted as now), the new epoch becomes current immediately. Otherwise, rollover to the new epoch is lazy on the first stats-changing action at/after `startAt` (emits `StatsReset(newEpochId, startAt)`).
+  - Recent == stats for the current epoch.
+- popStatsEpoch() [admin]:
+  - Removes the last scheduled epoch if it has not started yet and restores the previous epoch’s `endAt` to 0.
 
 ---
 

@@ -786,6 +786,13 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     }
 
     /**
+     * @notice Get the number of scheduled stats-epochs
+     */
+    function statsEpochsLength() external view override returns (uint256) {
+        return statsEpochs.length;
+    }
+
+    /**
      * @notice If a future epoch was scheduled and its start time has passed, roll over to the new epoch
      * @dev This is invoked lazily by stats-mutating functions (bid/reveal/submitProof)
      */

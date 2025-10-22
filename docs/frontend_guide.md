@@ -329,20 +329,18 @@ struct ProverStats {
 // Lifetime totals
 function getProverStatsTotal(address prover) external view returns (ProverStats memory);
 
-// Recent stats for the CURRENT epoch
-function getProverRecentStats(address prover) external view returns (ProverStats memory);
+// Recent stats for the CURRENT epoch + its start timestamp
+function getProverRecentStats(address prover) external view returns (ProverStats memory stats, uint64 startAt);
 
 // Current epoch metadata
 function getRecentStatsInfo() external view returns (uint64 startAt, uint64 epochId);
 
-// Admin: schedule or start a new epoch
-// - If startAt == 0: start now and become current immediately
-// - If startAt > now: schedule a future epoch; becomes current lazily on next stats-changing action
-function scheduleStatsEpoch(uint64 startAt) external;
+// Epoch history accessors (via public getters)
+function statsEpochId() external view returns (uint64 epochId);
+function statsEpochs(uint256 index) external view returns (uint64 startAt, uint64 endAt);
+function statsEpochsLength() external view returns (uint256);
 
-// Epoch history
-function getStatsEpochInfo(uint64 epochId) external view returns (uint64 startAt, uint64 endAt);
-function getLatestStatsEpochId() external view returns (uint64 epochId);
+// Per-epoch stats
 function getProverStatsForStatsEpoch(address prover, uint64 epochId) external view returns (ProverStats memory);
 ```
 
@@ -353,31 +351,34 @@ function getProverStatsForStatsEpoch(address prover, uint64 epochId) external vi
 - lastActiveAt: updated on the prover’s own bid/reveal/submit.
 
 #### Epochs, Recent, and Totals
-- Totals aggregate all-time activity for each prover.
-- The system keeps an on-chain history of per-epoch stats. Each epoch has:
-    - startAt: the timestamp when the epoch started
-    - endAt: the timestamp when the epoch ended; 0 if the epoch is ongoing
-- Recent is simply the stats of the current (latest) epoch.
-- `scheduleStatsEpoch(startAt)` behavior (startAt must be strictly greater than the last scheduled start):
-        - If `startAt == 0` (interpreted as now), the market sets the previous epoch's `endAt` to now, appends a new epoch that starts now, and becomes current immediately.
-        - If `startAt > block.timestamp`, the market sets the previous epoch's `endAt` to `startAt`, appends a future epoch, and emits `StatsEpochScheduled(startAt)`. The rollover occurs lazily on the first stats-changing action (bid/reveal/submit) at/after `startAt`, emitting `StatsReset(newEpochId, startAt)`.
-    - Note: With scheduling, a previous epoch can have a non-zero `endAt` in the future.
+- Totals: lifetime aggregate per prover.
+- Epochs: time-bounded buckets with startAt and endAt (0 while ongoing). Use `statsEpochId()`, `statsEpochs(i)`, and `statsEpochsLength()`.
+- Recent: the current epoch’s stats. Get startAt via `getProverRecentStats(..)` or `getRecentStatsInfo()`.
+- Rollover: when a new epoch becomes active, the previous epoch’s `endAt` equals the new epoch’s `startAt`. The rollover is applied lazily on the next stats-changing action at/after `startAt`.
 
 #### Example: Browsing Epoch History
 ```typescript
-const latestEpochId = await brevisMarket.getLatestStatsEpochId();
-const [currentStart, currentEnd] = await brevisMarket.getStatsEpochInfo(latestEpochId); // currentEnd = 0 while ongoing
+// Current epoch id and metadata
+const epochId = await brevisMarket.statsEpochId();
+const [currentStart, currentEnd] = await brevisMarket.statsEpochs(epochId); // currentEnd = 0 while ongoing
 
 // Recent == current epoch stats
-const recent = await brevisMarket.getProverRecentStats(proverAddress);
-const currentEpochStats = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, latestEpochId);
-// recent and currentEpochStats match
+const [recent, recentStart] = await brevisMarket.getProverRecentStats(proverAddress);
+const currentEpochStats = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, epochId);
+// recent and currentEpochStats should match; recentStart == currentStart
 
-// Inspect previous epoch
-if (latestEpochId > 1) {
-    const [prevStart, prevEnd] = await brevisMarket.getStatsEpochInfo(latestEpochId - 1);
-    const prevStats = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, latestEpochId - 1);
+// Inspect previous epoch if any
+if (epochId > 0) {
+    const [prevStart, prevEnd] = await brevisMarket.statsEpochs(epochId - 1);
+    const prevStats = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, epochId - 1);
     // prevEnd equals currentStart after a reset
+}
+
+// Optional: iterate all epochs
+const n = await brevisMarket.statsEpochsLength();
+for (let i = 0; i < n; i++) {
+    const [startAt, endAt] = await brevisMarket.statsEpochs(i);
+    // fetch per-epoch stats as needed
 }
 ```
 
