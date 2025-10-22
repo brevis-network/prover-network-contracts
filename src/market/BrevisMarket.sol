@@ -65,9 +65,19 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
     mapping(address => ProverStats) public proverStats; // prover address -> stats
 
-    // Windowed stats (since configurable start)
-    mapping(address => ProverStats) private _proverStatsWindow;
-    mapping(address => uint64) private _proverWindowEpoch;
+    // Historical stats per stats-epoch: prover => epochId => stats snapshot
+    // Populated lazily when a prover's window rolls over to a new epoch
+    mapping(address => mapping(uint64 => ProverStats)) public proverStatsByEpoch;
+
+    // Stats-epoch metadata (start/end times). endAt = 0 means ongoing epoch.
+    struct StatsEpochInfo {
+        uint64 startAt;
+        uint64 endAt;
+    }
+
+    mapping(uint64 => StatsEpochInfo) public statsEpochs;
+
+    // Windowed stats are represented by the current epoch entry in proverStatsByEpoch
     uint64 private _statsStartAt;
     uint64 private _statsEpochId;
 
@@ -101,6 +111,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
             // Initialize stats window for direct deployments
             _statsStartAt = uint64(block.timestamp);
             _statsEpochId = 1;
+            statsEpochs[_statsEpochId].startAt = _statsStartAt;
         }
         // For upgradeable deployment, pass zero addresses and call init() separately
     }
@@ -126,6 +137,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         // Initialize stats window
         _statsStartAt = uint64(block.timestamp);
         _statsEpochId = 1;
+        statsEpochs[_statsEpochId].startAt = _statsStartAt;
     }
 
     /**
@@ -241,9 +253,9 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         // Update prover activity stats
         proverStats[prover].bids += 1;
         proverStats[prover].lastActiveAt = uint64(block.timestamp);
-        ProverStats storage recentStats = _ensureWindow(prover);
-        recentStats.bids += 1;
-        recentStats.lastActiveAt = uint64(block.timestamp);
+        ProverStats storage epochStats = _epochStats(prover);
+        epochStats.bids += 1;
+        epochStats.lastActiveAt = uint64(block.timestamp);
 
         emit NewBid(reqid, prover, bidHash);
     }
@@ -291,9 +303,9 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         // Update prover activity stats
         proverStats[prover].reveals += 1;
         proverStats[prover].lastActiveAt = uint64(block.timestamp);
-        ProverStats storage recentStats = _ensureWindow(prover);
-        recentStats.reveals += 1;
-        recentStats.lastActiveAt = uint64(block.timestamp);
+        ProverStats storage epochStats = _epochStats(prover);
+        epochStats.reveals += 1;
+        epochStats.lastActiveAt = uint64(block.timestamp);
 
         emit BidRevealed(reqid, prover, fee);
     }
@@ -354,9 +366,9 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         // Update prover performance stats: successful submission only
         proverStats[prover].submissions += 1;
         proverStats[prover].lastActiveAt = uint64(block.timestamp);
-        ProverStats storage recentStats = _ensureWindow(prover);
-        recentStats.submissions += 1;
-        recentStats.lastActiveAt = uint64(block.timestamp);
+        ProverStats storage epochStats = _epochStats(prover);
+        epochStats.submissions += 1;
+        epochStats.lastActiveAt = uint64(block.timestamp);
 
         emit ProofSubmitted(reqid, prover, proof, actualFee);
     }
@@ -619,15 +631,10 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     // =========================================================================
 
     /**
-     * @notice Ensure and return the current epoch's window stats for a prover
-     * @dev Lazily resets the prover's window stats when epoch changes
+     * @notice Return the current epoch's stats storage for a prover
      */
-    function _ensureWindow(address prover) internal returns (ProverStats storage s) {
-        if (_proverWindowEpoch[prover] != _statsEpochId) {
-            delete _proverStatsWindow[prover];
-            _proverWindowEpoch[prover] = _statsEpochId;
-        }
-        return _proverStatsWindow[prover];
+    function _epochStats(address prover) internal view returns (ProverStats storage s) {
+        return proverStatsByEpoch[prover][_statsEpochId];
     }
 
     /**
@@ -658,13 +665,13 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
             if (prevWinner != address(0)) {
                 ProverStats storage sPrev = proverStats[prevWinner];
                 if (sPrev.wins > 0) sPrev.wins -= 1;
-                ProverStats storage wPrev = _ensureWindow(prevWinner);
+                ProverStats storage wPrev = _epochStats(prevWinner);
                 if (wPrev.wins > 0) wPrev.wins -= 1;
             }
             if (newWinner != address(0)) {
                 ProverStats storage sNew = proverStats[newWinner];
                 sNew.wins += 1;
-                ProverStats storage wNew = _ensureWindow(newWinner);
+                ProverStats storage wNew = _epochStats(newWinner);
                 wNew.wins += 1;
             }
         }
@@ -682,7 +689,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     }
 
     // =========================================================================
-    // STATS VIEW & ADMIN (WINDOWED)
+    // STATS VIEW & ADMIN
     // =========================================================================
 
     /**
@@ -690,8 +697,16 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
      * @param newStartAt New start timestamp (0 = now)
      */
     function resetStats(uint64 newStartAt) external override onlyOwner {
-        _statsEpochId += 1;
-        _statsStartAt = newStartAt == 0 ? uint64(block.timestamp) : newStartAt;
+        uint64 prevId = _statsEpochId;
+        uint64 nextStart = newStartAt == 0 ? uint64(block.timestamp) : newStartAt;
+        // Close previous epoch
+        if (prevId != 0) {
+            statsEpochs[prevId].endAt = nextStart; // end just before the new epoch starts
+        }
+        // Open new epoch
+        _statsEpochId = prevId + 1;
+        _statsStartAt = nextStart;
+        statsEpochs[_statsEpochId].startAt = _statsStartAt;
         emit StatsReset(_statsEpochId, _statsStartAt);
     }
 
@@ -705,15 +720,30 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     /**
      * @notice Get window (since last reset) stats for a prover
      */
-    // Recent stats (formerly “windowed”)
+    // Recent stats == stats in the current epoch
     function getProverRecentStats(address prover) external view override returns (ProverStats memory) {
-        if (_proverWindowEpoch[prover] != _statsEpochId) {
-            return ProverStats(0, 0, 0, 0, 0);
-        }
-        return _proverStatsWindow[prover];
+        return proverStatsByEpoch[prover][_statsEpochId];
     }
 
     function getRecentStatsInfo() external view override returns (uint64 startAt, uint64 epochId) {
         return (_statsStartAt, _statsEpochId);
+    }
+
+    function getStatsEpochInfo(uint64 epochId) external view override returns (uint64 startAt, uint64 endAt) {
+        StatsEpochInfo storage info = statsEpochs[epochId];
+        return (info.startAt, info.endAt);
+    }
+
+    function getLatestStatsEpochId() external view override returns (uint64 epochId) {
+        return _statsEpochId;
+    }
+
+    function getProverStatsForStatsEpoch(address prover, uint64 epochId)
+        external
+        view
+        override
+        returns (ProverStats memory)
+    {
+        return proverStatsByEpoch[prover][epochId];
     }
 }
