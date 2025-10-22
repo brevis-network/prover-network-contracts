@@ -343,7 +343,7 @@ More stats-related view functions can be found at [IBrevisMarket.sol](../src/mar
 
 #### Epochs, Recent, and Totals
 - Totals: lifetime aggregate per prover.
-- Epochs: time-bounded buckets with startAt and endAt (0 while ongoing).
+- Epochs: time-bounded buckets with startAt and endAt.
 - Recent: the recent (current epoch’s) stats. Use `getProverRecentStats(..)`, `getRecentStatsInfo()`.
 
 #### Example: Browsing Epoch History
