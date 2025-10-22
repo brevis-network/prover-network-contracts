@@ -358,6 +358,9 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         // Send remaining fee to staking controller as reward for the prover
         if (proverReward > 0) {
             stakingController.addRewards(prover, proverReward);
+            // Track rewards received by prover (lifetime and current stats-epoch)
+            proverStats[prover].feeReceived += proverReward;
+            _epochStats(prover).feeReceived += proverReward;
         }
 
         // Refund remaining fee to requester

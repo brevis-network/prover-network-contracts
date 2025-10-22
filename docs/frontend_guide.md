@@ -320,6 +320,7 @@ struct ProverStats {
     uint64 wins;          // assignments (times the prover was current winner)
     uint64 submissions;   // successful proof submissions
     uint64 lastActiveAt;  // last activity timestamp (only on the prover's own actions)
+    uint256 feeReceived;  // total rewards (after protocol fee) sent to the prover
 }
 ```
 

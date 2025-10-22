@@ -456,6 +456,21 @@ contract BrevisMarketTest is Test {
         (uint64 startAt, uint64 epochId) = market.getRecentStatsInfo();
         assertGt(startAt, 0);
         assertGt(epochId, 0);
+
+        // Fee accounting: with a single bidder, actualFee == winner fee
+        (address winner, uint256 winnerFee,, uint256 secondFee) = market.getBidders(reqid);
+        // silence winner variable
+        winner;
+        // protocol fee bps default is likely 0 in this test suite; compute reward generically
+        (uint256 feeBps,) = market.getProtocolFeeInfo();
+        uint256 actualFee = secondFee == 0 ? winnerFee : secondFee;
+        uint256 expectedReward = (actualFee * (10000 - feeBps)) / 10000;
+
+        // total and recent should reflect the reward paid to the prover
+        total = market.getProverStatsTotal(prover1);
+        recent = market.getProverRecentStats(prover1);
+        assertEq(total.feeReceived, expectedReward);
+        assertEq(recent.feeReceived, expectedReward);
     }
 
     function test_ProverStats_WinsMoveOnWinnerChange_LastActiveUnchanged() public {
