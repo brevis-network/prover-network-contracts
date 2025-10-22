@@ -581,6 +581,70 @@ contract BrevisMarketTest is Test {
         assertEq(uint256(total1.wins) - uint256(total1.submissions), 1);
     }
 
+    function test_EpochHistory_GettersAndPerEpochStats() public {
+        // Capture initial epoch metadata
+        (uint64 startAt1, uint64 epoch1) = market.getRecentStatsInfo();
+        assertGt(epoch1, 0);
+        assertEq(market.getLatestEpochId(), epoch1);
+
+        // Create a proof request and have prover1 perform activity in epoch1
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+        vm.prank(requester);
+        market.requestProof(req);
+
+        vm.prank(prover1);
+        market.bid(reqid, _createBidHash(5e17, 123));
+
+        // Recent == current epoch stats
+        IBrevisMarket.ProverStats memory recent1e1 = market.getProverRecentStats(prover1);
+        IBrevisMarket.ProverStats memory e1p1 = market.getProverStatsForEpoch(prover1, epoch1);
+        assertEq(recent1e1.bids, 1);
+        assertEq(e1p1.bids, 1);
+        assertEq(e1p1.bids, recent1e1.bids);
+
+        // Lifetime totals reflect activity regardless of epoch boundaries
+        IBrevisMarket.ProverStats memory total1Before = market.getProverStatsTotal(prover1);
+        assertEq(total1Before.bids, 1);
+
+        // Advance time and reset to start a new epoch
+        vm.warp(block.timestamp + 10);
+        vm.prank(owner);
+        market.resetStats(0);
+
+        (uint64 startAt2, uint64 epoch2) = market.getRecentStatsInfo();
+        assertEq(epoch2, epoch1 + 1);
+        assertEq(market.getLatestEpochId(), epoch2);
+
+        // Previous epoch endAt should equal the new epoch startAt; current epoch endAt is 0
+        (uint64 e1Start, uint64 e1End) = market.getEpochInfo(epoch1);
+        (uint64 e2Start, uint64 e2End) = market.getEpochInfo(epoch2);
+        assertEq(e1Start, startAt1);
+        assertEq(e1End, startAt2);
+        assertEq(e2Start, startAt2);
+        assertEq(e2End, 0);
+
+        // Per-epoch stats persist for epoch1 and are zero-initialized for epoch2
+        IBrevisMarket.ProverStats memory e1p1After = market.getProverStatsForEpoch(prover1, epoch1);
+        assertEq(e1p1After.bids, 1);
+        IBrevisMarket.ProverStats memory e2p1 = market.getProverStatsForEpoch(prover1, epoch2);
+        assertEq(e2p1.bids, 0);
+
+        // New activity in epoch2 should affect only epoch2 bucket and recent
+        vm.prank(prover2);
+        market.bid(reqid, _createBidHash(6e17, 456));
+
+        IBrevisMarket.ProverStats memory recent2e2 = market.getProverRecentStats(prover2);
+        IBrevisMarket.ProverStats memory e2p2 = market.getProverStatsForEpoch(prover2, epoch2);
+        assertEq(recent2e2.bids, 1);
+        assertEq(e2p2.bids, 1);
+
+        // Lifetime totals reflect both epochs
+        IBrevisMarket.ProverStats memory total1After = market.getProverStatsTotal(prover1);
+        IBrevisMarket.ProverStats memory total2After = market.getProverStatsTotal(prover2);
+        assertEq(total1After.bids, 1);
+        assertEq(total2After.bids, 1);
+    }
+
     function test_Refund_RevertBeforeDeadline() public {
         (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
 

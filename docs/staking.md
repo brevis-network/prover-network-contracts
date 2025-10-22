@@ -204,6 +204,9 @@ struct ProverInfo {
     uint256 pendingCommission;                       // Unclaimed commission accumulated
     EnumerableMap.AddressToUintMap commissionRates;  // Source-specific commission rates in basis points (0-10000)
                                                      // address(0) = default rate for unknown sources
+    uint64 joinedAt;                                 // Timestamp when the prover joined (initialized)
+    string name;                                     // <= 128 bytes
+    string iconUrl;                                  // <= 512 bytes
 }
 ```
 

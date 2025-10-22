@@ -328,14 +328,19 @@ struct ProverStats {
 // Lifetime totals
 function getProverStatsTotal(address prover) external view returns (ProverStats memory);
 
-// Recent stats since last reset (epoch-based, lazy per-prover)
+// Recent stats for the CURRENT epoch
 function getProverRecentStats(address prover) external view returns (ProverStats memory);
 
-// Current recent window metadata
+// Current epoch metadata
 function getRecentStatsInfo() external view returns (uint64 startAt, uint64 epochId);
 
 // Admin: reset the recent window (startAt=0 uses current block timestamp)
 function resetStats(uint64 newStartAt) external;
+
+// Epoch history
+function getEpochInfo(uint64 epochId) external view returns (uint64 startAt, uint64 endAt);
+function getLatestEpochId() external view returns (uint64 epochId);
+function getProverStatsForEpoch(address prover, uint64 epochId) external view returns (ProverStats memory);
 ```
 
 #### Semantics
@@ -344,9 +349,31 @@ function resetStats(uint64 newStartAt) external;
 - missed (derived): `wins - submissions`.
 - lastActiveAt: updated on the prover’s own bid/reveal/submit.
 
-#### Recent vs Totals
-- Totals aggregate all-time.
-- Recent is a lazily maintained window keyed by an epoch id; `resetStats()` by admin starts a new epoch and clears recent counters per prover upon their next activity.
+#### Epochs, Recent, and Totals
+- Totals aggregate all-time activity for each prover.
+- The system keeps an on-chain history of per-epoch stats. Each epoch has:
+    - startAt: the timestamp when the epoch started
+    - endAt: the timestamp when the epoch ended; 0 if the epoch is ongoing
+- Recent is simply the stats of the current (latest) epoch.
+- `resetStats(newStartAt)` closes the previous epoch (sets its endAt to the new epoch's startAt) and opens a new epoch at `newStartAt` (or `block.timestamp` if 0). Per-epoch counters for the new epoch start at zero.
+
+#### Example: Browsing Epoch History
+```typescript
+const latestEpochId = await brevisMarket.getLatestEpochId();
+const [currentStart, currentEnd] = await brevisMarket.getEpochInfo(latestEpochId); // currentEnd = 0 while ongoing
+
+// Recent == current epoch stats
+const recent = await brevisMarket.getProverRecentStats(proverAddress);
+const currentEpochStats = await brevisMarket.getProverStatsForEpoch(proverAddress, latestEpochId);
+// recent and currentEpochStats match
+
+// Inspect previous epoch
+if (latestEpochId > 1) {
+    const [prevStart, prevEnd] = await brevisMarket.getEpochInfo(latestEpochId - 1);
+    const prevStats = await brevisMarket.getProverStatsForEpoch(proverAddress, latestEpochId - 1);
+    // prevEnd equals currentStart after a reset
+}
+```
 
 ## 4. Action Reference
 

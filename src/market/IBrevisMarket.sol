@@ -302,17 +302,6 @@ interface IBrevisMarket {
     function getProverStatsTotal(address prover) external view returns (ProverStats memory);
 
     /**
-     * @notice Get window (since last reset) stats for a prover
-     */
-
-    /**
-     * @notice Get current stats window metadata
-     * @return startAt Window start timestamp
-     * @return epochId Current epoch identifier
-     */
-    // Deprecated: getProverStatsWindow/getStatsWindowInfo removed in favor of recent naming
-
-    /**
      * @notice Get recent (since last reset) stats for a prover
      * @dev Alias of getProverStatsWindow for readability
      */
@@ -325,6 +314,22 @@ interface IBrevisMarket {
      * @return epochId Current epoch identifier
      */
     function getRecentStatsInfo() external view returns (uint64 startAt, uint64 epochId);
+
+    /**
+     * @notice Get the start/end timestamps for a past or current epoch
+     * @dev endAt = 0 means the epoch is ongoing (current epoch)
+     */
+    function getEpochInfo(uint64 epochId) external view returns (uint64 startAt, uint64 endAt);
+
+    /**
+     * @notice Get the latest (current) epoch id
+     */
+    function getLatestEpochId() external view returns (uint64 epochId);
+
+    /**
+     * @notice Get a prover's stats for a specific epoch
+     */
+    function getProverStatsForEpoch(address prover, uint64 epochId) external view returns (ProverStats memory);
 
     // =========================================================================
     // REQUEST QUERY FUNCTIONS

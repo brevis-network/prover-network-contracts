@@ -31,8 +31,8 @@ interface IStakingController {
         EnumerableMap.AddressToUintMap commissionRates;
         uint64 joinedAt; // Timestamp when the prover joined (initialized)
         // Profile fields (display-only, editable by prover/admin)
-        string name; // <= 128 bytes recommended
-        string iconUrl; // <= 512 bytes recommended
+        string name; // <= 128 bytes
+        string iconUrl; // <= 512 bytes
     }
 
     struct ProverPendingUnstakes {
