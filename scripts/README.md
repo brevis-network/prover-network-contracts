@@ -22,15 +22,15 @@ Notes:
 ## 2) Deploy (two steps)
 
 1) Deploy a shared ProxyAdmin (one-time per network):
-```bash
-forge script scripts/DeploySharedProxyAdmin.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
-```
+   ```bash
+   forge script scripts/DeploySharedProxyAdmin.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
+   ```
 Copy the printed address and set it in `config.json` under `proxyAdmin.address`.
 
 2) Deploy the full Prover Network:
-```bash
-forge script scripts/DeployProverNetwork.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
-```
+   ```bash
+   forge script scripts/DeployProverNetwork.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
+   ```
 
 Where to find addresses:
 - The script prints all addresses at the end.
@@ -67,10 +67,10 @@ Notes:
 
 ## 4) After deployment (Etherscan + MetaMask)
 
-- Verification: Using `--verify` usually verifies all contracts automatically. If anything remains unverified, open the address on the explorer and use “Verify & Publish” in the UI.
-- Proxy ABI: If the proxy page shows no ABI, verify both the proxy and the implementation. Explorers usually auto-link; otherwise, look for “Is this a proxy?” on the page.
-- Transfer ownership: Open your ProxyAdmin on the explorer and call `transferOwnership(newOwner)` from the Write tab (connect MetaMask). Recommended to a multisig.
-- Upgrades later: Use the ProxyAdmin “upgrade” function in the explorer UI to point a proxy to a new implementation.
+- **Verification**: Using `--verify` usually verifies all contracts automatically. If anything remains unverified, open the address on the explorer and use “Verify & Publish” in the UI.
+- **Proxy ABI**: If the proxy page shows no ABI, verify both the proxy and the implementation. Explorers usually auto-link; otherwise, look for “Is this a proxy?” on the page.
+- **Transfer ownership**: Open your ProxyAdmin on the explorer and call `transferOwnership(newOwner)` from the Write tab (connect MetaMask). Recommended to a multisig.
+- **Upgrades later**: Use the ProxyAdmin “upgrade” function in the explorer UI to point a proxy to a new implementation.
 
 ## 5) Tips
 
