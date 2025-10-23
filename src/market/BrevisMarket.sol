@@ -27,17 +27,16 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         uint64 timestamp; // req is recorded at this block time, needed for bid/reveal phase
         address sender; // msg.sender of requestProof
         FeeParams fee;
-        // needed for verify
         bytes32 vk;
         bytes32 publicValuesDigest; // sha256(publicValues) & bytes32(uint256((1 << 253) - 1))
         mapping(address => bytes32) bids; // received sealed bids by provers
-        uint256 bidCount; // number of bids submitted (to track if any bids were made)
+        uint64 bidCount; // number of bids submitted (to track if any bids were made)
         Bidder winner; // winning bidder (lowest fee)
         Bidder second; // second-lowest bidder (for reverse second-price auction - winner pays second-lowest bid)
         uint256[8] proof;
     }
 
-    // Stats-epoch metadata (start/end times). endAt = 0 means ongoing epoch.
+    // Stats-epoch metadata (start/end times). endAt = 0 marks the tail (last scheduled) epoch.
     struct StatsEpochInfo {
         uint64 startAt;
         uint64 endAt;

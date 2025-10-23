@@ -354,7 +354,7 @@ More stats-related view functions can be found at [IBrevisMarket.sol](../src/mar
 ```typescript
 // Current epoch id and metadata
 const epochId = await brevisMarket.statsEpochId();
-const [currentStart, currentEnd] = await brevisMarket.statsEpochs(epochId); // currentEnd = 0 while ongoing
+const [currentStart, currentEnd] = await brevisMarket.statsEpochs(epochId); // endAt = 0 marks the tail epoch
 
 // Recent == current epoch stats
 const [recentStats, recentStart] = await brevisMarket.getProverRecentStats(proverAddress);

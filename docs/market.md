@@ -191,7 +191,7 @@ struct ProverStats {
   - `getRecentStatsInfo()` → (startAt, epochId)
 - Historical stats-epochs: on-chain time-bounded buckets via public getters
   - `statsEpochId()` → current epoch id
-  - `statsEpochs(uint256 index)` → (startAt, endAt) where endAt = 0 while ongoing
+  - `statsEpochs(uint256 index)` → (startAt, endAt) where endAt = 0 marks the tail (last scheduled) epoch
   - `statsEpochsLength()` → number of epochs
   - `getProverStatsForStatsEpoch(address prover, uint64 epochId)` → (ProverStats stats, uint64 startAt, uint64 endAt)
 

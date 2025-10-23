@@ -459,7 +459,7 @@ interface IBrevisMarket {
      * @dev Mirrors the public array getter in the implementation for interface-only access
      * @param index Epoch index
      * @return startAt Epoch start timestamp
-     * @return endAt Epoch end timestamp (0 if ongoing)
+     * @return endAt Epoch end timestamp; 0 indicates the tail (last scheduled) epoch
      */
     function statsEpochs(uint256 index) external view returns (uint64 startAt, uint64 endAt);
 
@@ -472,7 +472,7 @@ interface IBrevisMarket {
      * @notice Get a prover's stats for a specific epoch along with epoch start/end
      * @return stats Prover's stats in the epoch
      * @return startAt Epoch start timestamp
-     * @return endAt Epoch end timestamp (0 if ongoing)
+     * @return endAt Epoch end timestamp; 0 indicates the tail (last scheduled) epoch
      */
     function getProverStatsForStatsEpoch(address prover, uint64 epochId)
         external
