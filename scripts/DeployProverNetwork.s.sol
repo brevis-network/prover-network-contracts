@@ -24,11 +24,15 @@ contract DeployProverNetwork is Script {
     // Storage variables to avoid stack too deep
 
     ProxyAdmin public sharedProxyAdmin;
+    // VaultFactory proxy (typed) retained for convenience when calling functions
     VaultFactory public vaultFactory;
+    // Consistent naming for implementation and proxy addresses
+    address public vaultFactoryProxy;
     address public stakingControllerProxy;
     address public stakingViewer;
     address public brevisMarketProxy;
     address public stakingControllerImpl;
+    address public vaultFactoryImpl;
     address public brevisMarketImpl;
 
     // Cached JSON config (if provided)
@@ -99,15 +103,16 @@ contract DeployProverNetwork is Script {
 
         // Deploy VaultFactory implementation
         console.log("\n1a. Deploying VaultFactory implementation...");
-        address vaultFactoryImpl = address(new VaultFactory());
+        vaultFactoryImpl = address(new VaultFactory());
         console.log("VaultFactory implementation:", vaultFactoryImpl);
 
         // Deploy VaultFactory proxy using shared ProxyAdmin
         console.log("\n1a2. Deploying VaultFactory proxy...");
-        TransparentUpgradeableProxy vaultFactoryProxy =
+        TransparentUpgradeableProxy vaultFactoryProxy_ =
             new TransparentUpgradeableProxy(vaultFactoryImpl, address(sharedProxyAdmin), "");
-        vaultFactory = VaultFactory(address(vaultFactoryProxy));
-        console.log("VaultFactory proxy:", address(vaultFactory));
+        vaultFactoryProxy = address(vaultFactoryProxy_);
+        vaultFactory = VaultFactory(vaultFactoryProxy);
+        console.log("VaultFactory proxy:", vaultFactoryProxy);
 
         // Deploy StakingController implementation
         console.log("\n1b. Deploying StakingController implementation...");
@@ -242,7 +247,8 @@ contract DeployProverNetwork is Script {
     function _printSummary() internal view {
         console.log("\n=== DEPLOYMENT SUMMARY ===");
         console.log("Shared ProxyAdmin:", address(sharedProxyAdmin));
-        console.log("VaultFactory:", address(vaultFactory));
+        console.log("VaultFactory Implementation:", vaultFactoryImpl);
+        console.log("VaultFactory Proxy:", vaultFactoryProxy);
         console.log("StakingController Implementation:", stakingControllerImpl);
         console.log("StakingController Proxy:", stakingControllerProxy);
         console.log("StakingViewer:", stakingViewer);

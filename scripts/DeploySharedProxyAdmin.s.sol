@@ -8,6 +8,7 @@ import {ProxyAdmin} from "@openzeppelin/contracts-v4/proxy/transparent/ProxyAdmi
  * @title DeploySharedProxyAdmin
  * @notice Minimal script to deploy a shared ProxyAdmin
  * @dev Reads PRIVATE_KEY for broadcasting; deploys ProxyAdmin and prints the address.
+ *      usage: forge script scripts/DeploySharedProxyAdmin.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
  */
 contract DeploySharedProxyAdmin is Script {
     ProxyAdmin public proxyAdmin;
