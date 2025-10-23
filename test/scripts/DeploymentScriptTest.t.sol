@@ -11,9 +11,6 @@ pragma solidity ^0.8.20;
  * - Optional parameter handling
  * - Upgrade operations using shared ProxyAdmin pattern
  * - Script instantiation and basic functionality
- *
- * Note: Tests for PROXY_ADMIN environment variable functionality are located in
- * ExistingProxyAdminTest.manual.sol for manual execution when needed.
  */
 import "../../lib/forge-std/src/Test.sol";
 import "../../lib/forge-std/src/StdJson.sol";
