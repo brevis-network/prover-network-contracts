@@ -250,6 +250,13 @@ interface IBrevisMarket {
     function setProtocolFeeBps(uint256 newBps) external;
 
     /**
+     * @notice Update the overcommit protection basis points
+     * @dev Only owner can call this function
+     * @param newBps New overcommit basis points (0-10000)
+     */
+    function setOvercommitBps(uint256 newBps) external;
+
+    /**
      * @notice Withdraw accumulated protocol fees
      * @dev Only owner can call this function
      * @param to Address to send the fees to

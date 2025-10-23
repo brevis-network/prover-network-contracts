@@ -9,10 +9,10 @@ A sealed-bid reverse auction marketplace for zero-knowledge proof generation, wi
 - [3. Core Data Structures](#3-core-data-structures)
 - [4. Reverse Auction Process](#4-reverse-auction-process)
 - [5. Integration with Staking](#5-integration-with-staking)
-- [6. Prover Submitters](#6-prover-submitters)
-- [7. Configuration & Admin](#7-configuration--admin)
-- [8. Prover Stats](#8-prover-stats)
-- [9. Overcommit Protection](#9-overcommit-protection)
+- [6. Overcommit Protection](#6-overcommit-protection)
+- [7. Prover Submitters](#7-prover-submitters)
+- [8. Prover Statistics](#8-prover-statistics)
+- [9. Configuration & Admin](#9-configuration--admin)
 
 ---
 
@@ -108,7 +108,27 @@ stakingController.isProverEligible(prover, minimumStake)
 
 ---
 
-## 6. Prover Submitters
+## 6. Overcommit Protection
+
+To preserve slashing feasibility and avoid overcommitting provers across concurrent assignments, the market enforces an eligibility buffer based on currently assigned work.
+
+#### Key concepts:
+- `assignedStake[prover]`: the sum of `minStake` across requests where the prover is currently the winner and the request is not yet fulfilled or slashed.
+- `overcommitBps`: owner-configurable basis points applied to `assignedStake` when checking new eligibility.
+
+#### Eligibility rule (applies at both bid and reveal):
+- `required = request.minStake + assignedStake[prover] * overcommitBps / 10000`
+- The staking controller must report the prover eligible for this `required` amount.
+
+#### Lifecycle of `assignedStake`:
+- On reveal, when a prover becomes the current winner, their `assignedStake` increases by the request’s `minStake`. If a later reveal produces a lower bid, the `assignedStake` moves from the previous winner to the new winner.
+- On `submitProof` (success) or `slash` (failure after refund), the request’s `minStake` is released from the winning prover’s `assignedStake`.
+
+#### Tuning guidance:
+- Set `overcommitBps` to balance throughput vs. safety. For example, `500` (5%) adds a small buffer; `10000` (100%) requires a prover to have enough stake to cover all assigned `minStake` cumulatively before taking new work.
+---
+
+## 7. Prover Submitters
 
 The marketplace supports **submitter authorization** where provers can register submitter addresses to act on their behalf. This enables provers managed by multisig wallets or HD wallets to use dedicated "hot" keys for bidding and proof submission while keeping their main prover keys secure.
 
@@ -146,31 +166,7 @@ unregisterSubmitter()  // Submitter removes themselves
 
 ---
 
-## 7. Configuration & Admin
-
-### Parameters
-- `biddingPhaseDuration` - Sealed bid submission window
-- `revealPhaseDuration` - Bid reveal window  
-- `minMaxFee` - Minimum allowed maxFee to prevent spam requests
-- `slashBps` - Slashing percentage in basis points (0-10000)
-- `slashWindow` - Time window for slashing after deadline
-- `protocolFeeBps` - Protocol’s cut of prover payment in basis points (0-10000)
-- `overcommitBps` - Buffer applied to a prover’s currently assigned stake when checking eligibility (0-10000). Higher values more aggressively prevent overcommitment. Default is 500 (5%).
-
-### Admin Functions
-- Update parameters
-- Change PicoVerifier address
-
-Additional:
-- `setOvercommitBps(uint256 newBps)` – Owner-only. Sets the overcommit buffer in basis points and emits `OvercommitBpsUpdated(oldBps, newBps)`. Reverts if `newBps > 10000`.
-
-### Constants
-- Fee token automatically synced with staking system
-- `MAX_DEADLINE_DURATION` - Maximum request lifetime (30 days)
-
----
-
-## 8. Prover Stats
+## 8. Prover Statistics
 
 BrevisMarket tracks prover activity for explorer/analytics via lifetime totals and epoch–based recent windows.
 
@@ -212,25 +208,27 @@ struct ProverStats {
 
 ---
 
-## 9. Overcommit Protection
+## 9. Configuration & Admin
 
-To preserve slashing feasibility and avoid overcommitting provers across concurrent assignments, the market enforces an eligibility buffer based on currently assigned work.
+### Parameters
+- `biddingPhaseDuration` - Sealed bid submission window
+- `revealPhaseDuration` - Bid reveal window  
+- `minMaxFee` - Minimum allowed maxFee to prevent spam requests
+- `slashBps` - Slashing percentage in basis points (0-10000)
+- `slashWindow` - Time window for slashing after deadline
+- `protocolFeeBps` - Protocol’s cut of prover payment in basis points (0-10000)
+- `overcommitBps` - Buffer applied to a prover’s currently assigned stake when checking eligibility (0-10000). Higher values more aggressively prevent overcommitment. Default is 500 (5%).
 
-### Key concepts:
-- `assignedStake[prover]`: the sum of `minStake` across requests where the prover is currently the winner and the request is not yet fulfilled or slashed.
-- `overcommitBps`: owner-configurable basis points applied to `assignedStake` when checking new eligibility.
+### Admin Functions
+- Update parameters
+- Change PicoVerifier address
 
-### Eligibility rule (applies at both bid and reveal):
-- `required = request.minStake + assignedStake[prover] * overcommitBps / 10000`
-- The staking controller must report the prover eligible for this `required` amount.
+Additional:
+- `setOvercommitBps(uint256 newBps)` – Owner-only. Sets the overcommit buffer in basis points and emits `OvercommitBpsUpdated(oldBps, newBps)`. Reverts if `newBps > 10000`.
 
-### Lifecycle of `assignedStake`:
-- On reveal, when a prover becomes the current winner, their `assignedStake` increases by the request’s `minStake`. If a later reveal produces a lower bid, the `assignedStake` moves from the previous winner to the new winner.
-- On `submitProof` (success) or `slash` (failure after refund), the request’s `minStake` is released from the winning prover’s `assignedStake`.
-
-### Tuning guidance:
-- Set `overcommitBps` to balance throughput vs. safety. For example, `500` (5%) adds a small buffer; `10000` (100%) requires a prover to have enough stake to cover all assigned `minStake` cumulatively before taking new work.
-
+### Constants
+- Fee token automatically synced with staking system
+- `MAX_DEADLINE_DURATION` - Maximum request lifetime (30 days)
 ---
 
 **For exact function signatures and interface definitions, see [`IBrevisMarket.sol`](../src/market/IBrevisMarket.sol)**

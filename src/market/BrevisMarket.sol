@@ -59,7 +59,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     uint256 public slashBps; // slashing percentage for penalties in basis points
     uint256 public slashWindow; // time window for slashing after deadline (e.g., 7 days)
     uint256 public protocolFeeBps; // protocol fee percentage in basis points (0-10000)
-    uint256 public overcommitBps = 500; // reserve percentage applied to assignedStake when checking eligibility (default 5%)
+    uint256 public overcommitBps; // reserve percentage applied to assignedStake when checking eligibility
 
     // Protocol treasury
     uint256 public protocolFeeBalance; // accumulated protocol fees
@@ -465,7 +465,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
     /**
      * @notice Update the PicoVerifier contract address
-     * @dev Only owner can call this function
      * @param newVerifier The new PicoVerifier contract address
      */
     function setPicoVerifier(IPicoVerifier newVerifier) external override onlyOwner {
@@ -477,7 +476,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
     /**
      * @notice Update the bidding phase duration
-     * @dev Only owner can call this function
      * @param newDuration New duration in seconds for bidding phase
      */
     function setBiddingPhaseDuration(uint64 newDuration) external override onlyOwner {
@@ -488,7 +486,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
     /**
      * @notice Update the reveal phase duration
-     * @dev Only owner can call this function
      * @param newDuration New duration in seconds for reveal phase
      */
     function setRevealPhaseDuration(uint64 newDuration) external override onlyOwner {
@@ -499,7 +496,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
     /**
      * @notice Update the minimum fee
-     * @dev Only owner can call this function
      * @param newMinFee New minimum fee amount
      */
     function setMinMaxFee(uint256 newMinFee) external override onlyOwner {
@@ -510,7 +506,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
     /**
      * @notice Update the maximum fee
-     * @dev Only owner can call this function
      * @param newMaxFee New maximum fee amount
      */
     function setMaxMaxFee(uint256 newMaxFee) external override onlyOwner {
@@ -521,7 +516,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
     /**
      * @notice Update the slash percentage for penalizing non-performing provers
-     * @dev Only owner can call this function
      * @param newBps New slash percentage in basis points (0-10000)
      */
     function setSlashBps(uint256 newBps) external override onlyOwner {
@@ -533,7 +527,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
     /**
      * @notice Update the slash window duration
-     * @dev Only owner can call this function
      * @param newWindow New slash window duration in seconds
      */
     function setSlashWindow(uint256 newWindow) external override onlyOwner {
@@ -544,7 +537,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
     /**
      * @notice Update the protocol fee percentage
-     * @dev Only owner can call this function
      * @param newBps New protocol fee percentage in basis points (0-10000)
      */
     function setProtocolFeeBps(uint256 newBps) external override onlyOwner {
@@ -567,7 +559,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
     /**
      * @notice Withdraw accumulated protocol fees
-     * @dev Only owner can call this function
      * @param to Address to send the fees to
      */
     function withdrawProtocolFee(address to) external override onlyOwner {
