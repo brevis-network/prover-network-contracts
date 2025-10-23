@@ -1,0 +1,18 @@
+{
+    "staking": {
+        "token": "0x0000000000000000000000000000000000000000",
+        "unstakeDelay": 604800,
+        "minSelfStake": 1000000000000000000000,
+        "maxSlashBps": 5000
+    },
+    "market": {
+        "picoVerifier": "0x0000000000000000000000000000000000000000",
+        "biddingPhaseDuration": 300,
+        "revealPhaseDuration": 600,
+        "minMaxFee": 1000000000000000,
+        "slashBps": 1000,
+        "slashWindow": 86400,
+        "protocolFeeBps": 100,
+        "overcommitBps": 0
+    }
+}

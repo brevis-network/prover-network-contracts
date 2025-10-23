@@ -16,6 +16,7 @@ pragma solidity ^0.8.20;
  * ExistingProxyAdminTest.manual.sol for manual execution when needed.
  */
 import "../../lib/forge-std/src/Test.sol";
+import "../../lib/forge-std/src/StdJson.sol";
 import "../../scripts/DeployProverNetwork.s.sol";
 import "../../test/mocks/MockERC20.sol";
 import "../../src/pico/MockPicoVerifier.sol";
@@ -36,7 +37,9 @@ import {
  * - Single source of truth for deployment validation
  */
 contract DeploymentScriptTest is Test {
+    using stdJson for string;
     // Test deployer setup
+
     uint256 constant TEST_PRIVATE_KEY = 0x1234567890123456789012345678901234567890123456789012345678901234;
     address testDeployer;
 
@@ -358,56 +361,66 @@ contract DeploymentScriptTest is Test {
 
     // ===== Test Helpers =====
     function _setInlineConfig(bool withOptional) internal {
-        // Build minimal required config
+        // Load base config from file for readability
+        string memory base = vm.readFile("test/scripts/test_config.json");
+
+        // Dynamic addresses from freshly deployed mocks
         string memory tokenStr = vm.toString(address(stakingToken));
         string memory picoStr = vm.toString(address(picoVerifier));
 
-        string memory json = string.concat(
+        // Optional overrides as strings
+        string memory slashBpsStr = withOptional ? "1000" : vm.toString(base.readUint("$.market.slashBps"));
+        string memory slashWindowStr = withOptional ? "86400" : vm.toString(base.readUint("$.market.slashWindow"));
+        string memory protocolFeeBpsStr = withOptional ? "100" : vm.toString(base.readUint("$.market.protocolFeeBps"));
+        string memory overcommitBpsStr = vm.toString(base.readUintOr("$.market.overcommitBps", 0));
+
+        // Build nested JSON parts to keep stack shallow
+        string memory stakingJson = string.concat(
             "{",
-            '"staking":{',
             '"token":"',
             tokenStr,
             '",',
-            '"unstakeDelay":604800,',
-            '"minSelfStake":1000000000000000000000,',
-            '"maxSlashBps":5000',
-            "},",
-            '"market":{',
-            '"picoVerifier":"',
-            picoStr,
-            '",',
-            '"biddingPhaseDuration":300,',
-            '"revealPhaseDuration":600,',
-            '"minMaxFee":1000000000000000',
-            "}",
+            '"unstakeDelay":',
+            vm.toString(base.readUint("$.staking.unstakeDelay")),
+            ",",
+            '"minSelfStake":',
+            vm.toString(base.readUint("$.staking.minSelfStake")),
+            ",",
+            '"maxSlashBps":',
+            vm.toString(base.readUint("$.staking.maxSlashBps")),
             "}"
         );
 
-        if (withOptional) {
-            json = string.concat(
-                "{",
-                '"staking":{',
-                '"token":"',
-                tokenStr,
-                '",',
-                '"unstakeDelay":604800,',
-                '"minSelfStake":1000000000000000000000,',
-                '"maxSlashBps":5000',
-                "},",
-                '"market":{',
-                '"picoVerifier":"',
-                picoStr,
-                '",',
-                '"biddingPhaseDuration":300,',
-                '"revealPhaseDuration":600,',
-                '"minMaxFee":1000000000000000,',
-                '"slashBps":1000,',
-                '"slashWindow":86400,',
-                '"protocolFeeBps":100',
-                "}",
-                "}"
-            );
-        }
+        string memory marketJson = string.concat(
+            "{",
+            '"picoVerifier":"',
+            picoStr,
+            '",',
+            '"biddingPhaseDuration":',
+            vm.toString(base.readUint("$.market.biddingPhaseDuration")),
+            ",",
+            '"revealPhaseDuration":',
+            vm.toString(base.readUint("$.market.revealPhaseDuration")),
+            ",",
+            '"minMaxFee":',
+            vm.toString(base.readUint("$.market.minMaxFee")),
+            ",",
+            '"slashBps":',
+            slashBpsStr,
+            ",",
+            '"slashWindow":',
+            slashWindowStr,
+            ",",
+            '"protocolFeeBps":',
+            protocolFeeBpsStr,
+            ",",
+            '"overcommitBps":',
+            overcommitBpsStr,
+            "}"
+        );
+
+        // Build final JSON using base values + dynamic addresses
+        string memory json = string.concat("{", '"staking":', stakingJson, ",", '"market":', marketJson, "}");
 
         vm.setEnv("DEPLOY_CONFIG_JSON", json);
     }
