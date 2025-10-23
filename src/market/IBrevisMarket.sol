@@ -92,6 +92,7 @@ interface IBrevisMarket {
 
     error MarketInvalidRequestStatus(ReqStatus status);
     error MarketZeroAddress();
+    error MarketInvalidBps();
 
     // Request errors
     error MarketDeadlineMustBeInFuture();
@@ -118,12 +119,10 @@ interface IBrevisMarket {
     // Slashing errors
     error MarketBeforeDeadline(uint256 currentTime, uint256 deadline);
     error MarketInvalidStakingController();
-    error MarketInvalidSlashBps();
     error MarketSlashWindowExpired(uint256 currentTime, uint256 slashWindowEnd);
     error MarketNoAssignedProverToSlash(bytes32 reqid);
 
     // Admin errors
-    error MarketInvalidProtocolFeeBps();
     error MarketNoProtocolFeeToWithdraw();
     error MarketInvalidStatsEpochStart(uint64 lastStartAt, uint64 newStartAt);
     error MarketNoFutureEpochToPop();
