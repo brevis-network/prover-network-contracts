@@ -79,6 +79,7 @@ interface IBrevisMarket {
     event StatsReset(uint64 newEpochId, uint64 statsStartAt);
     event StatsEpochScheduled(uint64 scheduledStartAt);
     event StatsEpochPopped(uint64 poppedStartAt);
+    event OvercommitBpsUpdated(uint256 oldBps, uint256 newBps);
 
     // Prover submitter management events
     event SubmitterRegistered(address indexed prover, address indexed submitter);
@@ -91,6 +92,7 @@ interface IBrevisMarket {
 
     error MarketInvalidRequestStatus(ReqStatus status);
     error MarketZeroAddress();
+    error MarketInvalidBps();
 
     // Request errors
     error MarketDeadlineMustBeInFuture();
@@ -117,12 +119,10 @@ interface IBrevisMarket {
     // Slashing errors
     error MarketBeforeDeadline(uint256 currentTime, uint256 deadline);
     error MarketInvalidStakingController();
-    error MarketInvalidSlashBps();
     error MarketSlashWindowExpired(uint256 currentTime, uint256 slashWindowEnd);
     error MarketNoAssignedProverToSlash(bytes32 reqid);
 
     // Admin errors
-    error MarketInvalidProtocolFeeBps();
     error MarketNoProtocolFeeToWithdraw();
     error MarketInvalidStatsEpochStart(uint64 lastStartAt, uint64 newStartAt);
     error MarketNoFutureEpochToPop();
@@ -248,6 +248,13 @@ interface IBrevisMarket {
      * @param newBps New protocol fee percentage in basis points (0-10000)
      */
     function setProtocolFeeBps(uint256 newBps) external;
+
+    /**
+     * @notice Update the overcommit protection basis points
+     * @dev Only owner can call this function
+     * @param newBps New overcommit basis points (0-10000)
+     */
+    function setOvercommitBps(uint256 newBps) external;
 
     /**
      * @notice Withdraw accumulated protocol fees

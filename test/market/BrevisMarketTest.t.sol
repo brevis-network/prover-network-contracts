@@ -1466,4 +1466,189 @@ contract BrevisMarketTest is Test {
         vm.prank(owner);
         market.setProtocolFeeBps(newBps);
     }
+
+    // =========================================================================
+    // OVERCOMMITMENT RESERVE TESTS
+    // =========================================================================
+
+    function _requestAndGetId(IBrevisMarket.ProofRequest memory req) internal returns (bytes32) {
+        vm.prank(requester);
+        market.requestProof(req);
+        return keccak256(abi.encodePacked(req.nonce, req.vk, req.publicValuesDigest));
+    }
+
+    function test_OvercommitReserve_adminAndBounds() public {
+        // Default should be 5%
+        assertEq(market.overcommitBps(), 500);
+
+        // Update and expect event
+        uint256 oldBps = market.overcommitBps();
+        uint256 newBps = 2500;
+        vm.expectEmit(false, false, false, true);
+        emit IBrevisMarket.OvercommitBpsUpdated(oldBps, newBps);
+        vm.prank(owner);
+        market.setOvercommitBps(newBps);
+        assertEq(market.overcommitBps(), newBps);
+
+        // Bounds
+        vm.prank(owner);
+        vm.expectRevert(IBrevisMarket.MarketInvalidBps.selector);
+        market.setOvercommitBps(10001);
+    }
+
+    function test_OvercommitReserve_preventsSecondBidAfterAssignment() public {
+        // Strong reserve to require full coverage of existing obligations
+        vm.prank(owner);
+        market.setOvercommitBps(10000); // 100%
+
+        // Prover1 has exactly MIN_STAKE assets
+        stakingController.setProverStake(prover1, MIN_STAKE);
+        stakingController.setProverEligible(prover1, true, MIN_STAKE);
+
+        // Request A
+        (bytes32 reqidA, IBrevisMarket.ProofRequest memory reqA) = _createBasicRequest();
+        reqA.nonce = 100;
+        reqidA = _requestAndGetId(reqA);
+
+        // Prover1 bids and reveals on A -> becomes winner
+        uint256 feeA = 4e17;
+        bytes32 bidHashA = _createBidHash(feeA, 1);
+        vm.prank(prover1);
+        market.bid(reqidA, bidHashA);
+        vm.warp(block.timestamp + BIDDING_DURATION + 1);
+        vm.prank(prover1);
+        market.reveal(reqidA, feeA, 1);
+
+        // assignedStake should now equal MIN_STAKE
+        assertEq(market.assignedStake(prover1), MIN_STAKE);
+
+        // Request B
+        (bytes32 reqidB, IBrevisMarket.ProofRequest memory reqB) = _createBasicRequest();
+        reqB.nonce = 200;
+        reqidB = _requestAndGetId(reqB);
+
+        // Attempt to bid on B should fail at bid time as required = MIN_STAKE + MIN_STAKE*100% = 2*MIN_STAKE
+        bytes32 bidHashB = _createBidHash(5e17, 2);
+        vm.prank(prover1);
+        vm.expectRevert(
+            abi.encodeWithSelector(IBrevisMarket.MarketProverNotEligible.selector, prover1, MIN_STAKE * 2, MIN_STAKE)
+        );
+        market.bid(reqidB, bidHashB);
+    }
+
+    function test_OvercommitReserve_bidAllowedBeforeFirstRevealButSecondRevealFails() public {
+        vm.prank(owner);
+        market.setOvercommitBps(10000); // 100%
+
+        stakingController.setProverStake(prover1, MIN_STAKE);
+        stakingController.setProverEligible(prover1, true, MIN_STAKE);
+
+        // Request A and B
+        (bytes32 reqidA, IBrevisMarket.ProofRequest memory reqA) = _createBasicRequest();
+        reqA.nonce = 300;
+        reqidA = _requestAndGetId(reqA);
+        (bytes32 reqidB, IBrevisMarket.ProofRequest memory reqB) = _createBasicRequest();
+        reqB.nonce = 400;
+        reqidB = _requestAndGetId(reqB);
+
+        // Place bids for both before any reveal (should pass as assignedMinStake is 0)
+        bytes32 bidHashA = _createBidHash(5e17, 1);
+        bytes32 bidHashB = _createBidHash(5e17, 2);
+        vm.prank(prover1);
+        market.bid(reqidA, bidHashA);
+        vm.prank(prover1);
+        market.bid(reqidB, bidHashB);
+
+        // Move to reveal; reveal A first to become winner -> assigns MIN_STAKE
+        vm.warp(block.timestamp + BIDDING_DURATION + 1);
+        vm.prank(prover1);
+        market.reveal(reqidA, 5e17, 1);
+        assertEq(market.assignedStake(prover1), MIN_STAKE);
+
+        // Reveal for B should now fail due to overcommit prevention
+        vm.prank(prover1);
+        vm.expectRevert(
+            abi.encodeWithSelector(IBrevisMarket.MarketProverNotEligible.selector, prover1, MIN_STAKE * 2, MIN_STAKE)
+        );
+        market.reveal(reqidB, 5e17, 2);
+    }
+
+    function test_OvercommitReserve_releaseOnFulfillAllowsNext() public {
+        vm.prank(owner);
+        market.setOvercommitBps(10000); // 100%
+
+        stakingController.setProverStake(prover1, MIN_STAKE);
+        stakingController.setProverEligible(prover1, true, MIN_STAKE);
+
+        // Request A
+        (bytes32 reqidA, IBrevisMarket.ProofRequest memory reqA) = _createBasicRequest();
+        reqA.nonce = 500;
+        reqidA = _requestAndGetId(reqA);
+
+        // Win A
+        uint256 feeA = 5e17;
+        vm.prank(prover1);
+        market.bid(reqidA, _createBidHash(feeA, 1));
+        vm.warp(block.timestamp + BIDDING_DURATION + 1);
+        vm.prank(prover1);
+        market.reveal(reqidA, feeA, 1);
+        assertEq(market.assignedStake(prover1), MIN_STAKE);
+
+        // Move past reveal to submission phase and fulfill
+        vm.warp(block.timestamp + REVEAL_DURATION + 1);
+        vm.prank(prover1);
+        market.submitProof(reqidA, VALID_PROOF);
+        assertEq(market.assignedStake(prover1), 0);
+
+        // Request B now succeeds
+        (bytes32 reqidB, IBrevisMarket.ProofRequest memory reqB) = _createBasicRequest();
+        reqB.nonce = 600;
+        reqidB = _requestAndGetId(reqB);
+        vm.prank(prover1);
+        market.bid(reqidB, _createBidHash(4e17, 2));
+        vm.warp(block.timestamp + BIDDING_DURATION + 1);
+        vm.prank(prover1);
+        market.reveal(reqidB, 4e17, 2);
+    }
+
+    function test_OvercommitReserve_releaseOnSlashAllowsNext() public {
+        vm.prank(owner);
+        market.setOvercommitBps(10000); // 100%
+
+        stakingController.setProverStake(prover1, MIN_STAKE);
+        stakingController.setProverEligible(prover1, true, MIN_STAKE);
+
+        // Request A
+        (bytes32 reqidA, IBrevisMarket.ProofRequest memory reqA) = _createBasicRequest();
+        reqA.nonce = 700;
+        reqidA = _requestAndGetId(reqA);
+        // Win A
+        vm.prank(prover1);
+        market.bid(reqidA, _createBidHash(5e17, 1));
+        vm.warp(block.timestamp + BIDDING_DURATION + 1);
+        vm.prank(prover1);
+        market.reveal(reqidA, 5e17, 1);
+        assertEq(market.assignedStake(prover1), MIN_STAKE);
+
+        // Refund after deadline, then slash
+        vm.warp(reqA.fee.deadline + 1);
+        market.refund(reqidA);
+        // Slash window configuration
+        vm.startPrank(owner);
+        market.setSlashWindow(2 days);
+        vm.stopPrank();
+        vm.warp(block.timestamp + 1);
+        market.slash(reqidA);
+        assertEq(market.assignedStake(prover1), 0);
+
+        // Request B can proceed
+        (bytes32 reqidB, IBrevisMarket.ProofRequest memory reqB) = _createBasicRequest();
+        reqB.nonce = 800;
+        reqidB = _requestAndGetId(reqB);
+        vm.prank(prover1);
+        market.bid(reqidB, _createBidHash(4e17, 2));
+        vm.warp(block.timestamp + BIDDING_DURATION + 1);
+        vm.prank(prover1);
+        market.reveal(reqidB, 4e17, 2);
+    }
 }

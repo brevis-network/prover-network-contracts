@@ -37,6 +37,12 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         uint256[8] proof;
     }
 
+    // Stats-epoch metadata (start/end times). endAt = 0 means ongoing epoch.
+    struct StatsEpochInfo {
+        uint64 startAt;
+        uint64 endAt;
+    }
+
     uint256 public constant MAX_DEADLINE_DURATION = 30 days; // maximum deadline duration from request time
 
     uint256 public constant BPS_DENOMINATOR = 10000; // 100.00%
@@ -53,6 +59,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     uint256 public slashBps; // slashing percentage for penalties in basis points
     uint256 public slashWindow; // time window for slashing after deadline (e.g., 7 days)
     uint256 public protocolFeeBps; // protocol fee percentage in basis points (0-10000)
+    uint256 public overcommitBps; // reserve percentage applied to assignedStake when checking eligibility
 
     // Protocol treasury
     uint256 public protocolFeeBalance; // accumulated protocol fees
@@ -70,17 +77,15 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     // Populated lazily when a prover's window rolls over to a new epoch
     mapping(address => mapping(uint64 => ProverStats)) public proverStatsByEpoch;
 
-    // Stats-epoch metadata (start/end times). endAt = 0 means ongoing epoch.
-    struct StatsEpochInfo {
-        uint64 startAt;
-        uint64 endAt;
-    }
-
     // Stats-epoch metadata history as an ordered array (epochId == index)
     StatsEpochInfo[] public statsEpochs;
 
     // Current epoch id (index into statsEpochs). Advanced lazily on activity.
     uint64 public statsEpochId;
+
+    // Sum of minStake across all assigned-but-unfinalized requests per prover.
+    // checking eligibility: required = req.minStake + assignedStake[prover] * overcommitBps / 10_000.
+    mapping(address => uint256) public assignedStake;
 
     // Storage gap for future upgrades. Reserves 40 slots.
     uint256[40] private __gap;
@@ -169,6 +174,9 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
         // Approve unlimited tokens to staking controller for reward distribution
         feeToken.approve(address(stakingController), type(uint256).max);
+
+        // Default reserve to 5%
+        overcommitBps = 500;
     }
 
     // =========================================================================
@@ -238,8 +246,9 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
         // Get the effective prover (the prover the caller is acting on behalf of)
         address prover = _getEffectiveProver(msg.sender);
-        // Check if effective prover is eligible (must meet minimum stake requirement)
-        _requireProverEligible(prover, req.fee.minStake);
+        // Check eligibility considering existing pending obligations
+        uint256 requiredForBid = req.fee.minStake + ((assignedStake[prover] * overcommitBps) / BPS_DENOMINATOR);
+        _requireProverEligible(prover, requiredForBid);
 
         // Track if this is a new bid (not overwriting existing)
         bool isNewBid = req.bids[prover] == bytes32(0);
@@ -291,8 +300,9 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
         // Get the effective prover (the prover the caller is acting on behalf of)
         address prover = _getEffectiveProver(msg.sender);
-        // Check if effective prover is still eligible during reveal (re-validate minimum stake requirement)
-        _requireProverEligible(prover, req.fee.minStake);
+        // Check eligibility considering existing pending obligations
+        uint256 requiredForReveal = req.fee.minStake + ((assignedStake[prover] * overcommitBps) / BPS_DENOMINATOR);
+        _requireProverEligible(prover, requiredForReveal);
 
         // Verify the revealed bid matches the hash
         bytes32 expectedHash = keccak256(abi.encodePacked(fee, nonce));
@@ -344,6 +354,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         // Update request state
         req.proof = proof;
         req.status = ReqStatus.Fulfilled;
+        // Release any reserved obligation for this request as it has been fulfilled successfully
+        _releaseObligation(req);
 
         // Calculate and distribute fees
         uint256 actualFee = req.second.fee; // Reverse second-price auction: winner pays second-lowest bid
@@ -442,6 +454,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         stakingController.slashByAmount(req.winner.prover, slashAmount);
         // Update status to prevent double slashing
         req.status = ReqStatus.Slashed;
+        // Release any reserved obligation tied to this request now that it is finalized by slashing
+        _releaseObligation(req);
         emit ProverSlashed(reqid, req.winner.prover, slashAmount);
     }
 
@@ -451,7 +465,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
     /**
      * @notice Update the PicoVerifier contract address
-     * @dev Only owner can call this function
      * @param newVerifier The new PicoVerifier contract address
      */
     function setPicoVerifier(IPicoVerifier newVerifier) external override onlyOwner {
@@ -463,7 +476,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
     /**
      * @notice Update the bidding phase duration
-     * @dev Only owner can call this function
      * @param newDuration New duration in seconds for bidding phase
      */
     function setBiddingPhaseDuration(uint64 newDuration) external override onlyOwner {
@@ -474,7 +486,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
     /**
      * @notice Update the reveal phase duration
-     * @dev Only owner can call this function
      * @param newDuration New duration in seconds for reveal phase
      */
     function setRevealPhaseDuration(uint64 newDuration) external override onlyOwner {
@@ -485,7 +496,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
     /**
      * @notice Update the minimum fee
-     * @dev Only owner can call this function
      * @param newMinFee New minimum fee amount
      */
     function setMinMaxFee(uint256 newMinFee) external override onlyOwner {
@@ -496,7 +506,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
     /**
      * @notice Update the maximum fee
-     * @dev Only owner can call this function
      * @param newMaxFee New maximum fee amount
      */
     function setMaxMaxFee(uint256 newMaxFee) external override onlyOwner {
@@ -507,11 +516,10 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
     /**
      * @notice Update the slash percentage for penalizing non-performing provers
-     * @dev Only owner can call this function
      * @param newBps New slash percentage in basis points (0-10000)
      */
     function setSlashBps(uint256 newBps) external override onlyOwner {
-        if (newBps > BPS_DENOMINATOR) revert MarketInvalidSlashBps();
+        if (newBps > BPS_DENOMINATOR) revert MarketInvalidBps();
         uint256 oldBps = slashBps;
         slashBps = newBps;
         emit SlashBpsUpdated(oldBps, newBps);
@@ -519,7 +527,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
     /**
      * @notice Update the slash window duration
-     * @dev Only owner can call this function
      * @param newWindow New slash window duration in seconds
      */
     function setSlashWindow(uint256 newWindow) external override onlyOwner {
@@ -530,19 +537,28 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
     /**
      * @notice Update the protocol fee percentage
-     * @dev Only owner can call this function
      * @param newBps New protocol fee percentage in basis points (0-10000)
      */
     function setProtocolFeeBps(uint256 newBps) external override onlyOwner {
-        if (newBps > BPS_DENOMINATOR) revert MarketInvalidProtocolFeeBps();
+        if (newBps > BPS_DENOMINATOR) revert MarketInvalidBps();
         uint256 oldBps = protocolFeeBps;
         protocolFeeBps = newBps;
         emit ProtocolFeeBpsUpdated(oldBps, newBps);
     }
 
     /**
+     * @notice Update the reserve basis points used for overcommitment checks
+     * @param newBps New reserve percentage in basis points (0-10000)
+     */
+    function setOvercommitBps(uint256 newBps) external onlyOwner {
+        if (newBps > BPS_DENOMINATOR) revert MarketInvalidBps();
+        uint256 old = overcommitBps;
+        overcommitBps = newBps;
+        emit OvercommitBpsUpdated(old, newBps);
+    }
+
+    /**
      * @notice Withdraw accumulated protocol fees
-     * @dev Only owner can call this function
      * @param to Address to send the fees to
      */
     function withdrawProtocolFee(address to) external override onlyOwner {
@@ -675,6 +691,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         // Update wins to reflect current assigned winner
         address newWinner = req.winner.prover;
         if (newWinner != prevWinner) {
+            // Adjust pending obligations on winner change
+            _reassignObligation(req, prevWinner, newWinner);
             if (prevWinner != address(0)) {
                 ProverStats storage sPrev = proverStats[prevWinner];
                 if (sPrev.wins > 0) sPrev.wins -= 1;
@@ -699,6 +717,42 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     function _requireProverEligible(address prover, uint256 minimumStake) internal view {
         (bool eligible, uint256 currentStake) = stakingController.isProverEligible(prover, minimumStake);
         if (!eligible) revert MarketProverNotEligible(prover, minimumStake, currentStake);
+    }
+
+    /**
+     * @notice Internal utility to reassign obligation on winner change
+     * @param req Storage reference to the request state
+     * @param prevWinner Address of the previous winner
+     * @param newWinner Address of the new winner
+     */
+    function _reassignObligation(ReqState storage req, address prevWinner, address newWinner) internal {
+        uint256 ms = req.fee.minStake;
+        if (prevWinner != address(0)) {
+            if (assignedStake[prevWinner] >= ms) {
+                assignedStake[prevWinner] -= ms;
+            } else {
+                assignedStake[prevWinner] = 0;
+            }
+        }
+        if (newWinner != address(0)) {
+            assignedStake[newWinner] += ms;
+        }
+    }
+
+    /**
+     * @notice Internal utility to release obligation on request finalization
+     * @param req Storage reference to the request state
+     */
+    function _releaseObligation(ReqState storage req) internal {
+        address p = req.winner.prover;
+        if (p != address(0)) {
+            uint256 ms = req.fee.minStake;
+            if (assignedStake[p] >= ms) {
+                assignedStake[p] -= ms;
+            } else {
+                assignedStake[p] = 0;
+            }
+        }
     }
 
     // =========================================================================
