@@ -66,16 +66,8 @@ contract DeploymentScriptTest is Test {
 
         // Set required environment
         vm.setEnv("PRIVATE_KEY", vm.toString(TEST_PRIVATE_KEY));
-        vm.setEnv("STAKING_TOKEN_ADDRESS", vm.toString(address(stakingToken)));
-        vm.setEnv("PICO_VERIFIER_ADDRESS", vm.toString(address(picoVerifier)));
-
-        // Required parameters
-        vm.setEnv("UNSTAKE_DELAY", "604800"); // 7 days
-        vm.setEnv("MIN_SELF_STAKE", "1000000000000000000000"); // 1000e18
-        vm.setEnv("MAX_SLASH_BPS", "5000"); // 50%
-        vm.setEnv("BIDDING_PHASE_DURATION", "300"); // 5 minutes
-        vm.setEnv("REVEAL_PHASE_DURATION", "600"); // 10 minutes
-        vm.setEnv("MIN_MAX_FEE", "1000000000000000"); // 1e15
+        // Provide inline JSON config (single source of truth)
+        _setInlineConfig(false);
 
         // Execute the actual production deployment script
         DeployProverNetwork deployScript = new DeployProverNetwork();
@@ -99,19 +91,8 @@ contract DeploymentScriptTest is Test {
 
         // Set required environment
         vm.setEnv("PRIVATE_KEY", vm.toString(TEST_PRIVATE_KEY));
-        vm.setEnv("STAKING_TOKEN_ADDRESS", vm.toString(address(stakingToken)));
-        vm.setEnv("PICO_VERIFIER_ADDRESS", vm.toString(address(picoVerifier)));
-        vm.setEnv("UNSTAKE_DELAY", "604800");
-        vm.setEnv("MIN_SELF_STAKE", "1000000000000000000000");
-        vm.setEnv("MAX_SLASH_BPS", "5000");
-        vm.setEnv("BIDDING_PHASE_DURATION", "300");
-        vm.setEnv("REVEAL_PHASE_DURATION", "600");
-        vm.setEnv("MIN_MAX_FEE", "1000000000000000");
-
-        // Set optional market parameters
-        vm.setEnv("MARKET_SLASH_BPS", "1000"); // 10%
-        vm.setEnv("MARKET_SLASH_WINDOW", "86400"); // 1 day
-        vm.setEnv("MARKET_PROTOCOL_FEE_BPS", "100"); // 1%
+        // Provide inline JSON config with optional params
+        _setInlineConfig(true);
 
         DeployProverNetwork deployScript = new DeployProverNetwork();
         deployScript.run();
@@ -153,16 +134,9 @@ contract DeploymentScriptTest is Test {
     function test_UpgradeOperations() public {
         console.log("\n=== Testing Upgrade Operations ===");
 
-        // Step 1: Deploy initial system
+        // Step 1: Deploy initial system (use inline JSON config)
         vm.setEnv("PRIVATE_KEY", vm.toString(TEST_PRIVATE_KEY));
-        vm.setEnv("STAKING_TOKEN_ADDRESS", vm.toString(address(stakingToken)));
-        vm.setEnv("PICO_VERIFIER_ADDRESS", vm.toString(address(picoVerifier)));
-        vm.setEnv("UNSTAKE_DELAY", "604800");
-        vm.setEnv("MIN_SELF_STAKE", "1000000000000000000000");
-        vm.setEnv("MAX_SLASH_BPS", "5000");
-        vm.setEnv("BIDDING_PHASE_DURATION", "300");
-        vm.setEnv("REVEAL_PHASE_DURATION", "600");
-        vm.setEnv("MIN_MAX_FEE", "1000000000000000");
+        _setInlineConfig(false);
 
         DeployProverNetwork deployScript = new DeployProverNetwork();
         deployScript.run();
@@ -380,5 +354,61 @@ contract DeploymentScriptTest is Test {
         );
 
         console.log("Post-upgrade system functionality validation: PASSED");
+    }
+
+    // ===== Test Helpers =====
+    function _setInlineConfig(bool withOptional) internal {
+        // Build minimal required config
+        string memory tokenStr = vm.toString(address(stakingToken));
+        string memory picoStr = vm.toString(address(picoVerifier));
+
+        string memory json = string.concat(
+            "{",
+            '"staking":{',
+            '"token":"',
+            tokenStr,
+            '",',
+            '"unstakeDelay":604800,',
+            '"minSelfStake":1000000000000000000000,',
+            '"maxSlashBps":5000',
+            "},",
+            '"market":{',
+            '"picoVerifier":"',
+            picoStr,
+            '",',
+            '"biddingPhaseDuration":300,',
+            '"revealPhaseDuration":600,',
+            '"minMaxFee":1000000000000000',
+            "}",
+            "}"
+        );
+
+        if (withOptional) {
+            json = string.concat(
+                "{",
+                '"staking":{',
+                '"token":"',
+                tokenStr,
+                '",',
+                '"unstakeDelay":604800,',
+                '"minSelfStake":1000000000000000000000,',
+                '"maxSlashBps":5000',
+                "},",
+                '"market":{',
+                '"picoVerifier":"',
+                picoStr,
+                '",',
+                '"biddingPhaseDuration":300,',
+                '"revealPhaseDuration":600,',
+                '"minMaxFee":1000000000000000,',
+                '"slashBps":1000,',
+                '"slashWindow":86400,',
+                '"protocolFeeBps":100',
+                "}",
+                "}"
+            );
+        }
+
+        vm.setEnv("DEPLOY_CONFIG_JSON", json);
     }
 }

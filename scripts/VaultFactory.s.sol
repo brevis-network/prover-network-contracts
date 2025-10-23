@@ -2,15 +2,26 @@
 pragma solidity ^0.8.20;
 
 import "../lib/forge-std/src/Script.sol";
+import "../lib/forge-std/src/StdJson.sol";
 // Use v4 proxy contracts for shared ProxyAdmin pattern
 import {ProxyAdmin} from "@openzeppelin/contracts-v4/proxy/transparent/ProxyAdmin.sol";
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts-v4/proxy/transparent/TransparentUpgradeableProxy.sol";
 import "../src/staking/vault/VaultFactory.sol";
 
 contract DeployVaultFactory is Script {
+    using stdJson for string;
+
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
+
+        // Load config (prefer inline JSON via DEPLOY_CONFIG_JSON, else read DEPLOY_CONFIG file path)
+        string memory json = vm.envOr("DEPLOY_CONFIG_JSON", string(""));
+        if (bytes(json).length == 0) {
+            string memory configPath = vm.envString("DEPLOY_CONFIG");
+            require(bytes(configPath).length != 0, "DEPLOY_CONFIG not set");
+            json = vm.readFile(configPath);
+        }
 
         vm.startBroadcast(deployerPrivateKey);
 
@@ -26,7 +37,7 @@ contract DeployVaultFactory is Script {
 
         // Deploy or use existing ProxyAdmin
         console.log("\nConfiguring ProxyAdmin for VaultFactory...");
-        ProxyAdmin proxyAdmin = _deployOrUseProxyAdmin();
+        ProxyAdmin proxyAdmin = _deployOrUseProxyAdmin(json);
 
         console.log("\nDeploying VaultFactory proxy...");
         bytes memory initData = ""; // Empty init data, will call init() separately
@@ -35,8 +46,8 @@ contract DeployVaultFactory is Script {
         VaultFactory vaultFactory = VaultFactory(address(vaultFactoryProxy));
         console.log("VaultFactory proxy:", address(vaultFactory));
 
-        // Initialize with controller address if provided
-        address controllerAddress = vm.envOr("STAKING_CONTROLLER_ADDRESS", address(0));
+        // Initialize with controller address if provided (from config only)
+        address controllerAddress = json.readAddressOr("$.addresses.stakingController", address(0));
         if (controllerAddress != address(0)) {
             console.log("\nInitializing VaultFactory with controller...");
             vaultFactory.init(controllerAddress);
@@ -61,11 +72,14 @@ contract DeployVaultFactory is Script {
         );
     }
 
-    /// @notice Deploy new ProxyAdmin or use existing one from PROXY_ADMIN environment variable
+    /// @notice Deploy new ProxyAdmin or use existing one from config
     /// @return proxyAdmin The ProxyAdmin instance to use
-    function _deployOrUseProxyAdmin() internal returns (ProxyAdmin proxyAdmin) {
-        // Try to get existing ProxyAdmin from environment
-        address existingProxyAdmin = vm.envOr("PROXY_ADMIN", address(0));
+    function _deployOrUseProxyAdmin(string memory json) internal returns (ProxyAdmin proxyAdmin) {
+        // Try to get existing ProxyAdmin from config
+        address existingProxyAdmin = address(0);
+        if (json.keyExists("$.proxyAdmin.address")) {
+            existingProxyAdmin = json.readAddressOr("$.proxyAdmin.address", address(0));
+        }
         if (existingProxyAdmin != address(0)) {
             proxyAdmin = ProxyAdmin(existingProxyAdmin);
             console.log("Using existing ProxyAdmin:", address(proxyAdmin));

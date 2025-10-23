@@ -1,0 +1,25 @@
+{
+    "proxyAdmin": {
+        "address": ""
+    },
+    "staking": {
+        "token": "0x0000000000000000000000000000000000000000",
+        "unstakeDelay": 604800,
+        "minSelfStake": 0,
+        "maxSlashBps": 1000
+    },
+    "market": {
+        "picoVerifier": "0x0000000000000000000000000000000000000000",
+        "biddingPhaseDuration": 300,
+        "revealPhaseDuration": 600,
+        "minMaxFee": 0,
+        "slashBps": 0,
+        "slashWindow": 0,
+        "protocolFeeBps": 0,
+        "overcommitBps": 500
+    },
+    "addresses": {
+        "stakingController": "",
+        "vaultFactory": ""
+    }
+}

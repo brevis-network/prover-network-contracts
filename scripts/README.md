@@ -6,6 +6,7 @@ This directory contains deployment scripts for the Brevis Prover Network contrac
 
 - [1. Setup](#1-setup)
 - [2. Deployment Options](#2-deployment-options)
+- [2a. Config JSON](#2a-config-json)
 - [3. Verification](#3-verification)
 - [4. Upgrade](#4-upgrade)
 - [5. Example Flow](#5-example-flow)
@@ -18,32 +19,14 @@ This directory contains deployment scripts for the Brevis Prover Network contrac
    cp scripts/.env.example .env
    ```
 
-2. **Fill in your configuration in `.env`:**
+2. **Fill in your configuration in `.env` (config required):**
    ```bash
-   # Required for all deployments
-   PRIVATE_KEY=0x...                    # Deployer private key (becomes initial owner)
-   
-   # Optional: Reuse existing ProxyAdmin (for production deployments)
-   PROXY_ADMIN=0x...                    # Existing ProxyAdmin address (leave empty to deploy new)
-   
-   # Staking System
-   STAKING_TOKEN_ADDRESS=0x...          # ERC20 token for staking
-   UNSTAKE_DELAY=604800                 # 7 days in seconds
-   MIN_SELF_STAKE=1000000000000000000   # 1 token minimum
-   MAX_SLASH_BPS=5000                   # 50% max slashing
-   
-   # Market System  
-   PICO_VERIFIER_ADDRESS=0x...          # PicoVerifier contract
-   BIDDING_PHASE_DURATION=300           # 5 minutes
-   REVEAL_PHASE_DURATION=600            # 10 minutes
-   MIN_MAX_FEE=1000000000000000         # 0.001 ETH spam protection
-   
-   # Market System - Optional Parameters (set to 0 to skip)
-   MARKET_SLASH_BPS=1000                # 10% slashing percentage for penalties (0 to disable)
-   MARKET_SLASH_WINDOW=604800           # 7 days slashing window after deadline (0 to disable)
-   MARKET_PROTOCOL_FEE_BPS=100          # 1% protocol fee (0-10000, 0 to disable)
-   
-   # For individual component deployments, see additional variables in .env.example
+  RPC_URL=...
+  PRIVATE_KEY=0x...
+  ETHERSCAN_API_KEY=...
+
+  # Required: JSON config for parameters/addresses
+  DEPLOY_CONFIG=scripts/example_config.json
    ```
 
 **Note:** The deployer becomes the initial owner of all contracts. For production, transfer ownership to a multisig after deployment.
@@ -98,7 +81,46 @@ forge script scripts/MockPicoVerifier.s.sol --rpc-url $RPC_URL --broadcast
 
 > **Note:** Individual ProverVaults are automatically deployed via CREATE2 through the VaultFactory when provers are registered.
 
-**All deployment scripts support optional ProxyAdmin reuse via the `PROXY_ADMIN` environment variable for production deployments with unified administration.**
+**All deployment scripts are config-driven via `DEPLOY_CONFIG`. To reuse an existing ProxyAdmin, set `proxyAdmin.address` in the config JSON.**
+
+## 2a. Config JSON
+
+All deployment scripts require a config JSON file via `DEPLOY_CONFIG`. The JSON is the single source of truth; there are no parameter env fallbacks.
+
+Example at `scripts/example_config.json`:
+
+```json
+{
+  "proxyAdmin": { "address": "0x..." },
+  "staking": {
+    "token": "0x...",
+    "unstakeDelay": 604800,
+    "minSelfStake": 0,
+    "maxSlashBps": 1000
+  },
+  "market": {
+    "picoVerifier": "0x...",
+    "biddingPhaseDuration": 300,
+    "revealPhaseDuration": 600,
+    "minMaxFee": 0,
+    "slashBps": 0,
+    "slashWindow": 0,
+    "protocolFeeBps": 0,
+    "overcommitBps": 500
+  },
+  "addresses": {
+    "stakingController": "0x...",
+    "vaultFactory": "0x..."
+  }
+}
+```
+
+Usage:
+
+```bash
+export DEPLOY_CONFIG=scripts/example_config.json
+forge script scripts/DeployProverNetwork.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
+```
 
 ## 3. Verification
 

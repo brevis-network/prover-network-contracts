@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "../lib/forge-std/src/Script.sol";
+import "../lib/forge-std/src/StdJson.sol";
 // Use v4 proxy contracts for shared ProxyAdmin pattern
 import {ProxyAdmin} from "@openzeppelin/contracts-v4/proxy/transparent/ProxyAdmin.sol";
 import {TransparentUpgradeableProxy} from "@openzeppelin/contracts-v4/proxy/transparent/TransparentUpgradeableProxy.sol";
@@ -19,7 +20,9 @@ import "../src/pico/IPicoVerifier.sol";
  * @dev This script deploys the complete system: Staking System (VaultFactory, StakingController, StakingViewer) + BrevisMarket
  */
 contract DeployProverNetwork is Script {
+    using stdJson for string;
     // Storage variables to avoid stack too deep
+
     ProxyAdmin public sharedProxyAdmin;
     VaultFactory public vaultFactory;
     address public stakingControllerProxy;
@@ -28,8 +31,21 @@ contract DeployProverNetwork is Script {
     address public stakingControllerImpl;
     address public brevisMarketImpl;
 
+    // Cached JSON config (if provided)
+    string private _json;
+
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+
+        // Load config (prefer inline JSON via DEPLOY_CONFIG_JSON, else read DEPLOY_CONFIG file path)
+        string memory inlineJson = vm.envOr("DEPLOY_CONFIG_JSON", string(""));
+        if (bytes(inlineJson).length != 0) {
+            _json = inlineJson;
+        } else {
+            string memory configPath = vm.envString("DEPLOY_CONFIG");
+            require(bytes(configPath).length != 0, "DEPLOY_CONFIG not set");
+            _json = vm.readFile(configPath);
+        }
 
         vm.startBroadcast(deployerPrivateKey);
 
@@ -47,8 +63,11 @@ contract DeployProverNetwork is Script {
     function _deploySharedProxyAdmin() internal {
         console.log("\n0. Configuring ProxyAdmin...");
 
-        // Try to get existing ProxyAdmin from environment
-        address existingProxyAdmin = vm.envOr("PROXY_ADMIN", address(0));
+        // Try to get existing ProxyAdmin from config
+        address existingProxyAdmin = address(0);
+        if (_json.keyExists("$.proxyAdmin.address")) {
+            existingProxyAdmin = _json.readAddressOr("$.proxyAdmin.address", address(0));
+        }
         if (existingProxyAdmin != address(0)) {
             sharedProxyAdmin = ProxyAdmin(existingProxyAdmin);
             console.log("Using existing ProxyAdmin:", address(sharedProxyAdmin));
@@ -84,13 +103,24 @@ contract DeployProverNetwork is Script {
 
         // Deploy StakingController proxy
         console.log("\n1d. Deploying StakingController proxy...");
+        // Resolve staking params from JSON (required keys)
+        require(_json.keyExists("$.staking.token"), "config.staking.token missing");
+        require(_json.keyExists("$.staking.unstakeDelay"), "config.staking.unstakeDelay missing");
+        require(_json.keyExists("$.staking.minSelfStake"), "config.staking.minSelfStake missing");
+        require(_json.keyExists("$.staking.maxSlashBps"), "config.staking.maxSlashBps missing");
+
+        address stakingToken = _json.readAddressOr("$.staking.token", address(0));
+        uint256 unstakeDelay = _json.readUint("$.staking.unstakeDelay");
+        uint256 minSelfStake = _json.readUint("$.staking.minSelfStake");
+        uint256 maxSlashBps = _json.readUint("$.staking.maxSlashBps");
+
         bytes memory stakingControllerInitData = abi.encodeWithSignature(
             "init(address,address,uint256,uint256,uint256)",
-            vm.envAddress("STAKING_TOKEN_ADDRESS"),
+            stakingToken,
             address(vaultFactory),
-            vm.envUint("UNSTAKE_DELAY"),
-            vm.envUint("MIN_SELF_STAKE"),
-            vm.envUint("MAX_SLASH_BPS")
+            unstakeDelay,
+            minSelfStake,
+            maxSlashBps
         );
         TransparentUpgradeableProxy stakingControllerProxy_ =
             new TransparentUpgradeableProxy(stakingControllerImpl, address(sharedProxyAdmin), stakingControllerInitData);
@@ -117,13 +147,24 @@ contract DeployProverNetwork is Script {
 
         // Deploy BrevisMarket proxy
         console.log("\n2c. Deploying BrevisMarket proxy...");
+        // Resolve market params from JSON (required keys)
+        require(_json.keyExists("$.market.picoVerifier"), "config.market.picoVerifier missing");
+        require(_json.keyExists("$.market.biddingPhaseDuration"), "config.market.biddingPhaseDuration missing");
+        require(_json.keyExists("$.market.revealPhaseDuration"), "config.market.revealPhaseDuration missing");
+        require(_json.keyExists("$.market.minMaxFee"), "config.market.minMaxFee missing");
+
+        address picoVerifier = _json.readAddress("$.market.picoVerifier");
+        uint64 biddingPhaseDuration = uint64(_json.readUint("$.market.biddingPhaseDuration"));
+        uint64 revealPhaseDuration = uint64(_json.readUint("$.market.revealPhaseDuration"));
+        uint256 minMaxFee = _json.readUint("$.market.minMaxFee");
+
         bytes memory brevisMarketInitData = abi.encodeWithSignature(
             "init(address,address,uint64,uint64,uint256)",
-            vm.envAddress("PICO_VERIFIER_ADDRESS"),
+            picoVerifier,
             stakingControllerProxy,
-            vm.envUint("BIDDING_PHASE_DURATION"),
-            vm.envUint("REVEAL_PHASE_DURATION"),
-            vm.envUint("MIN_MAX_FEE")
+            biddingPhaseDuration,
+            revealPhaseDuration,
+            minMaxFee
         );
         TransparentUpgradeableProxy brevisMarketProxy_ =
             new TransparentUpgradeableProxy(brevisMarketImpl, address(sharedProxyAdmin), brevisMarketInitData);
@@ -140,8 +181,8 @@ contract DeployProverNetwork is Script {
         BrevisMarket market = BrevisMarket(brevisMarketProxy);
 
         // Set slashing parameters if provided
-        uint256 slashBps = vm.envOr("MARKET_SLASH_BPS", uint256(0));
-        uint256 slashWindow = vm.envOr("MARKET_SLASH_WINDOW", uint256(0));
+        uint256 slashBps = _json.readUintOr("$.market.slashBps", 0);
+        uint256 slashWindow = _json.readUintOr("$.market.slashWindow", 0);
 
         if (slashBps > 0) {
             console.log("Setting slash BPS:", slashBps);
@@ -158,12 +199,19 @@ contract DeployProverNetwork is Script {
         }
 
         // Set protocol fee if provided
-        uint256 protocolFeeBps = vm.envOr("MARKET_PROTOCOL_FEE_BPS", uint256(0));
+        uint256 protocolFeeBps = _json.readUintOr("$.market.protocolFeeBps", 0);
         if (protocolFeeBps > 0) {
             console.log("Setting protocol fee BPS:", protocolFeeBps);
             market.setProtocolFeeBps(protocolFeeBps);
         } else {
             console.log("Protocol fee not configured (disabled)");
+        }
+
+        // Optional overcommit buffer
+        uint256 overcommitBps = _json.readUintOr("$.market.overcommitBps", 0);
+        if (overcommitBps > 0) {
+            console.log("Setting overcommit BPS:", overcommitBps);
+            market.setOvercommitBps(overcommitBps);
         }
     }
 
