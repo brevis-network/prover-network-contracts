@@ -79,7 +79,7 @@ interface IBrevisMarket {
     event StatsReset(uint64 newEpochId, uint64 statsStartAt);
     event StatsEpochScheduled(uint64 scheduledStartAt);
     event StatsEpochPopped(uint64 poppedStartAt);
-    event ReserveBpsUpdated(uint256 oldBps, uint256 newBps);
+    event OvercommitBpsUpdated(uint256 oldBps, uint256 newBps);
 
     // Prover submitter management events
     event SubmitterRegistered(address indexed prover, address indexed submitter);
