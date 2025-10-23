@@ -25,7 +25,7 @@ Notes:
    ```bash
    forge script scripts/DeploySharedProxyAdmin.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
    ```
-Copy the printed address and set it in `config.json` under `proxyAdmin.address`.
+   Copy the printed address and set it in `config.json` under `proxyAdmin.address`.
 
 2) Deploy the full Prover Network:
    ```bash
