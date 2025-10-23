@@ -6,7 +6,6 @@ This directory contains deployment scripts for the Brevis Prover Network contrac
 
 - [1. Setup](#1-setup)
 - [2. Deployment Options](#2-deployment-options)
-- [2a. Config JSON](#2a-config-json)
 - [3. Verification](#3-verification)
 - [4. Upgrade](#4-upgrade)
 - [5. Example Flow](#5-example-flow)
@@ -14,20 +13,27 @@ This directory contains deployment scripts for the Brevis Prover Network contrac
 
 ## 1. Setup
 
-1. **Copy environment template:**
+1. **Copy templates:**
    ```bash
    cp scripts/.env.example .env
+   cp scripts/example_config.json config.json
    ```
 
-2. **Fill in your configuration in `.env` (config required):**
+2. **Edit `.env` and `config.json`:**
+   - Open `.env` and fill in your values. Make sure `DEPLOY_CONFIG` points to your JSON file.
+   - Open `config.json` and set all required parameters (see the example file for the full schema).
+
+   Example `.env`:
    ```bash
-  RPC_URL=...
-  PRIVATE_KEY=0x...
-  ETHERSCAN_API_KEY=...
-
-  # Required: JSON config for parameters/addresses
-  DEPLOY_CONFIG=scripts/example_config.json
+   RPC_URL=...
+   PRIVATE_KEY=0x...
+   ETHERSCAN_API_KEY=...
+   DEPLOY_CONFIG=config.json
    ```
+
+   See `scripts/example_config.json` for the complete schema and defaults you can adapt.
+   - Config JSON is the single source of truth (no per-parameter env fallbacks).
+   - `config.json` must include `proxyAdmin.address` (DeployProverNetwork will not auto-deploy a ProxyAdmin).
 
 **Note:** The deployer becomes the initial owner of all contracts. For production, transfer ownership to a multisig after deployment.
 
@@ -45,21 +51,13 @@ Two-step flow using a shared ProxyAdmin (required):
 
 **`DeploySharedProxyAdmin.s.sol`** - Minimal script that deploys a ProxyAdmin and prints its address/owner.
 ```bash
-# Deploy ProxyAdmin (save the address printed to console)
-forge script scripts/DeploySharedProxyAdmin.s.sol --rpc-url $RPC_URL --broadcast -vv
+forge script scripts/DeploySharedProxyAdmin.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
 ```
 
 **`DeployProverNetwork.s.sol`** ✨ - Comprehensive deployment script that deploys the entire Brevis Prover Network: VaultFactory, StakingController, StakingViewer, BrevisMarket (upgradeable with transparent proxy and shared ProxyAdmin), connects all components, and grants proper roles.
 
 ```bash
-# Deploy to local testnet (requires proxyAdmin.address in config JSON)
-forge script scripts/DeployProverNetwork.s.sol --rpc-url http://localhost:8545 --broadcast -vv
-
-# Deploy to testnet (e.g., Sepolia) (requires proxyAdmin.address)
-forge script scripts/DeployProverNetwork.s.sol --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vv
-
-# Deploy to mainnet (requires proxyAdmin.address)
-forge script scripts/DeployProverNetwork.s.sol --rpc-url $MAINNET_RPC_URL --broadcast --verify -vv
+forge script scripts/DeployProverNetwork.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
 ```
 
 ### Deploy Individual Components
@@ -68,71 +66,32 @@ For specialized deployments, you can deploy individual components:
 
 **`StakingController.s.sol`** - Deploys only the StakingController as an upgradeable contract:
 ```bash
-forge script scripts/StakingController.s.sol --rpc-url $RPC_URL --broadcast
+forge script scripts/StakingController.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
 ```
 
 **`VaultFactory.s.sol`** - Deploys only the VaultFactory as an upgradeable contract:
 ```bash
-forge script scripts/VaultFactory.s.sol --rpc-url $RPC_URL --broadcast
+forge script scripts/VaultFactory.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
 ```
 
 **`BrevisMarket.s.sol`** - Deploys only the BrevisMarket as an upgradeable contract:
 ```bash
-forge script scripts/BrevisMarket.s.sol --rpc-url $RPC_URL --broadcast
+forge script scripts/BrevisMarket.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
 ```
 
 **`StakingViewer.s.sol`** - Deploys only the StakingViewer (read-only contract, no proxy needed):
 ```bash
-forge script scripts/StakingViewer.s.sol --rpc-url $RPC_URL --broadcast
+forge script scripts/StakingViewer.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
 ```
 
 **`MockPicoVerifier.s.sol`** - Deploys a mock PicoVerifier for testing:
 ```bash
-forge script scripts/MockPicoVerifier.s.sol --rpc-url $RPC_URL --broadcast
+forge script scripts/MockPicoVerifier.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
 ```
 
 > **Note:** Individual ProverVaults are automatically deployed via CREATE2 through the VaultFactory when provers are registered.
 
 Important: `DeployProverNetwork.s.sol` always requires `proxyAdmin.address` in the config JSON and will not auto-deploy a ProxyAdmin. For component-only scripts (VaultFactory, StakingController, BrevisMarket), `proxyAdmin.address` is optional; if omitted, those scripts will deploy a new ProxyAdmin for that component.
-
-## 2a. Config JSON
-
-All deployment scripts require a config JSON file via `DEPLOY_CONFIG`. The JSON is the single source of truth; there are no parameter env fallbacks.
-
-Example at `scripts/example_config.json`:
-
-```json
-{
-  "proxyAdmin": { "address": "0x..." },
-  "staking": {
-    "token": "0x...",
-    "unstakeDelay": 604800,
-    "minSelfStake": 0,
-    "maxSlashBps": 1000
-  },
-  "market": {
-    "picoVerifier": "0x...",
-    "biddingPhaseDuration": 300,
-    "revealPhaseDuration": 600,
-    "minMaxFee": 0,
-    "slashBps": 0,
-    "slashWindow": 0,
-    "protocolFeeBps": 0,
-    "overcommitBps": 500
-  },
-  "addresses": {
-    "stakingController": "0x...",
-    "vaultFactory": "0x..."
-  }
-}
-```
-
-Usage:
-
-```bash
-export DEPLOY_CONFIG=scripts/example_config.json
-forge script scripts/DeployProverNetwork.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
-```
 
 ## 3. Verification
 
@@ -234,19 +193,20 @@ cast call $STAKING_CONTROLLER_PROXY "implementation()" --rpc-url $RPC_URL
 
 ```bash
 # 1. Set up environment
-cp scripts/.env.example .env
-# Edit .env with your values
+cp scripts/.env.example deployments/.env
+cp scripts/example_config.json deployments/config.json
+# Edit .env and config.json with your values
 
 # 2. Deploy a shared ProxyAdmin and capture its address
-forge script scripts/DeploySharedProxyAdmin.s.sol --rpc-url $SEPOLIA_RPC_URL --broadcast -vv
+forge script scripts/DeploySharedProxyAdmin.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
 # Update scripts/example_config.json with the printed ProxyAdmin under proxyAdmin.address
 
 # 3. Deploy the full Prover Network (requires proxyAdmin.address in config)
-forge script scripts/DeployProverNetwork.s.sol --rpc-url $SEPOLIA_RPC_URL --broadcast --verify -vv
+forge script scripts/DeployProverNetwork.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
 
 # 4. Verify deployment works correctly (see section 3)
-cast call $STAKING_CONTROLLER_PROXY "stakingToken()" --rpc-url $SEPOLIA_RPC_URL
-cast call $BREVIS_MARKET_PROXY "picoVerifier()" --rpc-url $SEPOLIA_RPC_URL
+cast call $STAKING_CONTROLLER_PROXY "stakingToken()" --rpc-url $RPC_URL
+cast call $BREVIS_MARKET_PROXY "picoVerifier()" --rpc-url $RPC_URL
 
 # 5. Transfer ProxyAdmin ownership to multisig (recommended for production)
 # See "Upgrade" section above for commands
@@ -278,7 +238,7 @@ The deployment scripts are thoroughly tested to ensure reliability:
 
 ```bash
 # Run deployment script tests
-forge test --match-contract DeployProverNetworkTest
+forge test --match-contract DeploymentScriptTest
 
 # Run full test suite (includes deployment tests)
 forge test

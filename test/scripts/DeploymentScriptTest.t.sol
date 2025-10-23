@@ -168,26 +168,28 @@ contract DeploymentScriptTest is Test {
         console.log("New implementation contracts deployed");
 
         // Step 3: Perform upgrades through shared ProxyAdmin
-        ProxyAdmin proxyAdmin = deployScript.sharedProxyAdmin();
+        ProxyAdmin sharedAdmin = deployScript.sharedProxyAdmin();
 
         // Upgrade VaultFactory
         address vaultFactoryProxy = address(deployScript.vaultFactory());
-        address oldVaultFactoryImpl = proxyAdmin.getProxyImplementation(ITransparentUpgradeableProxy(vaultFactoryProxy));
+        address oldVaultFactoryImpl =
+            sharedAdmin.getProxyImplementation(ITransparentUpgradeableProxy(vaultFactoryProxy));
 
-        proxyAdmin.upgrade(ITransparentUpgradeableProxy(vaultFactoryProxy), address(newVaultFactoryImpl));
+        sharedAdmin.upgrade(ITransparentUpgradeableProxy(vaultFactoryProxy), address(newVaultFactoryImpl));
 
         // Upgrade StakingController
         address stakingControllerProxy = deployScript.stakingControllerProxy();
         address oldStakingControllerImpl =
-            proxyAdmin.getProxyImplementation(ITransparentUpgradeableProxy(stakingControllerProxy));
+            sharedAdmin.getProxyImplementation(ITransparentUpgradeableProxy(stakingControllerProxy));
 
-        proxyAdmin.upgrade(ITransparentUpgradeableProxy(stakingControllerProxy), address(newStakingControllerImpl));
+        sharedAdmin.upgrade(ITransparentUpgradeableProxy(stakingControllerProxy), address(newStakingControllerImpl));
 
         // Upgrade BrevisMarket
         address brevisMarketProxy = deployScript.brevisMarketProxy();
-        address oldBrevisMarketImpl = proxyAdmin.getProxyImplementation(ITransparentUpgradeableProxy(brevisMarketProxy));
+        address oldBrevisMarketImpl =
+            sharedAdmin.getProxyImplementation(ITransparentUpgradeableProxy(brevisMarketProxy));
 
-        proxyAdmin.upgrade(ITransparentUpgradeableProxy(brevisMarketProxy), address(newBrevisMarketImpl));
+        sharedAdmin.upgrade(ITransparentUpgradeableProxy(brevisMarketProxy), address(newBrevisMarketImpl));
 
         vm.stopPrank();
 
@@ -195,7 +197,7 @@ contract DeploymentScriptTest is Test {
 
         // Step 4: Validate upgrades
         _validateUpgrades(
-            proxyAdmin,
+            sharedAdmin,
             vaultFactoryProxy,
             stakingControllerProxy,
             brevisMarketProxy,
@@ -322,7 +324,7 @@ contract DeploymentScriptTest is Test {
     }
 
     function _validateUpgrades(
-        ProxyAdmin proxyAdmin,
+        ProxyAdmin sharedAdmin,
         address vaultFactoryProxy,
         address stakingControllerProxy,
         address brevisMarketProxy,
@@ -335,11 +337,11 @@ contract DeploymentScriptTest is Test {
     ) internal view {
         // Validate implementation addresses changed
         address currentVaultFactoryImpl =
-            proxyAdmin.getProxyImplementation(ITransparentUpgradeableProxy(vaultFactoryProxy));
+            sharedAdmin.getProxyImplementation(ITransparentUpgradeableProxy(vaultFactoryProxy));
         address currentStakingControllerImpl =
-            proxyAdmin.getProxyImplementation(ITransparentUpgradeableProxy(stakingControllerProxy));
+            sharedAdmin.getProxyImplementation(ITransparentUpgradeableProxy(stakingControllerProxy));
         address currentBrevisMarketImpl =
-            proxyAdmin.getProxyImplementation(ITransparentUpgradeableProxy(brevisMarketProxy));
+            sharedAdmin.getProxyImplementation(ITransparentUpgradeableProxy(brevisMarketProxy));
 
         // Verify implementations were actually upgraded
         assertEq(currentVaultFactoryImpl, newVaultFactoryImpl, "VaultFactory implementation should be upgraded");
@@ -436,7 +438,7 @@ contract DeploymentScriptTest is Test {
         return json;
     }
 
-    function _stakingJson(string memory base, string memory tokenStr) internal view returns (string memory) {
+    function _stakingJson(string memory base, string memory tokenStr) internal pure returns (string memory) {
         // Note: base string is expected to contain staking defaults
         return string.concat(
             "{",
