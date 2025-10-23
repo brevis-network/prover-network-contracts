@@ -4,57 +4,53 @@ This directory contains tests for the deployment scripts.
 
 ## Automated Tests
 
-**`DeploymentScriptTest.t.sol`** - Runs automatically with `forge test`
-- Production deployment script validation
-- Optional parameter handling  
-- Upgrade operations testing
-- Script instantiation tests
+These run with `forge test`:
 
-## Manual Tests
+- `DeploymentScriptTest.t.sol`
+	- Production deployment script validation
+	- Optional parameter handling
+	- Upgrade operations testing
+	- Script instantiation tests
 
-**`ExistingProxyAdminTest.sol.skip`** - Requires manual execution
+- `ExistingProxyAdminTest.t.sol`
+	- Verifies deploying with an existing ProxyAdmin provided via JSON config
+	- Validates multisig-owned ProxyAdmin scenarios
+	- Confirms proxies are managed by the provided ProxyAdmin
 
-This file contains tests for the optional PROXY_ADMIN environment variable functionality. It's excluded from default test runs due to Foundry VM environment variable isolation quirks.
+## Configuration Model (JSON-only)
 
-### How to Run Manual Tests
+Deployment scripts now use a single JSON config source. Provide either:
 
-```bash
-# 1. Temporarily rename to test file
-mv test/scripts/ExistingProxyAdminTest.sol.skip test/scripts/ExistingProxyAdminTest.t.sol
+- Inline JSON via `DEPLOY_CONFIG_JSON`, or
+- A file path via `DEPLOY_CONFIG` (the script will read the file contents).
 
-# 2. Run the tests
-forge test --match-contract "ExistingProxyAdminTest"
+To reuse an existing ProxyAdmin, include it in the config under `proxyAdmin.address`.
 
-# 3. Rename back after testing
-mv test/scripts/ExistingProxyAdminTest.t.sol test/scripts/ExistingProxyAdminTest.sol.skip
+Example JSON:
+
+```json
+{
+	"proxyAdmin": { "address": "0x1234567890123456789012345678901234567890" },
+	"staking": {
+		"token": "0x...",
+		"unstakeDelay": 604800,
+		"minSelfStake": 1000000000000000000000,
+		"maxSlashBps": 5000
+	},
+	"market": {
+		"picoVerifier": "0x...",
+		"biddingPhaseDuration": 300,
+		"revealPhaseDuration": 600,
+		"minMaxFee": 1000000000000000,
+		"slashBps": 1000,
+		"slashWindow": 86400,
+		"protocolFeeBps": 100,
+		"overcommitBps": 0
+	}
+}
 ```
 
-### What Manual Tests Validate
+Notes:
+- Legacy environment variable fallbacks (like `PROXY_ADMIN`, `STAKING_TOKEN_ADDRESS`, etc.) have been removed.
+- Tests assemble `DEPLOY_CONFIG_JSON` at runtime from a readable base file: `test/scripts/test_config.json`.
 
-- ✅ PROXY_ADMIN environment variable works correctly
-- ✅ Deployment script can reuse existing ProxyAdmin 
-- ✅ Compatible with multisig-owned ProxyAdmin scenarios
-- ✅ Production flexibility for existing infrastructure
-
-The functionality is solid - manual execution is only needed due to Foundry test framework quirks, not code issues.
-
-## Usage in Production
-
-Both deployment patterns are fully supported:
-
-**New ProxyAdmin (Default)**:
-```bash
-# .env file (no PROXY_ADMIN specified)
-PRIVATE_KEY=your_key
-STAKING_TOKEN_ADDRESS=0x...
-# ... other vars
-```
-
-**Existing ProxyAdmin (Production)**:
-```bash
-# .env file (reuse existing ProxyAdmin) 
-PROXY_ADMIN=0x1234567890123456789012345678901234567890
-PRIVATE_KEY=your_key
-STAKING_TOKEN_ADDRESS=0x...
-# ... other vars
-```

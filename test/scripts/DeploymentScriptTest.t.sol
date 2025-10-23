@@ -47,6 +47,9 @@ contract DeploymentScriptTest is Test {
     MockPicoVerifier picoVerifier;
 
     function setUp() public {
+        // Ensure a clean environment before each test
+        vm.setEnv("DEPLOY_CONFIG_JSON", "");
+        vm.setEnv("DEPLOY_CONFIG", "");
         testDeployer = vm.addr(TEST_PRIVATE_KEY);
         vm.deal(testDeployer, 100 ether);
 
@@ -69,12 +72,12 @@ contract DeploymentScriptTest is Test {
 
         // Set required environment
         vm.setEnv("PRIVATE_KEY", vm.toString(TEST_PRIVATE_KEY));
-        // Provide inline JSON config (single source of truth)
-        _setInlineConfig(false);
+        // Build inline JSON config (single source of truth)
+        string memory json = _buildInlineConfig(false);
 
         // Execute the actual production deployment script
         DeployProverNetwork deployScript = new DeployProverNetwork();
-        deployScript.run();
+        deployScript.runWithConfigJson(json);
 
         // Validate critical deployments - comprehensive but focused
         _validateSharedProxyAdmin(deployScript);
@@ -95,10 +98,10 @@ contract DeploymentScriptTest is Test {
         // Set required environment
         vm.setEnv("PRIVATE_KEY", vm.toString(TEST_PRIVATE_KEY));
         // Provide inline JSON config with optional params
-        _setInlineConfig(true);
+        string memory json = _buildInlineConfig(true);
 
         DeployProverNetwork deployScript = new DeployProverNetwork();
-        deployScript.run();
+        deployScript.runWithConfigJson(json);
 
         // Validate deployment completed successfully with optional params
         assertNotEq(deployScript.brevisMarketProxy(), address(0), "Market should deploy with optional params");
@@ -139,10 +142,10 @@ contract DeploymentScriptTest is Test {
 
         // Step 1: Deploy initial system (use inline JSON config)
         vm.setEnv("PRIVATE_KEY", vm.toString(TEST_PRIVATE_KEY));
-        _setInlineConfig(false);
+        string memory json = _buildInlineConfig(false);
 
         DeployProverNetwork deployScript = new DeployProverNetwork();
-        deployScript.run();
+        deployScript.runWithConfigJson(json);
 
         console.log("Initial deployment completed");
 
@@ -360,7 +363,7 @@ contract DeploymentScriptTest is Test {
     }
 
     // ===== Test Helpers =====
-    function _setInlineConfig(bool withOptional) internal {
+    function _buildInlineConfig(bool withOptional) internal view returns (string memory) {
         // Load base config from file for readability
         string memory base = vm.readFile("test/scripts/test_config.json");
 
@@ -421,7 +424,6 @@ contract DeploymentScriptTest is Test {
 
         // Build final JSON using base values + dynamic addresses
         string memory json = string.concat("{", '"staking":', stakingJson, ",", '"market":', marketJson, "}");
-
-        vm.setEnv("DEPLOY_CONFIG_JSON", json);
+        return json;
     }
 }

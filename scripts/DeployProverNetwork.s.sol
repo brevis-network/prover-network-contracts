@@ -60,6 +60,28 @@ contract DeployProverNetwork is Script {
         _printSummary();
     }
 
+    /// @notice Test-friendly entry point to run deployment with an inline JSON string
+    /// @dev Bypasses reading DEPLOY_CONFIG/DEPLOY_CONFIG_JSON from env; still reads PRIVATE_KEY from env
+    /// @param inlineJson The complete deployment configuration JSON string
+    function runWithConfigJson(string memory inlineJson) external {
+        uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
+
+        require(bytes(inlineJson).length != 0, "DEPLOY_CONFIG_JSON empty");
+        _json = inlineJson;
+
+        vm.startBroadcast(deployerPrivateKey);
+
+        console.log("=== Deploying Brevis Prover Network (v4 Shared ProxyAdmin Pattern) ===");
+
+        _deploySharedProxyAdmin();
+        _deployStakingSystem();
+        _deployBrevisMarket();
+        _connectSystems();
+
+        vm.stopBroadcast();
+        _printSummary();
+    }
+
     function _deploySharedProxyAdmin() internal {
         console.log("\n0. Configuring ProxyAdmin...");
 
