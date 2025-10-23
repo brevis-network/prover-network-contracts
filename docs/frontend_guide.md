@@ -297,6 +297,10 @@ function stakingToken() external view returns (IERC20 token);
 // Get prover lists (consider using StakingViewer alternatives)
 function getActiveProvers() external view returns (address[] memory provers);
 function getAllProvers() external view returns (address[] memory provers);
+
+// Get number of provers
+function getProverCount() external view returns (uint256 count);
+function getActiveProverCount() external view returns (uint256 count);
 ```
 
 Single Value Queries
