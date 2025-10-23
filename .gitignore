@@ -10,3 +10,5 @@ broadcast/
 
 .vscode/
 .DS_Store
+
+deployments/

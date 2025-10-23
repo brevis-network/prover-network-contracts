@@ -16,6 +16,7 @@ pragma solidity ^0.8.20;
  * ExistingProxyAdminTest.manual.sol for manual execution when needed.
  */
 import "../../lib/forge-std/src/Test.sol";
+import "../../lib/forge-std/src/StdJson.sol";
 import "../../scripts/DeployProverNetwork.s.sol";
 import "../../test/mocks/MockERC20.sol";
 import "../../src/pico/MockPicoVerifier.sol";
@@ -24,6 +25,7 @@ import {
     ITransparentUpgradeableProxy,
     TransparentUpgradeableProxy
 } from "@openzeppelin/contracts-v4/proxy/transparent/TransparentUpgradeableProxy.sol";
+import {ProxyAdmin} from "@openzeppelin/contracts-v4/proxy/transparent/ProxyAdmin.sol";
 
 /**
  * @title DeploymentScriptTest
@@ -36,20 +38,31 @@ import {
  * - Single source of truth for deployment validation
  */
 contract DeploymentScriptTest is Test {
+    using stdJson for string;
     // Test deployer setup
+
     uint256 constant TEST_PRIVATE_KEY = 0x1234567890123456789012345678901234567890123456789012345678901234;
     address testDeployer;
 
     MockERC20 stakingToken;
     MockPicoVerifier picoVerifier;
+    ProxyAdmin proxyAdmin;
 
     function setUp() public {
+        // Ensure a clean environment before each test
+        vm.setEnv("DEPLOY_CONFIG_JSON", "");
+        vm.setEnv("DEPLOY_CONFIG", "");
         testDeployer = vm.addr(TEST_PRIVATE_KEY);
         vm.deal(testDeployer, 100 ether);
 
         // Deploy test dependencies
         stakingToken = new MockERC20("Test Token", "TEST");
         picoVerifier = new MockPicoVerifier();
+
+        // Deploy a shared ProxyAdmin owned by the test deployer (to match production flow)
+        vm.startPrank(testDeployer);
+        proxyAdmin = new ProxyAdmin();
+        vm.stopPrank();
 
         console.log("=== Test Setup ===");
         console.log("Test Deployer:", testDeployer);
@@ -66,20 +79,12 @@ contract DeploymentScriptTest is Test {
 
         // Set required environment
         vm.setEnv("PRIVATE_KEY", vm.toString(TEST_PRIVATE_KEY));
-        vm.setEnv("STAKING_TOKEN_ADDRESS", vm.toString(address(stakingToken)));
-        vm.setEnv("PICO_VERIFIER_ADDRESS", vm.toString(address(picoVerifier)));
-
-        // Required parameters
-        vm.setEnv("UNSTAKE_DELAY", "604800"); // 7 days
-        vm.setEnv("MIN_SELF_STAKE", "1000000000000000000000"); // 1000e18
-        vm.setEnv("MAX_SLASH_BPS", "5000"); // 50%
-        vm.setEnv("BIDDING_PHASE_DURATION", "300"); // 5 minutes
-        vm.setEnv("REVEAL_PHASE_DURATION", "600"); // 10 minutes
-        vm.setEnv("MIN_MAX_FEE", "1000000000000000"); // 1e15
+        // Build inline JSON config (single source of truth)
+        string memory json = _buildInlineConfig(false);
 
         // Execute the actual production deployment script
         DeployProverNetwork deployScript = new DeployProverNetwork();
-        deployScript.run();
+        deployScript.runWithConfigJson(json);
 
         // Validate critical deployments - comprehensive but focused
         _validateSharedProxyAdmin(deployScript);
@@ -99,22 +104,11 @@ contract DeploymentScriptTest is Test {
 
         // Set required environment
         vm.setEnv("PRIVATE_KEY", vm.toString(TEST_PRIVATE_KEY));
-        vm.setEnv("STAKING_TOKEN_ADDRESS", vm.toString(address(stakingToken)));
-        vm.setEnv("PICO_VERIFIER_ADDRESS", vm.toString(address(picoVerifier)));
-        vm.setEnv("UNSTAKE_DELAY", "604800");
-        vm.setEnv("MIN_SELF_STAKE", "1000000000000000000000");
-        vm.setEnv("MAX_SLASH_BPS", "5000");
-        vm.setEnv("BIDDING_PHASE_DURATION", "300");
-        vm.setEnv("REVEAL_PHASE_DURATION", "600");
-        vm.setEnv("MIN_MAX_FEE", "1000000000000000");
-
-        // Set optional market parameters
-        vm.setEnv("MARKET_SLASH_BPS", "1000"); // 10%
-        vm.setEnv("MARKET_SLASH_WINDOW", "86400"); // 1 day
-        vm.setEnv("MARKET_PROTOCOL_FEE_BPS", "100"); // 1%
+        // Provide inline JSON config with optional params
+        string memory json = _buildInlineConfig(true);
 
         DeployProverNetwork deployScript = new DeployProverNetwork();
-        deployScript.run();
+        deployScript.runWithConfigJson(json);
 
         // Validate deployment completed successfully with optional params
         assertNotEq(deployScript.brevisMarketProxy(), address(0), "Market should deploy with optional params");
@@ -153,19 +147,12 @@ contract DeploymentScriptTest is Test {
     function test_UpgradeOperations() public {
         console.log("\n=== Testing Upgrade Operations ===");
 
-        // Step 1: Deploy initial system
+        // Step 1: Deploy initial system (use inline JSON config)
         vm.setEnv("PRIVATE_KEY", vm.toString(TEST_PRIVATE_KEY));
-        vm.setEnv("STAKING_TOKEN_ADDRESS", vm.toString(address(stakingToken)));
-        vm.setEnv("PICO_VERIFIER_ADDRESS", vm.toString(address(picoVerifier)));
-        vm.setEnv("UNSTAKE_DELAY", "604800");
-        vm.setEnv("MIN_SELF_STAKE", "1000000000000000000000");
-        vm.setEnv("MAX_SLASH_BPS", "5000");
-        vm.setEnv("BIDDING_PHASE_DURATION", "300");
-        vm.setEnv("REVEAL_PHASE_DURATION", "600");
-        vm.setEnv("MIN_MAX_FEE", "1000000000000000");
+        string memory json = _buildInlineConfig(false);
 
         DeployProverNetwork deployScript = new DeployProverNetwork();
-        deployScript.run();
+        deployScript.runWithConfigJson(json);
 
         console.log("Initial deployment completed");
 
@@ -181,26 +168,28 @@ contract DeploymentScriptTest is Test {
         console.log("New implementation contracts deployed");
 
         // Step 3: Perform upgrades through shared ProxyAdmin
-        ProxyAdmin proxyAdmin = deployScript.sharedProxyAdmin();
+        ProxyAdmin sharedAdmin = deployScript.sharedProxyAdmin();
 
         // Upgrade VaultFactory
         address vaultFactoryProxy = address(deployScript.vaultFactory());
-        address oldVaultFactoryImpl = proxyAdmin.getProxyImplementation(ITransparentUpgradeableProxy(vaultFactoryProxy));
+        address oldVaultFactoryImpl =
+            sharedAdmin.getProxyImplementation(ITransparentUpgradeableProxy(vaultFactoryProxy));
 
-        proxyAdmin.upgrade(ITransparentUpgradeableProxy(vaultFactoryProxy), address(newVaultFactoryImpl));
+        sharedAdmin.upgrade(ITransparentUpgradeableProxy(vaultFactoryProxy), address(newVaultFactoryImpl));
 
         // Upgrade StakingController
         address stakingControllerProxy = deployScript.stakingControllerProxy();
         address oldStakingControllerImpl =
-            proxyAdmin.getProxyImplementation(ITransparentUpgradeableProxy(stakingControllerProxy));
+            sharedAdmin.getProxyImplementation(ITransparentUpgradeableProxy(stakingControllerProxy));
 
-        proxyAdmin.upgrade(ITransparentUpgradeableProxy(stakingControllerProxy), address(newStakingControllerImpl));
+        sharedAdmin.upgrade(ITransparentUpgradeableProxy(stakingControllerProxy), address(newStakingControllerImpl));
 
         // Upgrade BrevisMarket
         address brevisMarketProxy = deployScript.brevisMarketProxy();
-        address oldBrevisMarketImpl = proxyAdmin.getProxyImplementation(ITransparentUpgradeableProxy(brevisMarketProxy));
+        address oldBrevisMarketImpl =
+            sharedAdmin.getProxyImplementation(ITransparentUpgradeableProxy(brevisMarketProxy));
 
-        proxyAdmin.upgrade(ITransparentUpgradeableProxy(brevisMarketProxy), address(newBrevisMarketImpl));
+        sharedAdmin.upgrade(ITransparentUpgradeableProxy(brevisMarketProxy), address(newBrevisMarketImpl));
 
         vm.stopPrank();
 
@@ -208,7 +197,7 @@ contract DeploymentScriptTest is Test {
 
         // Step 4: Validate upgrades
         _validateUpgrades(
-            proxyAdmin,
+            sharedAdmin,
             vaultFactoryProxy,
             stakingControllerProxy,
             brevisMarketProxy,
@@ -226,14 +215,58 @@ contract DeploymentScriptTest is Test {
         console.log("Upgrade operations validation: PASSED");
     }
 
+    /**
+     * @notice Validate deployment when the ProxyAdmin is owned by a multisig (non-deployer)
+     * @dev Ensures the script uses the provided ProxyAdmin and does not change its owner
+     */
+    function test_Deployment_WithMultisigOwnedProxyAdmin() public {
+        console.log("\n=== Testing Deployment With Multisig-owned ProxyAdmin ===");
+
+        // Arrange: transfer ownership to a multisig and deploy with that admin
+        address multisig = address(0x999);
+        vm.prank(testDeployer);
+        proxyAdmin.transferOwnership(multisig);
+
+        vm.setEnv("PRIVATE_KEY", vm.toString(TEST_PRIVATE_KEY));
+        string memory json = _buildInlineConfig(false);
+
+        // Act
+        DeployProverNetwork script = new DeployProverNetwork();
+        script.runWithConfigJson(json);
+
+        // Assert: proxies are administered by the provided ProxyAdmin
+        assertEq(
+            proxyAdmin.getProxyAdmin(ITransparentUpgradeableProxy(address(script.vaultFactory()))),
+            address(proxyAdmin),
+            "VaultFactory admin should be provided ProxyAdmin"
+        );
+        assertEq(
+            proxyAdmin.getProxyAdmin(ITransparentUpgradeableProxy(script.stakingControllerProxy())),
+            address(proxyAdmin),
+            "StakingController admin should be provided ProxyAdmin"
+        );
+        assertEq(
+            proxyAdmin.getProxyAdmin(ITransparentUpgradeableProxy(script.brevisMarketProxy())),
+            address(proxyAdmin),
+            "BrevisMarket admin should be provided ProxyAdmin"
+        );
+
+        // Ownership is not changed by deployment
+        assertEq(proxyAdmin.owner(), multisig, "ProxyAdmin ownership should remain with multisig");
+
+        console.log("Deployment with multisig-owned ProxyAdmin: PASSED");
+    }
+
     // ============ Validation Helper Functions ============
 
     function _validateSharedProxyAdmin(DeployProverNetwork deployScript) internal view {
-        address proxyAdmin = address(deployScript.sharedProxyAdmin());
-        assertNotEq(proxyAdmin, address(0), "ProxyAdmin should be deployed");
+        address sharedAdminAddr = address(deployScript.sharedProxyAdmin());
+        assertNotEq(sharedAdminAddr, address(0), "ProxyAdmin should be deployed");
 
         // Validate ownership
         assertEq(deployScript.sharedProxyAdmin().owner(), testDeployer, "ProxyAdmin owner should be deployer");
+        // Validate that the script used the provided ProxyAdmin
+        assertEq(sharedAdminAddr, address(proxyAdmin), "Should use provided ProxyAdmin from config");
 
         console.log("SharedProxyAdmin validation: PASSED");
     }
@@ -291,7 +324,7 @@ contract DeploymentScriptTest is Test {
     }
 
     function _validateUpgrades(
-        ProxyAdmin proxyAdmin,
+        ProxyAdmin sharedAdmin,
         address vaultFactoryProxy,
         address stakingControllerProxy,
         address brevisMarketProxy,
@@ -304,11 +337,11 @@ contract DeploymentScriptTest is Test {
     ) internal view {
         // Validate implementation addresses changed
         address currentVaultFactoryImpl =
-            proxyAdmin.getProxyImplementation(ITransparentUpgradeableProxy(vaultFactoryProxy));
+            sharedAdmin.getProxyImplementation(ITransparentUpgradeableProxy(vaultFactoryProxy));
         address currentStakingControllerImpl =
-            proxyAdmin.getProxyImplementation(ITransparentUpgradeableProxy(stakingControllerProxy));
+            sharedAdmin.getProxyImplementation(ITransparentUpgradeableProxy(stakingControllerProxy));
         address currentBrevisMarketImpl =
-            proxyAdmin.getProxyImplementation(ITransparentUpgradeableProxy(brevisMarketProxy));
+            sharedAdmin.getProxyImplementation(ITransparentUpgradeableProxy(brevisMarketProxy));
 
         // Verify implementations were actually upgraded
         assertEq(currentVaultFactoryImpl, newVaultFactoryImpl, "VaultFactory implementation should be upgraded");
@@ -380,5 +413,88 @@ contract DeploymentScriptTest is Test {
         );
 
         console.log("Post-upgrade system functionality validation: PASSED");
+    }
+
+    // ===== Test Helpers =====
+    function _buildInlineConfig(bool withOptional) internal view returns (string memory) {
+        // Load base config from file for readability
+        string memory base = vm.readFile("test/scripts/test_config.json");
+
+        // Dynamic addresses from freshly deployed mocks
+        string memory tokenStr = vm.toString(address(stakingToken));
+        string memory picoStr = vm.toString(address(picoVerifier));
+        string memory proxyAdminStr = vm.toString(address(proxyAdmin));
+
+        string memory stakingJson = _stakingJson(base, tokenStr);
+        string memory marketJson = _marketJson(base, picoStr, withOptional);
+
+        // ProxyAdmin JSON
+        string memory proxyAdminJson = string.concat("{", '"address":"', proxyAdminStr, '"', "}");
+
+        // Build final JSON using base values + dynamic addresses
+        string memory json = string.concat(
+            "{", '"proxyAdmin":', proxyAdminJson, ",", '"staking":', stakingJson, ",", '"market":', marketJson, "}"
+        );
+        return json;
+    }
+
+    function _stakingJson(string memory base, string memory tokenStr) internal pure returns (string memory) {
+        // Note: base string is expected to contain staking defaults
+        return string.concat(
+            "{",
+            '"token":"',
+            tokenStr,
+            '",',
+            '"unstakeDelay":',
+            vm.toString(stdJson.readUint(base, "$.staking.unstakeDelay")),
+            ",",
+            '"minSelfStake":',
+            vm.toString(stdJson.readUint(base, "$.staking.minSelfStake")),
+            ",",
+            '"maxSlashBps":',
+            vm.toString(stdJson.readUint(base, "$.staking.maxSlashBps")),
+            "}"
+        );
+    }
+
+    function _marketJson(string memory base, string memory picoStr, bool withOptional)
+        internal
+        view
+        returns (string memory)
+    {
+        string memory slashBpsStr = withOptional ? "1000" : vm.toString(stdJson.readUint(base, "$.market.slashBps"));
+        string memory slashWindowStr =
+            withOptional ? "86400" : vm.toString(stdJson.readUint(base, "$.market.slashWindow"));
+        string memory protocolFeeBpsStr =
+            withOptional ? "100" : vm.toString(stdJson.readUint(base, "$.market.protocolFeeBps"));
+        string memory overcommitBpsStr = vm.toString(stdJson.readUintOr(base, "$.market.overcommitBps", 0));
+
+        return string.concat(
+            "{",
+            '"picoVerifier":"',
+            picoStr,
+            '",',
+            '"biddingPhaseDuration":',
+            vm.toString(stdJson.readUint(base, "$.market.biddingPhaseDuration")),
+            ",",
+            '"revealPhaseDuration":',
+            vm.toString(stdJson.readUint(base, "$.market.revealPhaseDuration")),
+            ",",
+            '"minMaxFee":',
+            vm.toString(stdJson.readUint(base, "$.market.minMaxFee")),
+            ",",
+            '"slashBps":',
+            slashBpsStr,
+            ",",
+            '"slashWindow":',
+            slashWindowStr,
+            ",",
+            '"protocolFeeBps":',
+            protocolFeeBpsStr,
+            ",",
+            '"overcommitBps":',
+            overcommitBpsStr,
+            "}"
+        );
     }
 }
