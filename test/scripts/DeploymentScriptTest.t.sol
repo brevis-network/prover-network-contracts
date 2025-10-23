@@ -25,6 +25,7 @@ import {
     ITransparentUpgradeableProxy,
     TransparentUpgradeableProxy
 } from "@openzeppelin/contracts-v4/proxy/transparent/TransparentUpgradeableProxy.sol";
+import {ProxyAdmin} from "@openzeppelin/contracts-v4/proxy/transparent/ProxyAdmin.sol";
 
 /**
  * @title DeploymentScriptTest
@@ -45,6 +46,7 @@ contract DeploymentScriptTest is Test {
 
     MockERC20 stakingToken;
     MockPicoVerifier picoVerifier;
+    ProxyAdmin proxyAdmin;
 
     function setUp() public {
         // Ensure a clean environment before each test
@@ -56,6 +58,11 @@ contract DeploymentScriptTest is Test {
         // Deploy test dependencies
         stakingToken = new MockERC20("Test Token", "TEST");
         picoVerifier = new MockPicoVerifier();
+
+        // Deploy a shared ProxyAdmin owned by the test deployer (to match production flow)
+        vm.startPrank(testDeployer);
+        proxyAdmin = new ProxyAdmin();
+        vm.stopPrank();
 
         console.log("=== Test Setup ===");
         console.log("Test Deployer:", testDeployer);
@@ -206,14 +213,58 @@ contract DeploymentScriptTest is Test {
         console.log("Upgrade operations validation: PASSED");
     }
 
+    /**
+     * @notice Validate deployment when the ProxyAdmin is owned by a multisig (non-deployer)
+     * @dev Ensures the script uses the provided ProxyAdmin and does not change its owner
+     */
+    function test_Deployment_WithMultisigOwnedProxyAdmin() public {
+        console.log("\n=== Testing Deployment With Multisig-owned ProxyAdmin ===");
+
+        // Arrange: transfer ownership to a multisig and deploy with that admin
+        address multisig = address(0x999);
+        vm.prank(testDeployer);
+        proxyAdmin.transferOwnership(multisig);
+
+        vm.setEnv("PRIVATE_KEY", vm.toString(TEST_PRIVATE_KEY));
+        string memory json = _buildInlineConfig(false);
+
+        // Act
+        DeployProverNetwork script = new DeployProverNetwork();
+        script.runWithConfigJson(json);
+
+        // Assert: proxies are administered by the provided ProxyAdmin
+        assertEq(
+            proxyAdmin.getProxyAdmin(ITransparentUpgradeableProxy(address(script.vaultFactory()))),
+            address(proxyAdmin),
+            "VaultFactory admin should be provided ProxyAdmin"
+        );
+        assertEq(
+            proxyAdmin.getProxyAdmin(ITransparentUpgradeableProxy(script.stakingControllerProxy())),
+            address(proxyAdmin),
+            "StakingController admin should be provided ProxyAdmin"
+        );
+        assertEq(
+            proxyAdmin.getProxyAdmin(ITransparentUpgradeableProxy(script.brevisMarketProxy())),
+            address(proxyAdmin),
+            "BrevisMarket admin should be provided ProxyAdmin"
+        );
+
+        // Ownership is not changed by deployment
+        assertEq(proxyAdmin.owner(), multisig, "ProxyAdmin ownership should remain with multisig");
+
+        console.log("Deployment with multisig-owned ProxyAdmin: PASSED");
+    }
+
     // ============ Validation Helper Functions ============
 
     function _validateSharedProxyAdmin(DeployProverNetwork deployScript) internal view {
-        address proxyAdmin = address(deployScript.sharedProxyAdmin());
-        assertNotEq(proxyAdmin, address(0), "ProxyAdmin should be deployed");
+        address sharedAdminAddr = address(deployScript.sharedProxyAdmin());
+        assertNotEq(sharedAdminAddr, address(0), "ProxyAdmin should be deployed");
 
         // Validate ownership
         assertEq(deployScript.sharedProxyAdmin().owner(), testDeployer, "ProxyAdmin owner should be deployer");
+        // Validate that the script used the provided ProxyAdmin
+        assertEq(sharedAdminAddr, address(proxyAdmin), "Should use provided ProxyAdmin from config");
 
         console.log("SharedProxyAdmin validation: PASSED");
     }
@@ -370,43 +421,65 @@ contract DeploymentScriptTest is Test {
         // Dynamic addresses from freshly deployed mocks
         string memory tokenStr = vm.toString(address(stakingToken));
         string memory picoStr = vm.toString(address(picoVerifier));
+        string memory proxyAdminStr = vm.toString(address(proxyAdmin));
 
-        // Optional overrides as strings
-        string memory slashBpsStr = withOptional ? "1000" : vm.toString(base.readUint("$.market.slashBps"));
-        string memory slashWindowStr = withOptional ? "86400" : vm.toString(base.readUint("$.market.slashWindow"));
-        string memory protocolFeeBpsStr = withOptional ? "100" : vm.toString(base.readUint("$.market.protocolFeeBps"));
-        string memory overcommitBpsStr = vm.toString(base.readUintOr("$.market.overcommitBps", 0));
+        string memory stakingJson = _stakingJson(base, tokenStr);
+        string memory marketJson = _marketJson(base, picoStr, withOptional);
 
-        // Build nested JSON parts to keep stack shallow
-        string memory stakingJson = string.concat(
+        // ProxyAdmin JSON
+        string memory proxyAdminJson = string.concat("{", '"address":"', proxyAdminStr, '"', "}");
+
+        // Build final JSON using base values + dynamic addresses
+        string memory json = string.concat(
+            "{", '"proxyAdmin":', proxyAdminJson, ",", '"staking":', stakingJson, ",", '"market":', marketJson, "}"
+        );
+        return json;
+    }
+
+    function _stakingJson(string memory base, string memory tokenStr) internal view returns (string memory) {
+        // Note: base string is expected to contain staking defaults
+        return string.concat(
             "{",
             '"token":"',
             tokenStr,
             '",',
             '"unstakeDelay":',
-            vm.toString(base.readUint("$.staking.unstakeDelay")),
+            vm.toString(stdJson.readUint(base, "$.staking.unstakeDelay")),
             ",",
             '"minSelfStake":',
-            vm.toString(base.readUint("$.staking.minSelfStake")),
+            vm.toString(stdJson.readUint(base, "$.staking.minSelfStake")),
             ",",
             '"maxSlashBps":',
-            vm.toString(base.readUint("$.staking.maxSlashBps")),
+            vm.toString(stdJson.readUint(base, "$.staking.maxSlashBps")),
             "}"
         );
+    }
 
-        string memory marketJson = string.concat(
+    function _marketJson(string memory base, string memory picoStr, bool withOptional)
+        internal
+        view
+        returns (string memory)
+    {
+        string memory slashBpsStr = withOptional ? "1000" : vm.toString(stdJson.readUint(base, "$.market.slashBps"));
+        string memory slashWindowStr =
+            withOptional ? "86400" : vm.toString(stdJson.readUint(base, "$.market.slashWindow"));
+        string memory protocolFeeBpsStr =
+            withOptional ? "100" : vm.toString(stdJson.readUint(base, "$.market.protocolFeeBps"));
+        string memory overcommitBpsStr = vm.toString(stdJson.readUintOr(base, "$.market.overcommitBps", 0));
+
+        return string.concat(
             "{",
             '"picoVerifier":"',
             picoStr,
             '",',
             '"biddingPhaseDuration":',
-            vm.toString(base.readUint("$.market.biddingPhaseDuration")),
+            vm.toString(stdJson.readUint(base, "$.market.biddingPhaseDuration")),
             ",",
             '"revealPhaseDuration":',
-            vm.toString(base.readUint("$.market.revealPhaseDuration")),
+            vm.toString(stdJson.readUint(base, "$.market.revealPhaseDuration")),
             ",",
             '"minMaxFee":',
-            vm.toString(base.readUint("$.market.minMaxFee")),
+            vm.toString(stdJson.readUint(base, "$.market.minMaxFee")),
             ",",
             '"slashBps":',
             slashBpsStr,
@@ -421,9 +494,5 @@ contract DeploymentScriptTest is Test {
             overcommitBpsStr,
             "}"
         );
-
-        // Build final JSON using base values + dynamic addresses
-        string memory json = string.concat("{", '"staking":', stakingJson, ",", '"market":', marketJson, "}");
-        return json;
     }
 }

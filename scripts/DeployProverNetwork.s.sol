@@ -84,23 +84,14 @@ contract DeployProverNetwork is Script {
 
     function _deploySharedProxyAdmin() internal {
         console.log("\n0. Configuring ProxyAdmin...");
+        // Require an existing ProxyAdmin address in config
+        require(_json.keyExists("$.proxyAdmin.address"), "config.proxyAdmin.address missing");
+        address existingProxyAdmin = _json.readAddress("$.proxyAdmin.address");
+        require(existingProxyAdmin != address(0), "config.proxyAdmin.address is zero");
 
-        // Try to get existing ProxyAdmin from config
-        address existingProxyAdmin = address(0);
-        if (_json.keyExists("$.proxyAdmin.address")) {
-            existingProxyAdmin = _json.readAddressOr("$.proxyAdmin.address", address(0));
-        }
-        if (existingProxyAdmin != address(0)) {
-            sharedProxyAdmin = ProxyAdmin(existingProxyAdmin);
-            console.log("Using existing ProxyAdmin:", address(sharedProxyAdmin));
-            console.log("ProxyAdmin owner:", sharedProxyAdmin.owner());
-            return;
-        }
-
-        // Deploy new ProxyAdmin
-        console.log("Deploying new ProxyAdmin...");
-        sharedProxyAdmin = new ProxyAdmin();
-        console.log("New ProxyAdmin deployed:", address(sharedProxyAdmin));
+        sharedProxyAdmin = ProxyAdmin(existingProxyAdmin);
+        console.log("Using existing ProxyAdmin:", address(sharedProxyAdmin));
+        console.log("ProxyAdmin owner:", sharedProxyAdmin.owner());
     }
 
     function _deployStakingSystem() internal {
