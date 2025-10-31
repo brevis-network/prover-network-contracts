@@ -47,11 +47,17 @@ interface IBrevisMarket {
         uint256 fee;
     }
 
+    struct GlobalStats {
+        uint64 totalRequests; // total proof requests made
+        uint64 totalFulfilled; // total proof requests fulfilled
+        uint256 totalFees; // total fees collected from requesters
+    }
+
     struct ProverStats {
         uint64 bids; // total bids placed
         uint64 reveals; // total bids revealed
-        uint64 wins; // total bids won
         uint64 requestsFulfilled; // total requests successfully fulfilled (proofs delivered)
+        uint64 requestsRefunded; // total assigned requests refunded after deadline (missed by the winner)
         uint64 lastActiveAt; // timestamp of last tracked activity
         uint256 feeReceived; // total rewards (after protocol fee) sent to the prover
     }
@@ -478,4 +484,41 @@ interface IBrevisMarket {
         external
         view
         returns (ProverStats memory stats, uint64 startAt, uint64 endAt);
+
+    /**
+     * @notice Get a prover's lifetime success rate and raw counters
+     * @dev Success rate is computed in basis points (0-10000) as:
+     *      rateBps = requestsFulfilled / (requestsFulfilled + requestsRefunded).
+     *      If denominator is zero, returns 0.
+     * @param prover The prover address to query
+     * @return rateBps Success rate in basis points
+     * @return fulfilled Lifetime fulfilled count
+     * @return refunded Lifetime refunded-after-deadline count (with a final winner)
+     */
+    function getProverSuccessRate(address prover)
+        external
+        view
+        returns (uint256 rateBps, uint64 fulfilled, uint64 refunded);
+
+    // =========================================================================
+    // GLOBAL STATS VIEW
+    // =========================================================================
+
+    /**
+     * @notice Get lifetime (cumulative) global stats across all provers
+     */
+    function getGlobalStatsTotal() external view returns (GlobalStats memory);
+
+    /**
+     * @notice Get recent (current epoch) global stats and its start time
+     */
+    function getGlobalRecentStats() external view returns (GlobalStats memory stats, uint64 startAt);
+
+    /**
+     * @notice Get global stats for a specific epoch id along with epoch metadata
+     */
+    function getGlobalStatsForStatsEpoch(uint64 epochId)
+        external
+        view
+        returns (GlobalStats memory stats, uint64 startAt, uint64 endAt);
 }

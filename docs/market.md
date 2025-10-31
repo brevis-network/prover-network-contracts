@@ -11,7 +11,7 @@ A sealed-bid reverse auction marketplace for zero-knowledge proof generation, wi
 - [5. Integration with Staking](#5-integration-with-staking)
 - [6. Overcommit Protection](#6-overcommit-protection)
 - [7. Prover Submitters](#7-prover-submitters)
-- [8. Prover Statistics](#8-prover-statistics)
+- [8. Statistics](#8-statistics)
 - [9. Configuration & Admin](#9-configuration--admin)
 
 ---
@@ -166,45 +166,65 @@ unregisterSubmitter()  // Submitter removes themselves
 
 ---
 
-## 8. Prover Statistics
+## 8. Statistics
 
-BrevisMarket tracks prover activity for explorer/analytics via lifetime totals and epoch–based recent windows.
+BrevisMarket tracks both per-prover activity and system-wide aggregates via lifetime totals and epoch–based recent windows.
 
 ### Data Model
 
+Global (system-wide) stats:
+```solidity
+struct GlobalStats {
+    uint64 totalRequests;   // total proof requests made
+    uint64 totalFulfilled;  // total proof requests fulfilled
+    uint256 totalFees;      // total requester fees actually paid
+}
+```
+
+Prover stats
 ```solidity
 struct ProverStats {
     uint64 bids;              // total bids placed
     uint64 reveals;           // total bids revealed
-    uint64 wins;              // assignments (times the prover was current winner)
     uint64 requestsFulfilled; // successful request fulfillments (proofs delivered)
+    uint64 requestsRefunded;  // assigned requests refunded after deadline (missed by the final winner)
     uint64 lastActiveAt;      // last activity timestamp (only on the prover's own actions)
     uint256 feeReceived;      // total rewards (after protocol fee) sent to the prover
 }
 ```
 
 ### APIs
-- Lifetime totals per prover: immutable aggregates since genesis
-  - `getProverStatsTotal(address prover)` → ProverStats
-- Recent (current stats-epoch): rolling window since the last scheduled epoch started
-  - `getProverRecentStats(address prover)` → (ProverStats stats, uint64 startAt)
-  - `getRecentStatsInfo()` → (startAt, epochId)
-- Historical stats-epochs: on-chain time-bounded buckets via public getters
-  - `statsEpochId()` → current epoch id
-  - `statsEpochs(uint256 index)` → (startAt, endAt) where endAt = 0 marks the tail (last scheduled) epoch
-  - `statsEpochsLength()` → number of epochs
-  - `getProverStatsForStatsEpoch(address prover, uint64 epochId)` → (ProverStats stats, uint64 startAt, uint64 endAt)
+Global stats:
+- `getGlobalStatsTotal()` — Lifetime totals (system-wide)
+- `getGlobalRecentStats()` — Recent (current epoch) stats + start timestamp
+- `getGlobalStatsForStatsEpoch(epochId)` — Stats for a specific epoch + time window
+
+Per-prover stats:
+- `getProverStatsTotal(prover)` — Lifetime totals
+- `getProverRecentStats(prover)` — Recent (current epoch) stats + start timestamp
+- `getProverSuccessRate(prover)` — Lifetime success rate (basis points) + raw counters
+- `getProverStatsForStatsEpoch(prover, epochId)` — Stats for a specific epoch + time window
+
+Epoch helpers:
+- `statsEpochId()` — Current epoch id
+- `statsEpochs(index)` — (startAt, endAt) for an epoch (endAt = 0 marks the tail epoch)
+- `statsEpochsLength()` — Number of scheduled epochs
+- `getRecentStatsInfo()` — (startAt, epochId) for the current stats window
 
 ### Semantics
-- ProverStats includes: bids, reveals, wins (assigned), requestsFulfilled (proofs delivered), lastActiveAt, feeReceived.
-- Derived metric missed = wins − requestsFulfilled.
-- On bid/reveal/submit, both the lifetime total and current stats-epoch buckets are updated.
-- scheduleStatsEpoch(startAt) [admin, startAt strictly greater than last start]:
-  - Sets the previous epoch’s `endAt` to `startAt` at scheduling time (may be in the future), then appends a new epoch starting at `startAt`.
-  - If `startAt == 0` (interpreted as now), the new epoch becomes current immediately. Otherwise, rollover to the new epoch is lazy on the first stats-changing action at/after `startAt` (emits `StatsReset(newEpochId, startAt)`).
-  - Recent == stats for the current epoch.
-- popStatsEpoch() [admin]:
-  - Removes the last scheduled epoch if it has not started yet and restores the previous epoch’s `endAt` to 0.
+- Totals: cumulative since genesis; snapshots auto carry-forward across epochs.
+- Recent: current epoch values as a diff vs the previous snapshot.
+- requestsFulfilled: increments on successful `submitProof()` (before deadline).
+- requestsRefunded: counts refunds after deadline when a final winner exists; excludes no-winner refunds.
+- Success rate: `fulfilled / (fulfilled + refunded)` (basis points via `getProverSuccessRate(prover)`).
+- lastActiveAt: set on prover actions (bid/reveal/submit); non-zero in Recent only if activity this epoch.
+- Totals fallback: if no activity in current epoch, totals getters return the previous snapshot.
+
+Global stats mirror the above:
+- totalRequests: increments on `requestProof()`.
+- totalFulfilled: increments on `submitProof()`.
+- totalFees: adds the actual fee paid on `submitProof()`.
+- Epochs are scheduled by admin; rollover to a new epoch is lazy on first activity at/after the start time.
 
 ---
 
