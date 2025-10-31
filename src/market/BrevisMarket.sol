@@ -809,10 +809,9 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         uint64 eid = statsEpochId;
         ProverStats memory cur = proverStats[prover][eid];
         if (eid == 0) return cur;
-        // If current epoch snapshot hasn't been initialized for this prover, fall back to previous
-        bool curActive = cur.bids != 0 || cur.reveals != 0 || cur.requestsFulfilled != 0 || cur.requestsRefunded != 0
-            || cur.feeReceived != 0 || cur.lastActiveAt != 0;
-        if (!curActive) {
+        // If current epoch snapshot hasn't been initialized for this prover, fall back to previous.
+        // We use lastActiveAt value to detect an initialized snapshot.
+        if (cur.lastActiveAt == 0) {
             return proverStats[prover][eid - 1];
         }
         return cur;
@@ -868,12 +867,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     {
         uint64 eid = statsEpochId;
         ProverStats memory cur = proverStats[prover][eid];
-        if (eid > 0) {
-            bool curActive = cur.bids != 0 || cur.reveals != 0 || cur.requestsFulfilled != 0
-                || cur.requestsRefunded != 0 || cur.feeReceived != 0 || cur.lastActiveAt != 0;
-            if (!curActive) {
-                cur = proverStats[prover][eid - 1];
-            }
+        if (eid > 0 && cur.lastActiveAt == 0) {
+            cur = proverStats[prover][eid - 1];
         }
         fulfilled = cur.requestsFulfilled;
         refunded = cur.requestsRefunded;
@@ -888,8 +883,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         uint64 eid = statsEpochId;
         GlobalStats memory cur = globalStats[eid];
         if (eid == 0) return cur;
-        bool curActive = cur.totalRequests != 0 || cur.totalFulfilled != 0 || cur.totalFees != 0;
-        if (!curActive) {
+        // Use totalRequests value to detect an initialized snapshot
+        if (cur.totalRequests == 0) {
             return globalStats[eid - 1];
         }
         return cur;
@@ -950,11 +945,9 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         s = proverStats[prover][eid];
         if (eid > 0 && s.lastActiveAt == 0) {
             ProverStats storage prev = proverStats[prover][eid - 1];
-            // Copy forward if there was previous activity
-            if (
-                prev.bids != 0 || prev.reveals != 0 || prev.requestsFulfilled != 0 || prev.requestsRefunded != 0
-                    || prev.feeReceived != 0 || prev.lastActiveAt != 0
-            ) {
+            // Copy forward if the previous snapshot was initialized.
+            // Sentinel: prev.lastActiveAt != 0. See rationale in getProverStatsTotal.
+            if (prev.lastActiveAt != 0) {
                 s.bids = prev.bids;
                 s.reveals = prev.reveals;
                 s.requestsFulfilled = prev.requestsFulfilled;
