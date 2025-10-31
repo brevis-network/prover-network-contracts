@@ -321,8 +321,8 @@ BrevisMarket exposes per-prover activity and performance stats tailored for expl
 struct ProverStats {
     uint64 bids;              // total bids placed
     uint64 reveals;           // total bids revealed
-    uint64 wins;              // instantaneous assignments: current number of requests the prover is assigned to
     uint64 requestsFulfilled; // successful request fulfillments (proofs delivered)
+    uint64 requestsRefunded;  // assigned requests refunded after deadline (missed by the final winner)
     uint64 lastActiveAt;      // last activity timestamp (only on the prover's own actions)
     uint256 feeReceived;      // total rewards (after protocol fee) sent to the prover
 }
@@ -345,15 +345,21 @@ The two major APIs for explorer frontend to use are:
 function getProverStatsTotal(address prover) external view returns (ProverStats memory);
 // Recent stats for the current epoch + its start timestamp
 function getProverRecentStats(address prover) external view returns (ProverStats memory stats, uint64 startAt);
+// Lifetime success rate and raw counters (basis points, fulfilled, refunded)
+function getProverSuccessRate(address prover)
+    external
+    view
+    returns (uint256 rateBps, uint64 fulfilled, uint64 refunded);
 ```
 More stats-related view functions can be found at:
 - Prover stats: [IBrevisMarket.sol](../src/market/IBrevisMarket.sol#L441-L490)
 - Global stats: [IBrevisMarket.sol](../src/market/IBrevisMarket.sol#L495-L514)
 
 #### Semantics
-- wins: instantaneous count of current assignments. It increases when the prover becomes the winner for a request and decreases if they are superseded before finalization. It is carried forward across epochs.
-- requestsFulfilled: cumulative lifetime count, incremented only on successful proof submission.
-- recent window semantics: recent values are computed as diffs between the current and previous cumulative snapshots. Therefore, `recent.wins` is a net change (assignments gained minus assignments lost) since the epoch start, not a count of “wins events”.
+- requestsFulfilled: cumulative lifetime count, incremented only on successful proof submission (before deadline).
+- requestsRefunded: cumulative lifetime count of assigned requests that were refunded after deadline with a final winner (i.e., missed by the winner). Refunds without a winner (no bids/no reveals) are excluded.
+- Success rate (lifetime): successRate = requestsFulfilled / (requestsFulfilled + requestsRefunded). Handle denominator = 0 as 0 or N/A.
+- recent window semantics: recent values are computed as diffs between the current and previous cumulative snapshots (applies to bids, reveals, requestsFulfilled, requestsRefunded, feeReceived).
 - lastActiveAt: updated on the prover’s own bid/reveal/submit; in recent stats it is non-zero only if there was activity in the current epoch.
 - totals fallback: if a prover had no activity in the current epoch, `getProverStatsTotal` returns the previous epoch snapshot, so totals don’t reset at epoch boundaries.
 
@@ -486,13 +492,16 @@ const [recentStartAt, recentEpochId] = await brevisMarket.getRecentStatsInfo();
 
 // UI metrics:
 // - Delivered (lifetime): total.requestsFulfilled
-// - Current assignments (instantaneous): total.wins
+// - Missed (lifetime): total.requestsRefunded
 // - Recent delivery: recent.requestsFulfilled
-// - Recent assignment net change: recent.wins  // note: gained minus lost during the current epoch
-// - Success rate: lifetime success rate cannot be derived purely on-chain without counting lifetime assignments.
-//   For a rough recent window indicator, use: recent.wins > 0 ? recent.requestsFulfilled / recent.wins : 0
-//   (interpretation: fraction of net new assignments fulfilled during the current epoch)
+// - Recent misses: recent.requestsRefunded
+// - Success rate (lifetime): prefer on-chain view
+//     const [rateBps, fulfilled, refunded] = await brevisMarket.getProverSuccessRate(proverAddress);
+//     // If needed locally:
+//     const denom = fulfilled + refunded;
+//     const rateBpsLocal = denom > 0 ? Math.floor((fulfilled * 1e4) / denom) : 0;
 // - Last active: prefer `recent.lastActiveAt` if > 0 else `total.lastActiveAt`
+// - Live load indicator (optional): use assignedStake[prover] from contract state (stake-weighted obligations)
 ```
 
 #### User Portfolio Dashboard 

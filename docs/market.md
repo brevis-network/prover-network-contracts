@@ -176,8 +176,8 @@ BrevisMarket tracks both per-prover activity and system-wide aggregates via life
 struct ProverStats {
     uint64 bids;              // total bids placed
     uint64 reveals;           // total bids revealed
-  uint64 wins;              // instantaneous assignments: current number of requests the prover is assigned to
     uint64 requestsFulfilled; // successful request fulfillments (proofs delivered)
+    uint64 requestsRefunded;  // assigned requests refunded after deadline (missed by the winner)
     uint64 lastActiveAt;      // last activity timestamp (only on the prover's own actions)
     uint256 feeReceived;      // total rewards (after protocol fee) sent to the prover
 }
@@ -198,6 +198,8 @@ struct GlobalStats {
 - Per-prover recent (current epoch) stats
   - `getProverRecentStats(address prover)` → (ProverStats stats, uint64 startAt) (see [IBrevisMarket.sol#L448](../src/market/IBrevisMarket.sol#L448))
   - `getRecentStatsInfo()` → (startAt, epochId)
+- Per-prover success rate (lifetime)
+  - `getProverSuccessRate(address prover)` → (uint256 rateBps, uint64 fulfilled, uint64 refunded) (see [IBrevisMarket.sol](../src/market/IBrevisMarket.sol))
 - Historical per-prover per-epoch
   - `getProverStatsForStatsEpoch(address prover, uint64 epochId)` → (ProverStats stats, uint64 startAt, uint64 endAt) (see [IBrevisMarket.sol#L483](../src/market/IBrevisMarket.sol#L483))
 
@@ -215,8 +217,10 @@ struct GlobalStats {
 
 ### Semantics
 - Data model: the contract maintains a single cumulative snapshot per (prover, epoch). On first activity in an epoch, the previous snapshot is carried forward; subsequent actions mutate the current snapshot. Per-epoch “recent” values are computed as diffs between the current and previous snapshots.
-- wins: instantaneous count of current assignments. It increases when a prover becomes the current winner and decreases when superseded before finalization. In the recent view, `wins` represents the net change (gained − lost) during the epoch.
-- requestsFulfilled: cumulative lifetime count of successful submissions.
+- requestsFulfilled: cumulative lifetime count of successful submissions (before deadline).
+- requestsRefunded: cumulative lifetime count of assigned requests refunded after the deadline when a final winner exists (missed by the winner). Refunds without a winner are excluded.
+- Success rate: successRate = requestsFulfilled / (requestsFulfilled + requestsRefunded). Handle denominator = 0 as 0 or N/A.
+  - Prefer calling `getProverSuccessRate(prover)` which returns the value in basis points along with raw counters.
 - lastActiveAt: updated on the prover’s own bid/reveal/submit. In the recent view it is non-zero only if there was activity in the current epoch.
 - totals fallback: if a prover has no activity in the current epoch, `getProverStatsTotal` returns the previous epoch snapshot so totals don’t reset at epoch boundaries.
 

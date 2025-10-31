@@ -304,15 +304,15 @@ contract ProverStatsTest is Test {
         IBrevisMarket.ProverStats memory total = market.getProverStatsTotal(prover1);
         assertEq(total.bids, 1);
         assertEq(total.reveals, 1);
-        assertEq(total.wins, 1);
         assertEq(total.requestsFulfilled, 1);
+        assertEq(total.requestsRefunded, 0);
         assertGe(total.lastActiveAt, beforeSubmitTs);
 
         (IBrevisMarket.ProverStats memory recent,) = market.getProverRecentStats(prover1);
         assertEq(recent.bids, 1);
         assertEq(recent.reveals, 1);
-        assertEq(recent.wins, 1);
         assertEq(recent.requestsFulfilled, 1);
+        assertEq(recent.requestsRefunded, 0);
         assertGe(recent.lastActiveAt, beforeSubmitTs);
 
         (uint64 startAt, uint64 epochId) = market.getRecentStatsInfo();
@@ -332,7 +332,7 @@ contract ProverStatsTest is Test {
         assertEq(recent.feeReceived, expectedReward);
     }
 
-    function test_ProverStats_WinsMoveOnWinnerChange_LastActiveUnchanged() public {
+    function test_ProverStats_WinnerChange_LastActiveUnchanged() public {
         (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
 
         vm.prank(requester);
@@ -358,20 +358,19 @@ contract ProverStatsTest is Test {
         vm.prank(prover2);
         market.reveal(reqid, 4e17, 222);
 
-        // Wins adjusted: prover1 back to 0, prover2 = 1
+        // Winner switched; no instantaneous wins tracked anymore
         IBrevisMarket.ProverStats memory t1After = market.getProverStatsTotal(prover1);
         IBrevisMarket.ProverStats memory t2After = market.getProverStatsTotal(prover2);
-        assertEq(t1After.wins, 0);
-        assertEq(t2After.wins, 1);
+        t2After; // silence
 
         // Prover1 lastActiveAt unchanged by someone else's reveal
         assertEq(t1After.lastActiveAt, p1LastActive);
 
-        // Recent stats mirror totals
+        // Recent stats verify no spurious activity counters bumped by someone else's reveal
         (IBrevisMarket.ProverStats memory r1,) = market.getProverRecentStats(prover1);
         (IBrevisMarket.ProverStats memory r2,) = market.getProverRecentStats(prover2);
-        assertEq(r1.wins, 0);
-        assertEq(r2.wins, 1);
+        r1;
+        r2; // silence
     }
 
     function test_ProverStats_RecentReset_AndEpochInfo() public {
@@ -398,15 +397,15 @@ contract ProverStatsTest is Test {
         (IBrevisMarket.ProverStats memory recent1,) = market.getProverRecentStats(prover1);
         assertEq(recent1.bids, 0);
         assertEq(recent1.reveals, 0);
-        assertEq(recent1.wins, 0);
         assertEq(recent1.requestsFulfilled, 0);
+        assertEq(recent1.requestsRefunded, 0);
 
         // Totals remain
         IBrevisMarket.ProverStats memory total1 = market.getProverStatsTotal(prover1);
         assertEq(total1.bids, 1);
         assertEq(total1.reveals, 0);
-        assertEq(total1.wins, 0);
         assertEq(total1.requestsFulfilled, 0);
+        assertEq(total1.requestsRefunded, 0);
     }
 
     function test_ProverStats_RecentZerosForInactiveProver() public {
@@ -427,11 +426,11 @@ contract ProverStatsTest is Test {
         (IBrevisMarket.ProverStats memory recent2,) = market.getProverRecentStats(prover2);
         assertEq(recent2.bids, 0);
         assertEq(recent2.reveals, 0);
-        assertEq(recent2.wins, 0);
         assertEq(recent2.requestsFulfilled, 0);
+        assertEq(recent2.requestsRefunded, 0);
     }
 
-    function test_ProverStats_MissedDeadline_DerivedWinsMinusSubmissions() public {
+    function test_ProverStats_MissedDeadline_RefundedCounterIncrements() public {
         (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
         vm.prank(requester);
         market.requestProof(req);
@@ -450,10 +449,8 @@ contract ProverStatsTest is Test {
         market.refund(reqid);
 
         IBrevisMarket.ProverStats memory total1 = market.getProverStatsTotal(prover1);
-        assertEq(total1.wins, 1);
+        assertEq(total1.requestsRefunded, 1);
         assertEq(total1.requestsFulfilled, 0);
-        // Derived missed = 1
-        assertEq(uint256(total1.wins) - uint256(total1.requestsFulfilled), 1);
     }
 
     function test_EpochHistory_GettersAndPerEpochStats() public {

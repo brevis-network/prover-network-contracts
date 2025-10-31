@@ -75,7 +75,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     mapping(uint64 => GlobalStats) public globalStats;
 
     // Unified cumulative prover stats per epochId
-    // Each entry holds cumulative counters since genesis and the current instantaneous `wins`.
+    // Each entry holds cumulative counters since genesis.
     // For epoch N, the struct carries forward values from epoch N-1 on first use, then increments in-place.
     mapping(address => mapping(uint64 => ProverStats)) public proverStats;
 
@@ -225,7 +225,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         reqState.publicValuesDigest = req.publicValuesDigest;
 
         // Update global stats: track total requests
-        GlobalStats storage gs = _currentGlobalCumulativeGlobalStats();
+        GlobalStats storage gs = _currentCumulativeGlobalStats();
         gs.totalRequests += 1;
 
         emit NewRequest(reqid, req);
@@ -394,7 +394,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         s2.lastActiveAt = uint64(block.timestamp);
 
         // Update global stats: fulfilled count and total actual fees
-        GlobalStats storage gs2 = _currentGlobalCumulativeGlobalStats();
+        GlobalStats storage gs2 = _currentCumulativeGlobalStats();
         gs2.totalFulfilled += 1;
         gs2.totalFees += actualFee;
 
@@ -432,6 +432,13 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
         req.status = ReqStatus.Refunded;
         feeToken.safeTransfer(req.sender, req.fee.maxFee);
+
+        // If deadline passed and there was a final winner, count a missed assignment for that prover
+        if (block.timestamp > req.fee.deadline && req.winner.prover != address(0)) {
+            ProverStats storage sMiss = _currentCumulativeStats(req.winner.prover);
+            sMiss.requestsRefunded += 1;
+            // Note: do not update lastActiveAt here (not a prover-initiated action)
+        }
 
         emit Refunded(reqid, req.sender, req.fee.maxFee);
     }
@@ -695,19 +702,10 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
             req.second = Bidder({prover: prover, fee: fee});
         }
 
-        // Update wins to reflect current assigned winner (instantaneous count)
+        // Adjust pending obligations on winner change (no longer track instantaneous `wins`)
         address newWinner = req.winner.prover;
         if (newWinner != prevWinner) {
-            // Adjust pending obligations on winner change
             _reassignObligation(req, prevWinner, newWinner);
-            if (prevWinner != address(0)) {
-                ProverStats storage sPrev = _currentCumulativeStats(prevWinner);
-                if (sPrev.wins > 0) sPrev.wins -= 1;
-            }
-            if (newWinner != address(0)) {
-                ProverStats storage sNew = _currentCumulativeStats(newWinner);
-                sNew.wins += 1;
-            }
         }
     }
 
@@ -812,7 +810,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         ProverStats memory cur = proverStats[prover][eid];
         if (eid == 0) return cur;
         // If current epoch snapshot hasn't been initialized for this prover, fall back to previous
-        bool curActive = cur.bids != 0 || cur.reveals != 0 || cur.wins != 0 || cur.requestsFulfilled != 0
+        bool curActive = cur.bids != 0 || cur.reveals != 0 || cur.requestsFulfilled != 0 || cur.requestsRefunded != 0
             || cur.feeReceived != 0 || cur.lastActiveAt != 0;
         if (!curActive) {
             return proverStats[prover][eid - 1];
@@ -854,6 +852,33 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         ProverStats memory cur = proverStats[prover][epochId];
         ProverStats memory prev = epochId > 0 ? proverStats[prover][epochId - 1] : _zeroStats();
         return (_diffStats(cur, prev), statsEpochs[epochId].startAt, statsEpochs[epochId].endAt);
+    }
+
+    /**
+     * @notice Get a prover's lifetime success rate and raw counters
+     * @dev Success rate is computed in basis points (0-10000) as:
+     *      rateBps = requestsFulfilled / (requestsFulfilled + requestsRefunded).
+     *      If denominator is zero, returns 0.
+     */
+    function getProverSuccessRate(address prover)
+        external
+        view
+        override
+        returns (uint256 rateBps, uint64 fulfilled, uint64 refunded)
+    {
+        uint64 eid = statsEpochId;
+        ProverStats memory cur = proverStats[prover][eid];
+        if (eid > 0) {
+            bool curActive = cur.bids != 0 || cur.reveals != 0 || cur.requestsFulfilled != 0
+                || cur.requestsRefunded != 0 || cur.feeReceived != 0 || cur.lastActiveAt != 0;
+            if (!curActive) {
+                cur = proverStats[prover][eid - 1];
+            }
+        }
+        fulfilled = cur.requestsFulfilled;
+        refunded = cur.requestsRefunded;
+        uint256 denom = uint256(fulfilled) + uint256(refunded);
+        rateBps = denom == 0 ? 0 : (uint256(fulfilled) * BPS_DENOMINATOR) / denom;
     }
 
     /**
@@ -927,13 +952,13 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
             ProverStats storage prev = proverStats[prover][eid - 1];
             // Copy forward if there was previous activity
             if (
-                prev.bids != 0 || prev.reveals != 0 || prev.wins != 0 || prev.requestsFulfilled != 0
+                prev.bids != 0 || prev.reveals != 0 || prev.requestsFulfilled != 0 || prev.requestsRefunded != 0
                     || prev.feeReceived != 0 || prev.lastActiveAt != 0
             ) {
                 s.bids = prev.bids;
                 s.reveals = prev.reveals;
-                s.wins = prev.wins; // instantaneous value carried forward
                 s.requestsFulfilled = prev.requestsFulfilled;
+                s.requestsRefunded = prev.requestsRefunded;
                 s.feeReceived = prev.feeReceived;
                 s.lastActiveAt = prev.lastActiveAt;
             }
@@ -947,13 +972,14 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     function _diffStats(ProverStats memory cur, ProverStats memory prev) internal pure returns (ProverStats memory d) {
         d.bids = cur.bids >= prev.bids ? cur.bids - prev.bids : 0;
         d.reveals = cur.reveals >= prev.reveals ? cur.reveals - prev.reveals : 0;
-        // `wins` reflects net change since the previous epoch snapshot
-        d.wins = cur.wins >= prev.wins ? cur.wins - prev.wins : 0;
         d.requestsFulfilled =
             cur.requestsFulfilled >= prev.requestsFulfilled ? cur.requestsFulfilled - prev.requestsFulfilled : 0;
+        d.requestsRefunded =
+            cur.requestsRefunded >= prev.requestsRefunded ? cur.requestsRefunded - prev.requestsRefunded : 0;
         d.feeReceived = cur.feeReceived >= prev.feeReceived ? cur.feeReceived - prev.feeReceived : 0;
         // lastActiveAt: show cur.lastActiveAt only if there was activity in the interval; else 0
-        if (d.bids != 0 || d.reveals != 0 || d.requestsFulfilled != 0 || d.feeReceived != 0 || d.wins != 0) {
+        if (d.bids != 0 || d.reveals != 0 || d.requestsFulfilled != 0 || d.requestsRefunded != 0 || d.feeReceived != 0)
+        {
             d.lastActiveAt = cur.lastActiveAt;
         } else {
             d.lastActiveAt = 0;
@@ -961,7 +987,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     }
 
     // ===== Global stats helpers =====
-    function _currentGlobalCumulativeGlobalStats() internal returns (GlobalStats storage s) {
+    function _currentCumulativeGlobalStats() internal returns (GlobalStats storage s) {
         uint64 eid = statsEpochId;
         s = globalStats[eid];
         if (eid > 0 && s.totalRequests == 0 && s.totalFulfilled == 0 && s.totalFees == 0) {
