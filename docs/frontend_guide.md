@@ -314,9 +314,20 @@ function getStakeInfo(address prover, address staker) external view returns (uin
 
 ### 3.3 BrevisMarket Stats
 
-BrevisMarket exposes per-prover activity and performance stats tailored for explorer views.
+BrevisMarket exposes simple per-prover activity and performance stats for explorer views.
 
-#### Struct
+#### Struct (what you get back)
+
+Global (system-wide) stats:
+```solidity
+struct GlobalStats {
+    uint64 totalRequests;   // total proof requests made
+    uint64 totalFulfilled;  // total proof requests fulfilled
+    uint256 totalFees;      // total requester fees actually paid
+}
+```
+
+Prover stats
 ```solidity
 struct ProverStats {
     uint64 bids;              // total bids placed
@@ -328,84 +339,42 @@ struct ProverStats {
 }
 ```
 
-Global (system-wide) stats:
+#### APIs (what to call)
+
+Use these for almost all UI needs:
+
+Global stats (system-wide):
 ```solidity
-struct GlobalStats {
-    uint64 totalRequests;   // total proof requests made
-    uint64 totalFulfilled;  // total proof requests fulfilled
-    uint256 totalFees;      // total requester fees actually paid
-}
+// Lifetime totals (system-wide)
+function getGlobalStatsTotal() external view returns (GlobalStats memory);
+// Recent (system-wide) stats + its start timestamp
+function getGlobalRecentStats() external view returns (GlobalStats memory stats, uint64 startAt);
 ```
 
-#### APIs
-
-The two major APIs for explorer frontend to use are:
+Prover stats
 ```solidity
 // Lifetime totals
 function getProverStatsTotal(address prover) external view returns (ProverStats memory);
 // Recent stats for the current epoch + its start timestamp
 function getProverRecentStats(address prover) external view returns (ProverStats memory stats, uint64 startAt);
 // Lifetime success rate and raw counters (basis points, fulfilled, refunded)
-function getProverSuccessRate(address prover)
-    external
-    view
-    returns (uint256 rateBps, uint64 fulfilled, uint64 refunded);
+function getProverSuccessRate(address prover) external view returns (uint256 rateBps, uint64 fulfilled, uint64 refunded);
 ```
-More stats-related view functions can be found at:
-- Prover stats: [IBrevisMarket.sol](../src/market/IBrevisMarket.sol#L441-L490)
-- Global stats: [IBrevisMarket.sol](../src/market/IBrevisMarket.sol#L495-L514)
 
-#### Semantics
-- requestsFulfilled: cumulative lifetime count, incremented only on successful proof submission (before deadline).
-- requestsRefunded: cumulative lifetime count of assigned requests that were refunded after deadline with a final winner (i.e., missed by the winner). Refunds without a winner (no bids/no reveals) are excluded.
-- Success rate (lifetime): successRate = requestsFulfilled / (requestsFulfilled + requestsRefunded). Handle denominator = 0 as 0 or N/A.
-- recent window semantics: recent values are computed as diffs between the current and previous cumulative snapshots (applies to bids, reveals, requestsFulfilled, requestsRefunded, feeReceived).
-- lastActiveAt: updated on the prover’s own bid/reveal/submit; in recent stats it is non-zero only if there was activity in the current epoch.
-- totals fallback: if a prover had no activity in the current epoch, `getProverStatsTotal` returns the previous epoch snapshot, so totals don’t reset at epoch boundaries.
+More stats-related view functions (advanced/optional): [IBrevisMarket.sol](../src/market/IBrevisMarket.sol#L422-L524)
 
-Global stats semantics:
-- Cumulative snapshots per epoch with lazy carry-forward like provers.
-- recent values are diffs vs previous epoch snapshot.
-- Fields:
-    - totalRequests: increments on `requestProof()`
-    - totalFulfilled: increments on successful `submitProof()`
-    - totalFees: adds the actual fee paid on `submitProof()` (winner pays second-lowest or own bid if single bidder)
+#### What to show in the UI (simple)
+- Delivered (lifetime): `getProverStatsTotal(prover).requestsFulfilled`
+- Missed (lifetime): `getProverStatsTotal(prover).requestsRefunded`
+- Success rate (lifetime): `getProverSuccessRate(prover)` → `rateBps` (0–10000)
+- Recent delivery/misses: from `getProverRecentStats(prover)`
+- Last active: prefer `recent.lastActiveAt` if > 0, else `total.lastActiveAt`
 
-#### Epochs, Recent, and Totals
-- Totals: cumulative snapshot for the current epoch (falls back to the previous epoch if no current activity).
-- Epochs: time-bounded buckets with startAt and endAt.
-- Recent: the recent (current epoch’s) stats computed as a diff between current and previous snapshots. Use `getProverRecentStats(..)`, `getRecentStatsInfo()`.
+Notes:
+- requestsRefunded counts late refunds where the final winner existed (i.e., missed by the winner). No-winner refunds are excluded.
+- Recent is the current time window; you can also get its start via `getRecentStatsInfo()` if needed.
 
-#### Example: Browsing Epoch History
-```typescript
-// Current epoch id and metadata
-const epochId = await brevisMarket.statsEpochId();
-const [currentStart, currentEnd] = await brevisMarket.statsEpochs(epochId); // endAt = 0 marks the tail epoch
-
-// Recent == current epoch stats
-const [recentStats, recentStart] = await brevisMarket.getProverRecentStats(proverAddress);
-const [currentEpochStats, curStart, curEnd] = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, epochId);
-// recentStats and currentEpochStats should match; recentStart == currentStart
-
-// Inspect previous epoch if any
-if (epochId > 0) {
-    const [prevEpochStart, prevEpochEnd] = await brevisMarket.statsEpochs(epochId - 1);
-    const [prevStats, prevStatsStart, prevStatsEnd] = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, epochId - 1);
-    // prevEpochEnd equals currentStart after a reset
-}
-
-// Global stats (system-wide)
-const gTotal = await brevisMarket.getGlobalStatsTotal();
-const [gRecent, gRecentStart] = await brevisMarket.getGlobalRecentStats();
-const [gE1, gE1Start, gE1End] = await brevisMarket.getGlobalStatsForStatsEpoch(epochId);
-
-// Optional: iterate all epochs
-const n = await brevisMarket.statsEpochsLength();
-for (let i = 0; i < n; i++) {
-    const [startAt, endAt] = await brevisMarket.statsEpochs(i);
-    // fetch per-epoch stats as needed
-}
-```
+Advanced (optional): If you need historical per-epoch stats or system-wide aggregates, see the full interface in `IBrevisMarket.sol`.
 
 ## 4. Action Reference
 
@@ -485,23 +454,18 @@ const proverInfo = await stakingViewer.getProverInfo(proverAddress);
 const sharePrice = proverInfo.vaultShares > 0 
     ? proverInfo.vaultAssets / proverInfo.vaultShares : 1;
 
-// Market stats for this prover (totals + recent)
+// Market stats (simple)
 const total = await brevisMarket.getProverStatsTotal(proverAddress);
-const recent = await brevisMarket.getProverRecentStats(proverAddress);
-const [recentStartAt, recentEpochId] = await brevisMarket.getRecentStatsInfo();
+const [recent] = await brevisMarket.getProverRecentStats(proverAddress);
+const [rateBps] = await brevisMarket.getProverSuccessRate(proverAddress);
 
 // UI metrics:
 // - Delivered (lifetime): total.requestsFulfilled
 // - Missed (lifetime): total.requestsRefunded
 // - Recent delivery: recent.requestsFulfilled
 // - Recent misses: recent.requestsRefunded
-// - Success rate (lifetime): prefer on-chain view
-//     const [rateBps, fulfilled, refunded] = await brevisMarket.getProverSuccessRate(proverAddress);
-//     // If needed locally:
-//     const denom = fulfilled + refunded;
-//     const rateBpsLocal = denom > 0 ? Math.floor((fulfilled * 1e4) / denom) : 0;
-// - Last active: prefer `recent.lastActiveAt` if > 0 else `total.lastActiveAt`
-// - Live load indicator (optional): use assignedStake[prover] from contract state (stake-weighted obligations)
+// - Success rate: rateBps (0–10000)
+// - Last active: recent.lastActiveAt || total.lastActiveAt
 ```
 
 #### User Portfolio Dashboard 
