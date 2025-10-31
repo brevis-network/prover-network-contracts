@@ -188,7 +188,7 @@ Global system-wide stats:
 struct GlobalStats {
   uint64 totalRequests;   // total proof requests made
   uint64 totalFulfilled;  // total proof requests fulfilled
-  uint64 totalFees;       // total requester fees actually paid (uint64)
+  uint256 totalFees;      // total requester fees actually paid
 }
 ```
 

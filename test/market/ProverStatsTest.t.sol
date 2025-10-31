@@ -562,10 +562,10 @@ contract ProverStatsTest is Test {
         (IBrevisMarket.GlobalStats memory gRecent2,) = market.getGlobalRecentStats();
         assertEq(gTotal2.totalRequests, 1);
         assertEq(gTotal2.totalFulfilled, 1);
-        assertEq(gTotal2.totalFees, uint64(bidFee));
+        assertEq(gTotal2.totalFees, bidFee);
         assertEq(gRecent2.totalRequests, 1);
         assertEq(gRecent2.totalFulfilled, 1);
-        assertEq(gRecent2.totalFees, uint64(bidFee));
+        assertEq(gRecent2.totalFees, bidFee);
     }
 
     function test_GlobalStats_EpochReset_FallbackAndDiff() public {
@@ -585,7 +585,7 @@ contract ProverStatsTest is Test {
         IBrevisMarket.GlobalStats memory gTotEpoch1 = market.getGlobalStatsTotal();
         assertEq(gTotEpoch1.totalRequests, 1);
         assertEq(gTotEpoch1.totalFulfilled, 1);
-        assertEq(gTotEpoch1.totalFees, uint64(4e17));
+        assertEq(gTotEpoch1.totalFees, 4e17);
 
         // Reset epoch (starts immediately)
         vm.warp(block.timestamp + 1);
@@ -597,7 +597,7 @@ contract ProverStatsTest is Test {
         (IBrevisMarket.GlobalStats memory gRecentAfter,) = market.getGlobalRecentStats();
         assertEq(gTotAfter.totalRequests, 1);
         assertEq(gTotAfter.totalFulfilled, 1);
-        assertEq(gTotAfter.totalFees, uint64(4e17));
+        assertEq(gTotAfter.totalFees, 4e17);
         assertEq(gRecentAfter.totalRequests, 0);
         assertEq(gRecentAfter.totalFulfilled, 0);
         assertEq(gRecentAfter.totalFees, 0);
@@ -618,7 +618,7 @@ contract ProverStatsTest is Test {
         (IBrevisMarket.GlobalStats memory e2,,) = market.getGlobalStatsForStatsEpoch(curEpoch);
         assertEq(e1.totalRequests, 1);
         assertEq(e1.totalFulfilled, 1);
-        assertEq(e1.totalFees, uint64(4e17));
+        assertEq(e1.totalFees, 4e17);
         assertEq(e2.totalRequests, 1);
         assertEq(e2.totalFulfilled, 0);
         assertEq(e2.totalFees, 0);
@@ -668,9 +668,9 @@ contract ProverStatsTest is Test {
         (IBrevisMarket.GlobalStats memory gRecent,) = market.getGlobalRecentStats();
         assertEq(gTot.totalRequests, 2);
         assertEq(gTot.totalFulfilled, 2);
-        assertEq(gTot.totalFees, uint64(actualA + actualB));
+        assertEq(gTot.totalFees, actualA + actualB);
         assertEq(gRecent.totalRequests, 2);
         assertEq(gRecent.totalFulfilled, 2);
-        assertEq(gRecent.totalFees, uint64(actualA + actualB));
+        assertEq(gRecent.totalFees, actualA + actualB);
     }
 }

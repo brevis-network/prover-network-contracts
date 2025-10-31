@@ -396,7 +396,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         // Update global stats: fulfilled count and total actual fees
         GlobalStats storage gs2 = _currentGlobalCumulativeGlobalStats();
         gs2.totalFulfilled += 1;
-        gs2.totalFees += uint64(actualFee);
+        gs2.totalFees += actualFee;
 
         emit ProofSubmitted(reqid, prover, proof, actualFee);
     }

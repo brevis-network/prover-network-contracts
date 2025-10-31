@@ -50,7 +50,7 @@ interface IBrevisMarket {
     struct GlobalStats {
         uint64 totalRequests; // total proof requests made
         uint64 totalFulfilled; // total proof requests fulfilled
-        uint64 totalFees; // total fees collected from requesters
+        uint256 totalFees; // total fees collected from requesters
     }
 
     struct ProverStats {
