@@ -519,4 +519,158 @@ contract ProverStatsTest is Test {
         assertEq(total1After.bids, 1);
         assertEq(total2After.bids, 1);
     }
+
+    // =============================
+    // GlobalStats tests
+    // =============================
+
+    function test_GlobalStats_TotalAndRecent_RequestAndSubmit() public {
+        // Initial epoch info
+        (uint64 startAt, uint64 epochId) = market.getRecentStatsInfo();
+        startAt;
+        epochId; // silence
+
+        // Create request -> increments totalRequests
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+        vm.prank(requester);
+        market.requestProof(req);
+
+        IBrevisMarket.GlobalStats memory gTotal1 = market.getGlobalStatsTotal();
+        (IBrevisMarket.GlobalStats memory gRecent1,) = market.getGlobalRecentStats();
+        assertEq(gTotal1.totalRequests, 1);
+        assertEq(gTotal1.totalFulfilled, 0);
+        assertEq(gTotal1.totalFees, 0);
+        assertEq(gRecent1.totalRequests, 1);
+        assertEq(gRecent1.totalFulfilled, 0);
+        assertEq(gRecent1.totalFees, 0);
+
+        // Single prover bids, reveals, submits
+        uint256 bidFee = 5e17;
+        uint256 bidNonce = 123;
+        vm.prank(prover1);
+        market.bid(reqid, _createBidHash(bidFee, bidNonce));
+        vm.warp(block.timestamp + BIDDING_DURATION + 1);
+        vm.prank(prover1);
+        market.reveal(reqid, bidFee, bidNonce);
+
+        vm.warp(block.timestamp + REVEAL_DURATION + 1);
+        vm.prank(prover1);
+        market.submitProof(reqid, VALID_PROOF);
+
+        // Winner pays their own bid as only bidder
+        IBrevisMarket.GlobalStats memory gTotal2 = market.getGlobalStatsTotal();
+        (IBrevisMarket.GlobalStats memory gRecent2,) = market.getGlobalRecentStats();
+        assertEq(gTotal2.totalRequests, 1);
+        assertEq(gTotal2.totalFulfilled, 1);
+        assertEq(gTotal2.totalFees, uint64(bidFee));
+        assertEq(gRecent2.totalRequests, 1);
+        assertEq(gRecent2.totalFulfilled, 1);
+        assertEq(gRecent2.totalFees, uint64(bidFee));
+    }
+
+    function test_GlobalStats_EpochReset_FallbackAndDiff() public {
+        // One fulfilled request in epoch1
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+        vm.prank(requester);
+        market.requestProof(req);
+        vm.prank(prover1);
+        market.bid(reqid, _createBidHash(4e17, 1));
+        vm.warp(block.timestamp + BIDDING_DURATION + 1);
+        vm.prank(prover1);
+        market.reveal(reqid, 4e17, 1);
+        vm.warp(block.timestamp + REVEAL_DURATION + 1);
+        vm.prank(prover1);
+        market.submitProof(reqid, VALID_PROOF);
+
+        IBrevisMarket.GlobalStats memory gTotEpoch1 = market.getGlobalStatsTotal();
+        assertEq(gTotEpoch1.totalRequests, 1);
+        assertEq(gTotEpoch1.totalFulfilled, 1);
+        assertEq(gTotEpoch1.totalFees, uint64(4e17));
+
+        // Reset epoch (starts immediately)
+        vm.warp(block.timestamp + 1);
+        vm.prank(owner);
+        market.scheduleStatsEpoch(0);
+
+        // Totals fallback to previous snapshot until new activity
+        IBrevisMarket.GlobalStats memory gTotAfter = market.getGlobalStatsTotal();
+        (IBrevisMarket.GlobalStats memory gRecentAfter,) = market.getGlobalRecentStats();
+        assertEq(gTotAfter.totalRequests, 1);
+        assertEq(gTotAfter.totalFulfilled, 1);
+        assertEq(gTotAfter.totalFees, uint64(4e17));
+        assertEq(gRecentAfter.totalRequests, 0);
+        assertEq(gRecentAfter.totalFulfilled, 0);
+        assertEq(gRecentAfter.totalFees, 0);
+
+        // New request in epoch2 -> affects recent and totals
+        (, IBrevisMarket.ProofRequest memory req2) = _createBasicRequest(7);
+        vm.prank(requester);
+        market.requestProof(req2);
+
+        IBrevisMarket.GlobalStats memory gTotAfter2 = market.getGlobalStatsTotal();
+        (IBrevisMarket.GlobalStats memory gRecentAfter2,) = market.getGlobalRecentStats();
+        assertEq(gTotAfter2.totalRequests, 2);
+        assertEq(gRecentAfter2.totalRequests, 1);
+
+        // And per-epoch getters: epoch1 should reflect first request, epoch2 reflects only second (so far)
+        (, uint64 curEpoch) = market.getRecentStatsInfo();
+        (IBrevisMarket.GlobalStats memory e1,,) = market.getGlobalStatsForStatsEpoch(curEpoch - 1);
+        (IBrevisMarket.GlobalStats memory e2,,) = market.getGlobalStatsForStatsEpoch(curEpoch);
+        assertEq(e1.totalRequests, 1);
+        assertEq(e1.totalFulfilled, 1);
+        assertEq(e1.totalFees, uint64(4e17));
+        assertEq(e2.totalRequests, 1);
+        assertEq(e2.totalFulfilled, 0);
+        assertEq(e2.totalFees, 0);
+    }
+
+    function test_GlobalStats_MultiRequests_SecondPriceAccounting() public {
+        // Request A: two bidders, second price applies
+        (bytes32 reqA, IBrevisMarket.ProofRequest memory rA) = _createBasicRequest(10);
+        vm.prank(requester);
+        market.requestProof(rA);
+        // Bids
+        vm.prank(prover1);
+        market.bid(reqA, _createBidHash(6e17, 111));
+        vm.prank(prover2);
+        market.bid(reqA, _createBidHash(4e17, 222));
+        // Reveal both
+        vm.warp(block.timestamp + BIDDING_DURATION + 1);
+        vm.prank(prover1);
+        market.reveal(reqA, 6e17, 111); // temporarily winner
+        vm.prank(prover2);
+        market.reveal(reqA, 4e17, 222); // final winner at lower bid
+        // Submit by winner (prover2)
+        vm.warp(block.timestamp + REVEAL_DURATION + 1);
+        vm.prank(prover2);
+        market.submitProof(reqA, VALID_PROOF);
+
+        // Request B: single bidder
+        (bytes32 reqB, IBrevisMarket.ProofRequest memory rB) = _createBasicRequest(11);
+        vm.prank(requester);
+        market.requestProof(rB);
+        vm.prank(prover1);
+        market.bid(reqB, _createBidHash(8e17, 333));
+        vm.warp(block.timestamp + BIDDING_DURATION + 1);
+        vm.prank(prover1);
+        market.reveal(reqB, 8e17, 333);
+        vm.warp(block.timestamp + REVEAL_DURATION + 1);
+        vm.prank(prover1);
+        market.submitProof(reqB, VALID_PROOF);
+
+        // Compute actual fees for A and B from bidders
+        (, uint256 winnerFeeA,, uint256 secondFeeA) = market.getBidders(reqA);
+        uint256 actualA = secondFeeA == 0 ? winnerFeeA : secondFeeA; // second price
+        (, uint256 winnerFeeB,, uint256 secondFeeB) = market.getBidders(reqB);
+        uint256 actualB = secondFeeB == 0 ? winnerFeeB : secondFeeB;
+
+        IBrevisMarket.GlobalStats memory gTot = market.getGlobalStatsTotal();
+        (IBrevisMarket.GlobalStats memory gRecent,) = market.getGlobalRecentStats();
+        assertEq(gTot.totalRequests, 2);
+        assertEq(gTot.totalFulfilled, 2);
+        assertEq(gTot.totalFees, uint64(actualA + actualB));
+        assertEq(gRecent.totalRequests, 2);
+        assertEq(gRecent.totalFulfilled, 2);
+        assertEq(gRecent.totalFees, uint64(actualA + actualB));
+    }
 }

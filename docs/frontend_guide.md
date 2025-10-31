@@ -328,6 +328,15 @@ struct ProverStats {
 }
 ```
 
+Global (system-wide) stats:
+```solidity
+struct GlobalStats {
+    uint64 totalRequests;   // total proof requests made
+    uint64 totalFulfilled;  // total proof requests fulfilled
+    uint64 totalFees;       // total requester fees actually paid (uint64)
+}
+```
+
 #### APIs
 
 The two major APIs for explorer frontend to use are:
@@ -337,7 +346,9 @@ function getProverStatsTotal(address prover) external view returns (ProverStats 
 // Recent stats for the current epoch + its start timestamp
 function getProverRecentStats(address prover) external view returns (ProverStats memory stats, uint64 startAt);
 ```
-More stats-related view functions can be found at [IBrevisMarket.sol](../src/market/IBrevisMarket.sol#L425-L473)
+More stats-related view functions can be found at:
+- Prover stats: [IBrevisMarket.sol](../src/market/IBrevisMarket.sol#L441-L490)
+- Global stats: [IBrevisMarket.sol](../src/market/IBrevisMarket.sol#L495-L514)
 
 #### Semantics
 - wins: instantaneous count of current assignments. It increases when the prover becomes the winner for a request and decreases if they are superseded before finalization. It is carried forward across epochs.
@@ -345,6 +356,14 @@ More stats-related view functions can be found at [IBrevisMarket.sol](../src/mar
 - recent window semantics: recent values are computed as diffs between the current and previous cumulative snapshots. Therefore, `recent.wins` is a net change (assignments gained minus assignments lost) since the epoch start, not a count of “wins events”.
 - lastActiveAt: updated on the prover’s own bid/reveal/submit; in recent stats it is non-zero only if there was activity in the current epoch.
 - totals fallback: if a prover had no activity in the current epoch, `getProverStatsTotal` returns the previous epoch snapshot, so totals don’t reset at epoch boundaries.
+
+Global stats semantics:
+- Cumulative snapshots per epoch with lazy carry-forward like provers.
+- recent values are diffs vs previous epoch snapshot.
+- Fields:
+    - totalRequests: increments on `requestProof()`
+    - totalFulfilled: increments on successful `submitProof()`
+    - totalFees: adds the actual fee paid on `submitProof()` (winner pays second-lowest or own bid if single bidder)
 
 #### Epochs, Recent, and Totals
 - Totals: cumulative snapshot for the current epoch (falls back to the previous epoch if no current activity).
@@ -368,6 +387,11 @@ if (epochId > 0) {
     const [prevStats, prevStatsStart, prevStatsEnd] = await brevisMarket.getProverStatsForStatsEpoch(proverAddress, epochId - 1);
     // prevEpochEnd equals currentStart after a reset
 }
+
+// Global stats (system-wide)
+const gTotal = await brevisMarket.getGlobalStatsTotal();
+const [gRecent, gRecentStart] = await brevisMarket.getGlobalRecentStats();
+const [gE1, gE1Start, gE1End] = await brevisMarket.getGlobalStatsForStatsEpoch(epochId);
 
 // Optional: iterate all epochs
 const n = await brevisMarket.statsEpochsLength();

@@ -166,9 +166,9 @@ unregisterSubmitter()  // Submitter removes themselves
 
 ---
 
-## 8. Prover Statistics
+## 8. Prover & Global Statistics
 
-BrevisMarket tracks prover activity for explorer/analytics via lifetime totals and epoch–based recent windows.
+BrevisMarket tracks both per-prover activity and system-wide aggregates via lifetime totals and epoch–based recent windows.
 
 ### Data Model
 
@@ -183,12 +183,30 @@ struct ProverStats {
 }
 ```
 
+Global system-wide stats:
+```solidity
+struct GlobalStats {
+  uint64 totalRequests;   // total proof requests made
+  uint64 totalFulfilled;  // total proof requests fulfilled
+  uint64 totalFees;       // total requester fees actually paid (uint64)
+}
+```
+
 ### APIs
-- Lifetime totals per prover: immutable aggregates since genesis
-  - `getProverStatsTotal(address prover)` → ProverStats
-- Recent (current stats-epoch): rolling window since the last scheduled epoch started
-  - `getProverRecentStats(address prover)` → (ProverStats stats, uint64 startAt)
+- Per-prover lifetime totals: cumulative since genesis
+  - `getProverStatsTotal(address prover)` → ProverStats (see [IBrevisMarket.sol#L441](../src/market/IBrevisMarket.sol#L441))
+- Per-prover recent (current epoch) stats
+  - `getProverRecentStats(address prover)` → (ProverStats stats, uint64 startAt) (see [IBrevisMarket.sol#L448](../src/market/IBrevisMarket.sol#L448))
   - `getRecentStatsInfo()` → (startAt, epochId)
+- Historical per-prover per-epoch
+  - `getProverStatsForStatsEpoch(address prover, uint64 epochId)` → (ProverStats stats, uint64 startAt, uint64 endAt) (see [IBrevisMarket.sol#L483](../src/market/IBrevisMarket.sol#L483))
+
+- Global lifetime totals: cumulative since genesis
+  - `getGlobalStatsTotal()` → GlobalStats (see [IBrevisMarket.sol#L495](../src/market/IBrevisMarket.sol#L495))
+- Global recent (current epoch) stats
+  - `getGlobalRecentStats()` → (GlobalStats stats, uint64 startAt) (see [IBrevisMarket.sol#L500](../src/market/IBrevisMarket.sol#L500))
+- Historical global per-epoch
+  - `getGlobalStatsForStatsEpoch(uint64 epochId)` → (GlobalStats stats, uint64 startAt, uint64 endAt) (see [IBrevisMarket.sol#L505](../src/market/IBrevisMarket.sol#L505))
 - Historical stats-epochs: on-chain time-bounded buckets via public getters
   - `statsEpochId()` → current epoch id
   - `statsEpochs(uint256 index)` → (startAt, endAt) where endAt = 0 marks the tail (last scheduled) epoch
@@ -201,6 +219,11 @@ struct ProverStats {
 - requestsFulfilled: cumulative lifetime count of successful submissions.
 - lastActiveAt: updated on the prover’s own bid/reveal/submit. In the recent view it is non-zero only if there was activity in the current epoch.
 - totals fallback: if a prover has no activity in the current epoch, `getProverStatsTotal` returns the previous epoch snapshot so totals don’t reset at epoch boundaries.
+
+Global stats semantics mirror the above (cumulative snapshots with diff-based recent):
+- totalRequests: increments on `requestProof()`.
+- totalFulfilled: increments on successful `submitProof()`.
+- totalFees: adds the actual fee paid by the requester on `submitProof()` (second-price rule, or winner’s fee if single bidder).
 - scheduleStatsEpoch(startAt) [admin, startAt strictly greater than last start]:
   - Sets the previous epoch’s `endAt` to `startAt` at scheduling time (may be in the future), then appends a new epoch starting at `startAt`.
   - If `startAt == 0` (interpreted as now), the new epoch becomes current immediately. Otherwise, rollover to the new epoch is lazy on the first stats-changing action at/after `startAt` (emits `StatsReset(newEpochId, startAt)`).

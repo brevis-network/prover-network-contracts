@@ -70,7 +70,11 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     // Core data structures
     mapping(bytes32 => ReqState) public requests; // proof req id -> state
 
-    // Unified cumulative stats per prover per epochId
+    // Unified cumulative global stats per epochId
+    // Each entry holds cumulative counters since genesis (carried forward on first use per epoch, then mutated in-place)
+    mapping(uint64 => GlobalStats) public globalStats;
+
+    // Unified cumulative prover stats per epochId
     // Each entry holds cumulative counters since genesis and the current instantaneous `wins`.
     // For epoch N, the struct carries forward values from epoch N-1 on first use, then increments in-place.
     mapping(address => mapping(uint64 => ProverStats)) public proverStats;
@@ -187,6 +191,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
      * @param req The proof request containing all necessary parameters
      */
     function requestProof(ProofRequest calldata req) external override {
+        // Advance epoch id if any scheduled epoch start has passed
+        _syncStatsEpochId();
         // Input validation
         if (req.fee.deadline <= block.timestamp) revert MarketDeadlineMustBeInFuture();
         if (req.fee.deadline > block.timestamp + MAX_DEADLINE_DURATION) {
@@ -217,6 +223,10 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         reqState.fee = req.fee;
         reqState.vk = req.vk;
         reqState.publicValuesDigest = req.publicValuesDigest;
+
+        // Update global stats: track total requests
+        GlobalStats storage gs = _currentGlobalCumulativeGlobalStats();
+        gs.totalRequests += 1;
 
         emit NewRequest(reqid, req);
     }
@@ -382,6 +392,11 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         ProverStats storage s2 = _currentCumulativeStats(prover);
         s2.requestsFulfilled += 1;
         s2.lastActiveAt = uint64(block.timestamp);
+
+        // Update global stats: fulfilled count and total actual fees
+        GlobalStats storage gs2 = _currentGlobalCumulativeGlobalStats();
+        gs2.totalFulfilled += 1;
+        gs2.totalFees += uint64(actualFee);
 
         emit ProofSubmitted(reqid, prover, proof, actualFee);
     }
@@ -842,6 +857,44 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     }
 
     /**
+     * @notice Get lifetime (cumulative) global stats
+     */
+    function getGlobalStatsTotal() external view override returns (GlobalStats memory) {
+        uint64 eid = statsEpochId;
+        GlobalStats memory cur = globalStats[eid];
+        if (eid == 0) return cur;
+        bool curActive = cur.totalRequests != 0 || cur.totalFulfilled != 0 || cur.totalFees != 0;
+        if (!curActive) {
+            return globalStats[eid - 1];
+        }
+        return cur;
+    }
+
+    /**
+     * @notice Get recent (current epoch) global stats and start time
+     */
+    function getGlobalRecentStats() external view override returns (GlobalStats memory stats, uint64 startAt) {
+        uint64 eid = statsEpochId;
+        GlobalStats memory cur = globalStats[eid];
+        GlobalStats memory prev = eid > 0 ? globalStats[eid - 1] : _zeroGlobalStats();
+        return (_diffGlobalStats(cur, prev), statsEpochs[eid].startAt);
+    }
+
+    /**
+     * @notice Get global stats for a specific epoch id
+     */
+    function getGlobalStatsForStatsEpoch(uint64 epochId)
+        external
+        view
+        override
+        returns (GlobalStats memory stats, uint64 startAt, uint64 endAt)
+    {
+        GlobalStats memory cur = globalStats[epochId];
+        GlobalStats memory prev = epochId > 0 ? globalStats[epochId - 1] : _zeroGlobalStats();
+        return (_diffGlobalStats(cur, prev), statsEpochs[epochId].startAt, statsEpochs[epochId].endAt);
+    }
+
+    /**
      * @notice Get the number of scheduled stats-epochs
      */
     function statsEpochsLength() external view override returns (uint256) {
@@ -905,5 +958,33 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         } else {
             d.lastActiveAt = 0;
         }
+    }
+
+    // ===== Global stats helpers =====
+    function _currentGlobalCumulativeGlobalStats() internal returns (GlobalStats storage s) {
+        uint64 eid = statsEpochId;
+        s = globalStats[eid];
+        if (eid > 0 && s.totalRequests == 0 && s.totalFulfilled == 0 && s.totalFees == 0) {
+            GlobalStats storage prev = globalStats[eid - 1];
+            if (prev.totalRequests != 0 || prev.totalFulfilled != 0 || prev.totalFees != 0) {
+                s.totalRequests = prev.totalRequests;
+                s.totalFulfilled = prev.totalFulfilled;
+                s.totalFees = prev.totalFees;
+            }
+        }
+    }
+
+    function _zeroGlobalStats() internal pure returns (GlobalStats memory z) {
+        return z;
+    }
+
+    function _diffGlobalStats(GlobalStats memory cur, GlobalStats memory prev)
+        internal
+        pure
+        returns (GlobalStats memory d)
+    {
+        d.totalRequests = cur.totalRequests >= prev.totalRequests ? cur.totalRequests - prev.totalRequests : 0;
+        d.totalFulfilled = cur.totalFulfilled >= prev.totalFulfilled ? cur.totalFulfilled - prev.totalFulfilled : 0;
+        d.totalFees = cur.totalFees >= prev.totalFees ? cur.totalFees - prev.totalFees : 0;
     }
 }

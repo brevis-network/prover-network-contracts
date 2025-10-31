@@ -47,6 +47,12 @@ interface IBrevisMarket {
         uint256 fee;
     }
 
+    struct GlobalStats {
+        uint64 totalRequests; // total proof requests made
+        uint64 totalFulfilled; // total proof requests fulfilled
+        uint64 totalFees; // total fees collected from requesters
+    }
+
     struct ProverStats {
         uint64 bids; // total bids placed
         uint64 reveals; // total bids revealed
@@ -478,4 +484,26 @@ interface IBrevisMarket {
         external
         view
         returns (ProverStats memory stats, uint64 startAt, uint64 endAt);
+
+    // =========================================================================
+    // GLOBAL STATS VIEW
+    // =========================================================================
+
+    /**
+     * @notice Get lifetime (cumulative) global stats across all provers
+     */
+    function getGlobalStatsTotal() external view returns (GlobalStats memory);
+
+    /**
+     * @notice Get recent (current epoch) global stats and its start time
+     */
+    function getGlobalRecentStats() external view returns (GlobalStats memory stats, uint64 startAt);
+
+    /**
+     * @notice Get global stats for a specific epoch id along with epoch metadata
+     */
+    function getGlobalStatsForStatsEpoch(uint64 epochId)
+        external
+        view
+        returns (GlobalStats memory stats, uint64 startAt, uint64 endAt);
 }
