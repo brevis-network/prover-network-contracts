@@ -176,7 +176,7 @@ BrevisMarket tracks prover activity for explorer/analytics via lifetime totals a
 struct ProverStats {
     uint64 bids;              // total bids placed
     uint64 reveals;           // total bids revealed
-    uint64 wins;              // assignments (times the prover was current winner)
+  uint64 wins;              // instantaneous assignments: current number of requests the prover is assigned to
     uint64 requestsFulfilled; // successful request fulfillments (proofs delivered)
     uint64 lastActiveAt;      // last activity timestamp (only on the prover's own actions)
     uint256 feeReceived;      // total rewards (after protocol fee) sent to the prover
@@ -196,13 +196,15 @@ struct ProverStats {
   - `getProverStatsForStatsEpoch(address prover, uint64 epochId)` → (ProverStats stats, uint64 startAt, uint64 endAt)
 
 ### Semantics
-- ProverStats includes: bids, reveals, wins (assigned), requestsFulfilled (proofs delivered), lastActiveAt, feeReceived.
-- Derived metric missed = wins − requestsFulfilled.
-- On bid/reveal/submit, both the lifetime total and current stats-epoch buckets are updated.
+- Data model: the contract maintains a single cumulative snapshot per (prover, epoch). On first activity in an epoch, the previous snapshot is carried forward; subsequent actions mutate the current snapshot. Per-epoch “recent” values are computed as diffs between the current and previous snapshots.
+- wins: instantaneous count of current assignments. It increases when a prover becomes the current winner and decreases when superseded before finalization. In the recent view, `wins` represents the net change (gained − lost) during the epoch.
+- requestsFulfilled: cumulative lifetime count of successful submissions.
+- lastActiveAt: updated on the prover’s own bid/reveal/submit. In the recent view it is non-zero only if there was activity in the current epoch.
+- totals fallback: if a prover has no activity in the current epoch, `getProverStatsTotal` returns the previous epoch snapshot so totals don’t reset at epoch boundaries.
 - scheduleStatsEpoch(startAt) [admin, startAt strictly greater than last start]:
   - Sets the previous epoch’s `endAt` to `startAt` at scheduling time (may be in the future), then appends a new epoch starting at `startAt`.
   - If `startAt == 0` (interpreted as now), the new epoch becomes current immediately. Otherwise, rollover to the new epoch is lazy on the first stats-changing action at/after `startAt` (emits `StatsReset(newEpochId, startAt)`).
-  - Recent == stats for the current epoch.
+  - Recent == stats for the current epoch (as a diff).
 - popStatsEpoch() [admin]:
   - Removes the last scheduled epoch if it has not started yet and restores the previous epoch’s `endAt` to 0.
 

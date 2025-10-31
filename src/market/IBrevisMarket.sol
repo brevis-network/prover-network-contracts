@@ -50,7 +50,7 @@ interface IBrevisMarket {
     struct ProverStats {
         uint64 bids; // total bids placed
         uint64 reveals; // total bids revealed
-        uint64 wins; // total bids won
+        uint64 wins; // instantaneous assignments (current number of requests the prover is assigned to)
         uint64 requestsFulfilled; // total requests successfully fulfilled (proofs delivered)
         uint64 lastActiveAt; // timestamp of last tracked activity
         uint256 feeReceived; // total rewards (after protocol fee) sent to the prover

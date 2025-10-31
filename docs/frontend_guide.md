@@ -321,7 +321,7 @@ BrevisMarket exposes per-prover activity and performance stats tailored for expl
 struct ProverStats {
     uint64 bids;              // total bids placed
     uint64 reveals;           // total bids revealed
-    uint64 wins;              // assignments (times the prover was current winner)
+    uint64 wins;              // instantaneous assignments: current number of requests the prover is assigned to
     uint64 requestsFulfilled; // successful request fulfillments (proofs delivered)
     uint64 lastActiveAt;      // last activity timestamp (only on the prover's own actions)
     uint256 feeReceived;      // total rewards (after protocol fee) sent to the prover
@@ -340,15 +340,16 @@ function getProverRecentStats(address prover) external view returns (ProverStats
 More stats-related view functions can be found at [IBrevisMarket.sol](../src/market/IBrevisMarket.sol#L425-L473)
 
 #### Semantics
-- wins: incremented on assignment changes during reveal; reflects how many requests a prover was assigned (won).
-- requestsFulfilled: incremented only on successful proof submission.
-- missed (derived): `wins - requestsFulfilled`.
-- lastActiveAt: updated on the prover’s own bid/reveal/submit.
+- wins: instantaneous count of current assignments. It increases when the prover becomes the winner for a request and decreases if they are superseded before finalization. It is carried forward across epochs.
+- requestsFulfilled: cumulative lifetime count, incremented only on successful proof submission.
+- recent window semantics: recent values are computed as diffs between the current and previous cumulative snapshots. Therefore, `recent.wins` is a net change (assignments gained minus assignments lost) since the epoch start, not a count of “wins events”.
+- lastActiveAt: updated on the prover’s own bid/reveal/submit; in recent stats it is non-zero only if there was activity in the current epoch.
+- totals fallback: if a prover had no activity in the current epoch, `getProverStatsTotal` returns the previous epoch snapshot, so totals don’t reset at epoch boundaries.
 
 #### Epochs, Recent, and Totals
-- Totals: lifetime aggregate per prover.
+- Totals: cumulative snapshot for the current epoch (falls back to the previous epoch if no current activity).
 - Epochs: time-bounded buckets with startAt and endAt.
-- Recent: the recent (current epoch’s) stats. Use `getProverRecentStats(..)`, `getRecentStatsInfo()`.
+- Recent: the recent (current epoch’s) stats computed as a diff between current and previous snapshots. Use `getProverRecentStats(..)`, `getRecentStatsInfo()`.
 
 #### Example: Browsing Epoch History
 ```typescript
@@ -460,10 +461,13 @@ const recent = await brevisMarket.getProverRecentStats(proverAddress);
 const [recentStartAt, recentEpochId] = await brevisMarket.getRecentStatsInfo();
 
 // UI metrics:
-// - Proofs Won (lifetime): total.wins
-// - Success Rate (lifetime): total.wins > 0 ? total.requestsFulfilled / total.wins : 0
-// - Missed Deadlines (lifetime): total.wins - total.requestsFulfilled
-// - Recent window equivalents: use `recent` instead of `total`
+// - Delivered (lifetime): total.requestsFulfilled
+// - Current assignments (instantaneous): total.wins
+// - Recent delivery: recent.requestsFulfilled
+// - Recent assignment net change: recent.wins  // note: gained minus lost during the current epoch
+// - Success rate: lifetime success rate cannot be derived purely on-chain without counting lifetime assignments.
+//   For a rough recent window indicator, use: recent.wins > 0 ? recent.requestsFulfilled / recent.wins : 0
+//   (interpretation: fraction of net new assignments fulfilled during the current epoch)
 // - Last active: prefer `recent.lastActiveAt` if > 0 else `total.lastActiveAt`
 ```
 
