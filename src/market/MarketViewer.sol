@@ -4,6 +4,8 @@ pragma solidity ^0.8.20;
 import "./interfaces/IBrevisMarket.sol";
 import "./interfaces/IMarketViewer.sol";
 
+/// @title MarketViewer
+/// @notice Read-only aggregator for BrevisMarket: batch getters, pending/overdue views, and composite stats
 contract MarketViewer is IMarketViewer {
     IBrevisMarket public immutable brevisMarket;
 
@@ -257,8 +259,6 @@ contract MarketViewer is IMarketViewer {
     // =========================================================================
     // INTERNAL UTILITIES
     // =========================================================================
-
-    // _sliceBounds removed; replaced by full-list and selected batch helpers
 
     function _pendingViews(bytes32[] memory reqids)
         internal
