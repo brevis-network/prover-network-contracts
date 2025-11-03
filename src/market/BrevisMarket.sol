@@ -685,6 +685,34 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         return (protocolFeeBps, protocolFeeBalance);
     }
 
+    /**
+     * @notice Get pending requests for a specific prover
+     * @param prover The prover address to query
+     * @return reqids Array of pending request IDs for the prover
+     */
+    function getProverPendingRequests(address prover) external view override returns (bytes32[] memory reqids) {
+        EnumerableSet.Bytes32Set storage set = proverPendingRequests[prover];
+        uint256 len = set.length();
+        reqids = new bytes32[](len);
+        for (uint256 i = 0; i < len; i++) {
+            reqids[i] = set.at(i);
+        }
+    }
+
+    /**
+     * @notice Get pending requests for a specific sender
+     * @param sender The sender address to query
+     * @return reqids Array of pending request IDs for the sender
+     */
+    function getSenderPendingRequests(address sender) external view override returns (bytes32[] memory reqids) {
+        EnumerableSet.Bytes32Set storage set = senderPendingRequests[sender];
+        uint256 len = set.length();
+        reqids = new bytes32[](len);
+        for (uint256 i = 0; i < len; i++) {
+            reqids[i] = set.at(i);
+        }
+    }
+
     // =========================================================================
     // INTERNAL FUNCTIONS
     // =========================================================================

@@ -322,6 +322,20 @@ interface IBrevisMarket {
      */
     function getProtocolFeeInfo() external view returns (uint256 feeBps, uint256 balance);
 
+    /**
+     * @notice Get pending request IDs for a specific prover
+     * @param prover The prover address to query
+     * @return reqids Array of pending request IDs
+     */
+    function getProverPendingRequests(address prover) external view returns (bytes32[] memory reqids);
+
+    /**
+     * @notice Get pending request IDs for a specific sender
+     * @param sender The sender address to query
+     * @return reqids Array of pending request IDs
+     */
+    function getSenderPendingRequests(address sender) external view returns (bytes32[] memory reqids);
+
     // =========================================================================
     // REQUEST QUERY FUNCTIONS
     // =========================================================================
