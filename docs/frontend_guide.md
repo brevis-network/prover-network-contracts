@@ -396,6 +396,7 @@ Key structs and return types are tailored for frontends and use compact types wh
         - `getProverPendingRequests(prover, reqids[])` → `PendingItemView[]`
         - `getSenderPendingRequests(sender, reqids[])` → `PendingItemView[]`
     - Overdue IDs only: `getProverOverdueRequests(prover)`, `getSenderOverdueRequests(sender)`.
+    - Refundable IDs (sender): `getSenderRefundableRequests(sender)` → `bytes32[]`
 
 - Epoch helpers
     - `getStatsEpochs()` → `(startAts[], endAts[])`

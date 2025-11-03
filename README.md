@@ -29,11 +29,13 @@ src/
 │   │   ├── ProverVault.sol       # Isolated staking vault per prover
 │   │   └── VaultFactory.sol      # Deterministic vault deployment factory
 │   ├── viewer/
-│   │   └── StakingViewer.sol     # Read-only helper providing unified data access
+│   │   └── StakingViewer.sol     # Read-only helper for off-chain data access
 │   └── interfaces/               # Staking interfaces
 │
 ├── market/                     # Auction marketplace contracts
-│   └── BrevisMarket.sol          # Sealed-bid reverse second-price auction
+│   ├── BrevisMarket.sol          # Sealed-bid reverse second-price auction
+│   ├── MarketViewer.sol          # Read-only helper for off-chain data access
+│   └── interfaces/               # Market interfaces
 │
 └── pico/                       # ZK proof verification
     ├── PicoVerifier.sol          # On-chain Brevis VM verifier

@@ -167,6 +167,12 @@ interface IMarketViewer {
      */
     function getSenderOverdueRequests(address sender) external view returns (bytes32[] memory reqids);
 
+    /**
+     * @notice All refundable request IDs for a sender
+     * @dev Includes all scenarios where `refund(reqid)` can be called
+     */
+    function getSenderRefundableRequests(address sender) external view returns (bytes32[] memory reqids);
+
     // =========================================================================
     // STATS COMPOSITES
     // =========================================================================

@@ -341,7 +341,36 @@ interface IBrevisMarket {
     // =========================================================================
 
     /**
-     * @notice Get complete request information
+     * @notice Public getter for the requests mapping
+     * @dev Mirrors the automatically generated public getter in the implementation.
+     * @param reqid The request ID to query
+     * @return status Current request status
+     * @return timestamp Creation timestamp
+     * @return sender Original requester
+     * @return fee Fee parameters (maxFee, minStake, deadline)
+     * @return vk Verification key
+     * @return publicValuesDigest Public values hash
+     * @return bidCount Number of sealed bids submitted
+     * @return winner Current winner tuple (prover, fee)
+     * @return second Current second-place tuple (prover, fee)
+     */
+    function requests(bytes32 reqid)
+        external
+        view
+        returns (
+            ReqStatus status,
+            uint64 timestamp,
+            address sender,
+            FeeParams memory fee,
+            bytes32 vk,
+            bytes32 publicValuesDigest,
+            uint64 bidCount,
+            Bidder memory winner,
+            Bidder memory second
+        );
+
+    /**
+     * @notice Get basic request information
      * @param reqid The request ID to query
      * @return status Current request status (Pending/Fulfilled/Refunded)
      * @return timestamp Request creation timestamp

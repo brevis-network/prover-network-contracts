@@ -249,4 +249,57 @@ contract MarketViewerTest is Test {
         items = viewer.getSenderPendingRequests(sender);
         total = items.length;
     }
+
+    function test_SenderRefundable_PastDeadline() public {
+        // Create a request with minimal allowed deadline (just after reveal)
+        uint64 minDeadlineDelta = BIDDING_DURATION + REVEAL_DURATION + 1;
+        (bytes32 reqid,) = _requestAndAuction(minDeadlineDelta, 7, 20);
+
+        // Warp past deadline (no proof submitted)
+        (,,,,, uint64 deadline,,) = market.getRequest(reqid);
+        vm.warp(deadline + 1);
+
+        // Refundable because now > deadline
+        bytes32[] memory ids = viewer.getSenderRefundableRequests(requester);
+        assertEq(ids.length, 1);
+        assertEq(ids[0], reqid);
+    }
+
+    function test_SenderRefundable_NoBidsAfterBiddingEnd() public {
+        // Create a request with long deadline; submit no bids
+        uint64 start = uint64(block.timestamp);
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) =
+            _createRequest(BIDDING_DURATION + REVEAL_DURATION + 1 days);
+        vm.prank(requester);
+        market.requestProof(req);
+
+        // Advance to just after bidding phase end but before reveal end and deadline
+        vm.warp(uint256(start) + BIDDING_DURATION + 1);
+
+        // Refundable because bidding ended and bidCount == 0
+        bytes32[] memory ids = viewer.getSenderRefundableRequests(requester);
+        assertEq(ids.length, 1);
+        assertEq(ids[0], reqid);
+    }
+
+    function test_SenderRefundable_NoWinnerAfterRevealEnd() public {
+        // Create a request with long deadline; place bids but don't reveal
+        uint64 start = uint64(block.timestamp);
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) =
+            _createRequest(BIDDING_DURATION + REVEAL_DURATION + 1 days);
+        vm.prank(requester);
+        market.requestProof(req);
+
+        // Bidding phase: sealed bids submitted
+        _bid(reqid, prover1, 10, 111);
+        _bid(reqid, prover2, 20, 222);
+
+        // Move past reveal phase without any reveal
+        vm.warp(uint256(start) + BIDDING_DURATION + REVEAL_DURATION + 2);
+
+        // Refundable because reveal ended and no winner (no reveals)
+        bytes32[] memory ids = viewer.getSenderRefundableRequests(requester);
+        assertEq(ids.length, 1);
+        assertEq(ids[0], reqid);
+    }
 }

@@ -196,6 +196,44 @@ contract MarketViewer is IMarketViewer {
         }
     }
 
+    /**
+     * @notice Get sender's refundable requests (all scenarios)
+     * @dev Returns reqids where refund(reqid) is currently allowed due to any of:
+     *      - deadline has passed,
+     *      - bidding phase ended and no bids were submitted,
+     *      - reveal phase ended and no winner was set.
+     */
+    function getSenderRefundableRequests(address sender) external view returns (bytes32[] memory reqids) {
+        bytes32[] memory all = brevisMarket.getSenderPendingRequests(sender);
+        uint64 biddingDur = brevisMarket.biddingPhaseDuration();
+        uint64 revealDur = brevisMarket.revealPhaseDuration();
+        uint256 nowTs = block.timestamp;
+
+        // Single pass over 'all' into a temporary buffer; trim at the end
+        bytes32[] memory tmp = new bytes32[](all.length);
+        uint256 j = 0;
+        for (uint256 i = 0; i < all.length; i++) {
+            bytes32 id = all[i];
+            (, uint64 ts,, IBrevisMarket.FeeParams memory fee,,, uint64 bidCount, IBrevisMarket.Bidder memory winner,) =
+                brevisMarket.requests(id);
+
+            uint256 biddingEnd = uint256(ts) + uint256(biddingDur);
+            uint256 revealEnd = biddingEnd + uint256(revealDur);
+
+            bool refundable = (nowTs > fee.deadline) || (nowTs > biddingEnd && bidCount == 0)
+                || (nowTs > revealEnd && winner.prover == address(0));
+
+            if (refundable) {
+                tmp[j++] = id;
+            }
+        }
+
+        reqids = new bytes32[](j);
+        for (uint256 k = 0; k < j; k++) {
+            reqids[k] = tmp[k];
+        }
+    }
+
     // =========================================================================
     // STATS COMPOSITES
     // =========================================================================

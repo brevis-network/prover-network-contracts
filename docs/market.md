@@ -240,6 +240,7 @@ Key endpoints:
   - Pending: `getProverPendingRequests(prover)`, `getProverPendingRequests(prover, reqids)`
   - Pending (sender): `getSenderPendingRequests(sender)`, `getSenderPendingRequests(sender, reqids)`
   - Overdue IDs: `getProverOverdueRequests(prover)`, `getSenderOverdueRequests(sender)`
+  - Refundable (sender): `getSenderRefundableRequests(sender)`
 - Stats composites:
   - `getProverStatsComposite(prover)` returns `{ total, recent, recentStartAt, successRateBps, fulfilled, refunded, pendingCount, overdueCount }`
     - `successRateBps` = `fulfilled / (fulfilled + refunded + overduePending)` in basis points
