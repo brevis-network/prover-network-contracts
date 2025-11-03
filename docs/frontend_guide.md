@@ -357,16 +357,14 @@ Prover stats
 function getProverStatsTotal(address prover) external view returns (ProverStats memory);
 // Recent stats for the current epoch + its start timestamp
 function getProverRecentStats(address prover) external view returns (ProverStats memory stats, uint64 startAt);
-// Lifetime success rate and raw counters (basis points, fulfilled, refunded)
-function getProverSuccessRate(address prover) external view returns (uint256 rateBps, uint64 fulfilled, uint64 refunded);
 ```
 
-More stats-related view functions (advanced/optional): [IBrevisMarket.sol](../src/market/IBrevisMarket.sol#L422-L524)
+More stats-related view functions (advanced/optional): [IBrevisMarket.sol](../src/market/interfaces/IBrevisMarket.sol)
 
 #### What to show in the UI (simple)
 - Delivered (lifetime): `getProverStatsTotal(prover).requestsFulfilled`
 - Missed (lifetime): `getProverStatsTotal(prover).requestsRefunded`
-- Success rate (lifetime): `getProverSuccessRate(prover)` → `rateBps` (0–10000)
+- Success rate (lifetime): via `MarketViewer.getProverStatsComposite(prover).successRateBps` (0–10000)
 - Recent delivery/misses: from `getProverRecentStats(prover)`
 - Last active: prefer `recent.lastActiveAt` if > 0, else `total.lastActiveAt`
 
@@ -374,7 +372,7 @@ Notes:
 - requestsRefunded counts late refunds where the final winner existed (i.e., missed by the winner). No-winner refunds are excluded.
 - Recent is the current time window; you can also get its start via `getRecentStatsInfo()` if needed.
 
-Advanced (optional): If you need historical per-epoch stats or system-wide aggregates, see the full interface in `IBrevisMarket.sol`.
+Advanced (optional): If you need historical per-epoch stats or system-wide aggregates, see the full interface in [`IBrevisMarket.sol`](../src/market/interfaces/IBrevisMarket.sol). For composite and paginated views, use `MarketViewer` via [`IMarketViewer.sol`](../src/market/interfaces/IMarketViewer.sol).
 
 ## 4. Action Reference
 
@@ -457,7 +455,8 @@ const sharePrice = proverInfo.vaultShares > 0
 // Market stats (simple)
 const total = await brevisMarket.getProverStatsTotal(proverAddress);
 const [recent] = await brevisMarket.getProverRecentStats(proverAddress);
-const [rateBps] = await brevisMarket.getProverSuccessRate(proverAddress);
+const statsComposite = await marketViewer.getProverStatsComposite(proverAddress);
+const rateBps = statsComposite.successRateBps;
 
 // UI metrics:
 // - Delivered (lifetime): total.requestsFulfilled

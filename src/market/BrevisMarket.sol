@@ -4,10 +4,11 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import "@security/access/AccessControl.sol";
 import "../pico/IPicoVerifier.sol";
 import "../staking/interfaces/IStakingController.sol";
-import "./IBrevisMarket.sol";
+import "./interfaces/IBrevisMarket.sol";
 import "./ProverSubmitters.sol";
 
 /**
@@ -16,6 +17,7 @@ import "./ProverSubmitters.sol";
  */
 contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, ReentrancyGuard {
     using SafeERC20 for IERC20;
+    using EnumerableSet for EnumerableSet.Bytes32Set;
 
     // =========================================================================
     // STRUCTS & CONSTANTS
@@ -88,6 +90,10 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     // Sum of minStake across all assigned-but-unfinalized requests per prover.
     // checking eligibility: required = req.minStake + assignedStake[prover] * overcommitBps / 10_000.
     mapping(address => uint256) public assignedStake;
+
+    // Pending requests per prover and per sender for easy lookup
+    mapping(address => EnumerableSet.Bytes32Set) internal proverPendingRequests;
+    mapping(address => EnumerableSet.Bytes32Set) internal senderPendingRequests;
 
     // Storage gap for future upgrades. Reserves 40 slots.
     uint256[40] private __gap;
@@ -228,6 +234,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         GlobalStats storage gs = _currentCumulativeGlobalStats();
         gs.totalRequests += 1;
 
+        senderPendingRequests[msg.sender].add(reqid);
+
         emit NewRequest(reqid, req);
     }
 
@@ -258,16 +266,13 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         uint256 requiredForBid = req.fee.minStake + ((assignedStake[prover] * overcommitBps) / BPS_DENOMINATOR);
         _requireProverEligible(prover, requiredForBid);
 
-        // Track if this is a new bid (not overwriting existing)
-        bool isNewBid = req.bids[prover] == bytes32(0);
+        // Increment bid count only for new bids
+        if (req.bids[prover] == bytes32(0)) {
+            req.bidCount++;
+        }
 
         // Store the sealed bid under the effective prover address
         req.bids[prover] = bidHash;
-
-        // Increment bid count only for new bids
-        if (isNewBid) {
-            req.bidCount++;
-        }
 
         // Update unified cumulative stats (carry over previous epoch on first touch)
         ProverStats storage s = _currentCumulativeStats(prover);
@@ -318,7 +323,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         if (fee > req.fee.maxFee) revert MarketFeeExceedsMaximum(fee, req.fee.maxFee);
 
         // Update lowest and second lowest bidders
-        _updateBidders(req, prover, fee);
+        _updateBidders(reqid, prover, fee);
 
         // Update unified cumulative stats
         ProverStats storage s = _currentCumulativeStats(prover);
@@ -398,6 +403,9 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         gs2.totalFulfilled += 1;
         gs2.totalFees += actualFee;
 
+        proverPendingRequests[prover].remove(reqid);
+        senderPendingRequests[req.sender].remove(reqid);
+
         emit ProofSubmitted(reqid, prover, proof, actualFee);
     }
 
@@ -437,8 +445,9 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         if (block.timestamp > req.fee.deadline && req.winner.prover != address(0)) {
             ProverStats storage sMiss = _currentCumulativeStats(req.winner.prover);
             sMiss.requestsRefunded += 1;
-            // Note: do not update lastActiveAt here (not a prover-initiated action)
+            proverPendingRequests[req.winner.prover].remove(reqid);
         }
+        senderPendingRequests[req.sender].remove(reqid);
 
         emit Refunded(reqid, req.sender, req.fee.maxFee);
     }
@@ -676,6 +685,34 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         return (protocolFeeBps, protocolFeeBalance);
     }
 
+    /**
+     * @notice Get pending requests for a specific prover
+     * @param prover The prover address to query
+     * @return reqids Array of pending request IDs for the prover
+     */
+    function getProverPendingRequests(address prover) external view override returns (bytes32[] memory reqids) {
+        EnumerableSet.Bytes32Set storage set = proverPendingRequests[prover];
+        uint256 len = set.length();
+        reqids = new bytes32[](len);
+        for (uint256 i = 0; i < len; i++) {
+            reqids[i] = set.at(i);
+        }
+    }
+
+    /**
+     * @notice Get pending requests for a specific sender
+     * @param sender The sender address to query
+     * @return reqids Array of pending request IDs for the sender
+     */
+    function getSenderPendingRequests(address sender) external view override returns (bytes32[] memory reqids) {
+        EnumerableSet.Bytes32Set storage set = senderPendingRequests[sender];
+        uint256 len = set.length();
+        reqids = new bytes32[](len);
+        for (uint256 i = 0; i < len; i++) {
+            reqids[i] = set.at(i);
+        }
+    }
+
     // =========================================================================
     // INTERNAL FUNCTIONS
     // =========================================================================
@@ -683,11 +720,13 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     /**
      * @notice Update the two lowest bidders for a request
      * @dev Maintains sorted order of winner and second-place bidders
-     * @param req Storage reference to the request state
+     * @param reqid The request ID to update
      * @param prover Address of the prover making the bid
      * @param fee Fee amount being bid
      */
-    function _updateBidders(ReqState storage req, address prover, uint256 fee) internal {
+    function _updateBidders(bytes32 reqid, address prover, uint256 fee) internal {
+        ReqState storage req = requests[reqid];
+
         address prevWinner = req.winner.prover;
 
         // If no bidders yet, or this is lower than current winner
@@ -706,6 +745,10 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         address newWinner = req.winner.prover;
         if (newWinner != prevWinner) {
             _reassignObligation(req, prevWinner, newWinner);
+            proverPendingRequests[prover].add(reqid);
+            if (prevWinner != address(0)) {
+                proverPendingRequests[prevWinner].remove(reqid);
+            }
         }
     }
 
@@ -853,28 +896,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         return (_diffStats(cur, prev), statsEpochs[epochId].startAt, statsEpochs[epochId].endAt);
     }
 
-    /**
-     * @notice Get a prover's lifetime success rate and raw counters
-     * @dev Success rate is computed in basis points (0-10000) as:
-     *      rateBps = requestsFulfilled / (requestsFulfilled + requestsRefunded).
-     *      If denominator is zero, returns 0.
-     */
-    function getProverSuccessRate(address prover)
-        external
-        view
-        override
-        returns (uint256 rateBps, uint64 fulfilled, uint64 refunded)
-    {
-        uint64 eid = statsEpochId;
-        ProverStats memory cur = proverStats[prover][eid];
-        if (eid > 0 && cur.lastActiveAt == 0) {
-            cur = proverStats[prover][eid - 1];
-        }
-        fulfilled = cur.requestsFulfilled;
-        refunded = cur.requestsRefunded;
-        uint256 denom = uint256(fulfilled) + uint256(refunded);
-        rateBps = denom == 0 ? 0 : (uint256(fulfilled) * BPS_DENOMINATOR) / denom;
-    }
+    // getProverSuccessRate removed from core; compute in MarketViewer/off-chain to allow different definitions.
 
     /**
      * @notice Get lifetime (cumulative) global stats

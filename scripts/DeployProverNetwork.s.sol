@@ -11,6 +11,7 @@ import "../src/staking/controller/StakingController.sol";
 import "../src/staking/viewer/StakingViewer.sol";
 import "../src/staking/vault/VaultFactory.sol";
 import "../src/market/BrevisMarket.sol";
+import "../src/market/MarketViewer.sol";
 import "../src/staking/interfaces/IStakingController.sol";
 import "../src/pico/IPicoVerifier.sol";
 
@@ -31,6 +32,7 @@ contract DeployProverNetwork is Script {
     address public stakingControllerProxy;
     address public stakingViewer;
     address public brevisMarketProxy;
+    address public marketViewer;
     address public stakingControllerImpl;
     address public vaultFactoryImpl;
     address public brevisMarketImpl;
@@ -58,6 +60,7 @@ contract DeployProverNetwork is Script {
         _deploySharedProxyAdmin();
         _deployStakingSystem();
         _deployBrevisMarket();
+        _deployMarketViewer();
         _connectSystems();
 
         vm.stopBroadcast();
@@ -80,6 +83,7 @@ contract DeployProverNetwork is Script {
         _deploySharedProxyAdmin();
         _deployStakingSystem();
         _deployBrevisMarket();
+        _deployMarketViewer();
         _connectSystems();
 
         vm.stopBroadcast();
@@ -233,6 +237,13 @@ contract DeployProverNetwork is Script {
         }
     }
 
+    function _deployMarketViewer() internal {
+        console.log("\n2e. Deploying MarketViewer (standalone)...");
+        // Deploy MarketViewer pointing to the BrevisMarket proxy (read-only, non-upgradeable)
+        marketViewer = address(new MarketViewer(brevisMarketProxy));
+        console.log("MarketViewer:", marketViewer);
+    }
+
     function _connectSystems() internal {
         console.log("\n=== SYSTEM INTEGRATION ===");
 
@@ -254,6 +265,7 @@ contract DeployProverNetwork is Script {
         console.log("StakingViewer:", stakingViewer);
         console.log("BrevisMarket Implementation:", brevisMarketImpl);
         console.log("BrevisMarket Proxy:", brevisMarketProxy);
+        console.log("MarketViewer:", marketViewer);
         console.log("\nTransfer ProxyAdmin ownership to multisig for production!");
     }
 }
