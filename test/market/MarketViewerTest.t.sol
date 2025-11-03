@@ -167,19 +167,19 @@ contract MarketViewerTest is Test {
         (bytes32 reqid,) = _requestAndAuction(minDeadlineDelta, 10, 20);
 
         // Before deadline, pending but not overdue
-        (IMarketViewer.PendingItemView[] memory items, uint256 total) = viewer.getProverPendingSlice(prover1, 0, 10);
-        assertEq(total, 1);
+        IMarketViewer.PendingItemView[] memory items = viewer.getProverPendingRequests(prover1);
+        assertEq(items.length, 1);
         assertEq(items.length, 1);
         assertEq(items[0].reqid, reqid);
         assertEq(items[0].winner, prover1);
         assertEq(items[0].isOverdue, false);
 
         // Advance past deadline: still pending, now overdue
-        _noopAndGetSenderSlice(requester);
+        _noopAndGetSenderPending(requester);
         vm.warp(items[0].deadline + 1);
 
-        (items, total) = viewer.getProverPendingSlice(prover1, 0, 10);
-        assertEq(total, 1);
+        items = viewer.getProverPendingRequests(prover1);
+        assertEq(items.length, 1);
         assertEq(items[0].isOverdue, true);
 
         // Overdue counts and ids
@@ -241,12 +241,12 @@ contract MarketViewerTest is Test {
         arr[0] = reqid;
     }
 
-    function _noopAndGetSenderSlice(address sender)
+    function _noopAndGetSenderPending(address sender)
         internal
         view
-        returns (uint256 total, IMarketViewer.PendingItemView[] memory items, uint256 senderTotal)
+        returns (uint256 total, IMarketViewer.PendingItemView[] memory items)
     {
-        (items, senderTotal) = viewer.getSenderPendingSlice(sender, 0, 10);
+        items = viewer.getSenderPendingRequests(sender);
         total = items.length;
     }
 }

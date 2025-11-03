@@ -62,11 +62,11 @@ interface IMarketViewer {
         IBrevisMarket.ProverStats total;
         IBrevisMarket.ProverStats recent;
         uint64 recentStartAt;
-        uint256 successRateBps; // 0–10000 (basis points)
+        uint64 successRateBps; // 0–10000 (basis points)
         uint64 fulfilled;
         uint64 refunded;
-        uint256 pendingCount;
-        uint256 overdueCount;
+        uint64 pendingCount;
+        uint64 overdueCount;
     }
 
     /**
@@ -120,34 +120,42 @@ interface IMarketViewer {
     function getSenderPendingCount(address sender) external view returns (uint256 count);
 
     /**
-     * @notice Paginate the prover's pending requests
-     * @return items Slice of pending items with deadline/winner
-     * @return total Total pending count (for client-side pagination)
+     * @notice Get all pending items for a prover with deadline/winner info
      */
-    function getProverPendingSlice(address prover, uint256 offset, uint256 limit)
-        external
-        view
-        returns (PendingItemView[] memory items, uint256 total);
+    function getProverPendingRequests(address prover) external view returns (PendingItemView[] memory items);
 
     /**
-     * @notice Paginate the sender's pending requests
-     * @return items Slice of pending items with deadline/winner
-     * @return total Total pending count (for client-side pagination)
+     * @notice Batch fetch selected pending items for a prover by reqids
+     * @dev Returns PendingItemView for the provided reqids in-order
      */
-    function getSenderPendingSlice(address sender, uint256 offset, uint256 limit)
+    function getProverPendingRequests(address prover, bytes32[] calldata reqids)
         external
         view
-        returns (PendingItemView[] memory items, uint256 total);
+        returns (PendingItemView[] memory items);
+
+    /**
+     * @notice Get all pending items for a sender with deadline/winner info
+     */
+    function getSenderPendingRequests(address sender) external view returns (PendingItemView[] memory items);
+
+    /**
+     * @notice Batch fetch selected pending items for a sender by reqids
+     * @dev Returns PendingItemView for the provided reqids in-order
+     */
+    function getSenderPendingRequests(address sender, bytes32[] calldata reqids)
+        external
+        view
+        returns (PendingItemView[] memory items);
 
     /**
      * @notice Count of overdue pending requests for a prover (now > deadline)
      */
-    function getProverOverdueCount(address prover) external view returns (uint256 overdue);
+    function getProverOverdueCount(address prover) external view returns (uint64 overdue);
 
     /**
      * @notice Count of overdue pending requests for a sender (now > deadline)
      */
-    function getSenderOverdueCount(address sender) external view returns (uint256 overdue);
+    function getSenderOverdueCount(address sender) external view returns (uint64 overdue);
 
     /**
      * @notice All overdue pending request IDs for a prover
@@ -170,6 +178,15 @@ interface IMarketViewer {
     function getProverStatsComposite(address prover) external view returns (ProverStatsComposite memory v);
 
     /**
+     * @notice Batch composite stats for a list of provers
+     * @dev Mirrors getProverStatsComposite but returns an array matching the input order
+     */
+    function batchGetProverStatsComposite(address[] calldata provers)
+        external
+        view
+        returns (ProverStatsComposite[] memory out);
+
+    /**
      * @notice Composite global stats suitable for dashboards
      */
     function getGlobalStatsComposite() external view returns (GlobalStatsComposite memory v);
@@ -179,13 +196,15 @@ interface IMarketViewer {
     // =========================================================================
 
     /**
-     * @notice Paginate over stats epochs metadata
-     * @return startAts Epoch start timestamps
-     * @return endAts Epoch end timestamps (0 for tail epoch)
-     * @return total Total number of epochs
+     * @notice Get all stats epochs metadata (start/end timestamps)
      */
-    function getStatsEpochsSlice(uint256 offset, uint256 limit)
+    function getStatsEpochs() external view returns (uint64[] memory startAts, uint64[] memory endAts);
+
+    /**
+     * @notice Get epoch metadata for selected epochIds
+     */
+    function getStatsEpochs(uint64[] calldata epochIds)
         external
         view
-        returns (uint64[] memory startAts, uint64[] memory endAts, uint256 total);
+        returns (uint64[] memory startAts, uint64[] memory endAts);
 }

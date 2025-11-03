@@ -237,13 +237,14 @@ Key endpoints:
 - Batch request data: `batchGetRequests`, `batchGetBidders`, `batchGetBidHashes`, `batchGetProofs`
 - Pending and overdue:
   - Counts: `getProverPendingCount`, `getSenderPendingCount`, `getProverOverdueCount`, `getSenderOverdueCount`
-  - Pagination: `getProverPendingSlice(prover, offset, limit)`, `getSenderPendingSlice(sender, offset, limit)`
+  - Pending: `getProverPendingRequests(prover)`, `getProverPendingRequests(prover, reqids)`
+  - Pending (sender): `getSenderPendingRequests(sender)`, `getSenderPendingRequests(sender, reqids)`
   - Overdue IDs: `getProverOverdueRequests(prover)`, `getSenderOverdueRequests(sender)`
 - Stats composites:
   - `getProverStatsComposite(prover)` returns `{ total, recent, recentStartAt, successRateBps, fulfilled, refunded, pendingCount, overdueCount }`
     - `successRateBps` = `fulfilled / (fulfilled + refunded + overduePending)` in basis points
   - `getGlobalStatsComposite()` returns `{ total, recent, recentStartAt }`
-- Epoch helpers: `getStatsEpochsSlice(offset, limit)`
+- Epoch helpers: `getStatsEpochs()`, `getStatsEpochs(epochIds)`
 
 Notes:
 - Success rate has multiple valid product definitions. We intentionally compute it in `MarketViewer` (or off-chain) to avoid coupling the core contract. The default viewer includes overdue pending requests in the denominator to reflect backlog risk.
