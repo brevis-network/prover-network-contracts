@@ -178,8 +178,8 @@ interface IMarketViewer {
     // =========================================================================
 
     /**
-     * @notice Composite stats for a prover including a success rate suitable for UI
-     * @dev successRateBps = fulfilled / (fulfilled + refunded + overduePending) in basis points (0–10000)
+     * @notice Composite stats for a prover including a success rate
+     * @dev successRateBps = fulfilled / (fulfilled + refunded + overdueCount) in basis points (0–10000)
      */
     function getProverStatsComposite(address prover) external view returns (ProverStatsComposite memory v);
 

@@ -328,19 +328,19 @@ contract MarketViewer is IMarketViewer {
         IBrevisMarket.ProverStats memory total = brevisMarket.getProverStatsTotal(prover);
         uint64 fulfilled = total.requestsFulfilled;
         uint64 refunded = total.requestsRefunded;
-        uint256 pendingCount256 = brevisMarket.getProverPendingRequests(prover).length;
-        uint64 overdueCount64 = this.getProverOverdueCount(prover);
-        uint256 denom = uint256(fulfilled) + uint256(refunded) + uint256(overdueCount64);
-        uint64 rateWithOverdueBps = denom == 0 ? uint64(0) : uint64((uint256(fulfilled) * 10_000) / denom);
+        uint64 pendingCount = uint64(brevisMarket.getProverPendingRequests(prover).length);
+        uint64 overdueCount = this.getProverOverdueCount(prover);
+        uint64 totalCount = fulfilled + refunded + overdueCount;
+        uint64 successRateBps = totalCount == 0 ? 0 : (fulfilled * 10_000) / totalCount;
         v = IMarketViewer.ProverStatsComposite({
             total: total,
             recent: recent,
             recentStartAt: startAt,
-            successRateBps: rateWithOverdueBps,
+            successRateBps: successRateBps,
             fulfilled: fulfilled,
             refunded: refunded,
-            pendingCount: uint64(pendingCount256),
-            overdueCount: overdueCount64
+            pendingCount: pendingCount,
+            overdueCount: overdueCount
         });
     }
 }

@@ -240,10 +240,10 @@ Key endpoints:
   - Pending: `getProverPendingRequests(prover)`, `getProverPendingRequests(prover, reqids)`
   - Pending (sender): `getSenderPendingRequests(sender)`, `getSenderPendingRequests(sender, reqids)`
   - Overdue IDs: `getProverOverdueRequests(prover)`, `getSenderOverdueRequests(sender)`
-  - Refundable (sender): `getSenderRefundableRequests(sender)`
+  - Refundable IDs (sender): `getSenderRefundableRequests(sender)`
 - Stats composites:
   - `getProverStatsComposite(prover)` returns `{ total, recent, recentStartAt, successRateBps, fulfilled, refunded, pendingCount, overdueCount }`
-    - `successRateBps` = `fulfilled / (fulfilled + refunded + overduePending)` in basis points
+    - `successRateBps` = `fulfilled / (fulfilled + refunded + overdueCount)` in basis points (0–10000)
   - `getGlobalStatsComposite()` returns `{ total, recent, recentStartAt }`
 - Epoch helpers: `getStatsEpochs()`, `getStatsEpochs(epochIds)`
 
