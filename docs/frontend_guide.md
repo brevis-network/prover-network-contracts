@@ -359,7 +359,7 @@ function getProverStatsTotal(address prover) external view returns (ProverStats 
 function getProverRecentStats(address prover) external view returns (ProverStats memory stats, uint64 startAt);
 ```
 
-More stats-related view functions (advanced/optional): [IBrevisMarket.sol](../src/market/IBrevisMarket.sol#L422-L524)
+More stats-related view functions (advanced/optional): [IBrevisMarket.sol](../src/market/interfaces/IBrevisMarket.sol)
 
 #### What to show in the UI (simple)
 - Delivered (lifetime): `getProverStatsTotal(prover).requestsFulfilled`
@@ -372,7 +372,7 @@ Notes:
 - requestsRefunded counts late refunds where the final winner existed (i.e., missed by the winner). No-winner refunds are excluded.
 - Recent is the current time window; you can also get its start via `getRecentStatsInfo()` if needed.
 
-Advanced (optional): If you need historical per-epoch stats or system-wide aggregates, see the full interface in `IBrevisMarket.sol`. For composite and paginated views, use `MarketViewer`.
+Advanced (optional): If you need historical per-epoch stats or system-wide aggregates, see the full interface in [`IBrevisMarket.sol`](../src/market/interfaces/IBrevisMarket.sol). For composite and paginated views, use `MarketViewer` via [`IMarketViewer.sol`](../src/market/interfaces/IMarketViewer.sol).
 
 ## 4. Action Reference
 
