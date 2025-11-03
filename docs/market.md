@@ -202,7 +202,6 @@ Global stats:
 Per-prover stats:
 - `getProverStatsTotal(prover)` — Lifetime totals
 - `getProverRecentStats(prover)` — Recent (current epoch) stats + start timestamp
-- `getProverSuccessRate(prover)` — Lifetime success rate (basis points) + raw counters
 - `getProverStatsForStatsEpoch(prover, epochId)` — Stats for a specific epoch + time window
 
 Epoch helpers:
@@ -216,7 +215,7 @@ Epoch helpers:
 - Recent: current epoch values as a diff vs the previous snapshot.
 - requestsFulfilled: increments on successful `submitProof()` (before deadline).
 - requestsRefunded: counts refunds after deadline when a final winner exists; excludes no-winner refunds.
-- Success rate: `fulfilled / (fulfilled + refunded)` (basis points via `getProverSuccessRate(prover)`).
+- Success rate: computed off-chain or via MarketViewer as `fulfilled / (fulfilled + refunded + overduePending)` in basis points (0–10000). See MarketViewer below.
 - lastActiveAt: set on prover actions (bid/reveal/submit); non-zero in Recent only if activity this epoch.
 - Totals fallback: if no activity in current epoch, totals getters return the previous snapshot.
 
@@ -252,3 +251,25 @@ Additional:
 ---
 
 **For exact function signatures and interface definitions, see [`IBrevisMarket.sol`](../src/market/IBrevisMarket.sol)**
+
+---
+
+## MarketViewer (off-chain focused views)
+
+To keep `BrevisMarket` lean and within size limits, richer read-only aggregation is provided by `MarketViewer.sol`.
+
+Key endpoints:
+
+- Batch request data: `batchGetRequests`, `batchGetBidders`, `batchGetBidHashes`, `batchGetProofs`
+- Pending and overdue:
+  - Counts: `getProverPendingCount`, `getSenderPendingCount`, `getProverOverdueCount`, `getSenderOverdueCount`
+  - Pagination: `getProverPendingSlice(prover, offset, limit)`, `getSenderPendingSlice(sender, offset, limit)`
+  - Overdue IDs: `getProverOverdueRequests(prover)`, `getSenderOverdueRequests(sender)`
+- Stats composites:
+  - `getProverStatsComposite(prover)` returns `{ total, recent, recentStartAt, successRateBps, fulfilled, refunded, pendingCount, overdueCount }`
+    - `successRateBps` = `fulfilled / (fulfilled + refunded + overduePending)` in basis points
+  - `getGlobalStatsComposite()` returns `{ total, recent, recentStartAt }`
+- Epoch helpers: `getStatsEpochsSlice(offset, limit)`
+
+Notes:
+- Success rate has multiple valid product definitions. We intentionally compute it in `MarketViewer` (or off-chain) to avoid coupling the core contract. The default viewer includes overdue pending requests in the denominator to reflect backlog risk.

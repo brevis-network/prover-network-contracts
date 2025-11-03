@@ -206,6 +206,48 @@ contract MarketViewer {
         }
     }
 
+    /**
+     * @notice Get all overdue pending request IDs for a prover
+     * @dev Overdue = current time > deadline; data sourced from prover's pending set
+     */
+    function getProverOverdueRequests(address prover) external view returns (bytes32[] memory reqids) {
+        bytes32[] memory all = brevisMarket.getProverPendingRequests(prover);
+        uint256 count;
+        for (uint256 i = 0; i < all.length; i++) {
+            (,,,,, uint64 deadline,,) = brevisMarket.getRequest(all[i]);
+            if (block.timestamp > deadline) count++;
+        }
+        reqids = new bytes32[](count);
+        uint256 j;
+        for (uint256 i = 0; i < all.length; i++) {
+            (,,,,, uint64 deadline,,) = brevisMarket.getRequest(all[i]);
+            if (block.timestamp > deadline) {
+                reqids[j++] = all[i];
+            }
+        }
+    }
+
+    /**
+     * @notice Get all overdue pending request IDs for a sender
+     * @dev Overdue = current time > deadline; data sourced from sender's pending set
+     */
+    function getSenderOverdueRequests(address sender) external view returns (bytes32[] memory reqids) {
+        bytes32[] memory all = brevisMarket.getSenderPendingRequests(sender);
+        uint256 count;
+        for (uint256 i = 0; i < all.length; i++) {
+            (,,,,, uint64 deadline,,) = brevisMarket.getRequest(all[i]);
+            if (block.timestamp > deadline) count++;
+        }
+        reqids = new bytes32[](count);
+        uint256 j;
+        for (uint256 i = 0; i < all.length; i++) {
+            (,,,,, uint64 deadline,,) = brevisMarket.getRequest(all[i]);
+            if (block.timestamp > deadline) {
+                reqids[j++] = all[i];
+            }
+        }
+    }
+
     // =========================================================================
     // STATS COMPOSITES
     // =========================================================================
