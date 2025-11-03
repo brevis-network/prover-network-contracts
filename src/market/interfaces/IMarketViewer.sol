@@ -112,12 +112,12 @@ interface IMarketViewer {
     /**
      * @notice Number of pending requests currently assigned to a prover
      */
-    function getProverPendingCount(address prover) external view returns (uint256 count);
+    function getProverPendingCount(address prover) external view returns (uint64 count);
 
     /**
      * @notice Number of pending requests created by a sender
      */
-    function getSenderPendingCount(address sender) external view returns (uint256 count);
+    function getSenderPendingCount(address sender) external view returns (uint64 count);
 
     /**
      * @notice Get all pending items for a prover with deadline/winner info

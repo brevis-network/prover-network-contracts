@@ -17,6 +17,7 @@ This guide provides frontend developers with the essential information needed to
     - 3.1 [Data Structures](#31-data-structures)
     - 3.2 [Read Functions](#32-read-functions)
     - 3.3 [BrevisMarket Stats](#33-brevismarket-stats)
+    - 3.4 [MarketViewer helpers](#34-marketviewer-helpers)
 4. [Action Reference](#4-action-reference)
 5. [Integration Patterns](#5-integration-patterns)
 6. [Error Handling & Performance](#6-error-handling--performance)
@@ -372,7 +373,35 @@ Notes:
 - requestsRefunded counts late refunds where the final winner existed (i.e., missed by the winner). No-winner refunds are excluded.
 - Recent is the current time window; you can also get its start via `getRecentStatsInfo()` if needed.
 
-Advanced (optional): If you need historical per-epoch stats or system-wide aggregates, see the full interface in [`IBrevisMarket.sol`](../src/market/interfaces/IBrevisMarket.sol). For composite and paginated views, use `MarketViewer` via [`IMarketViewer.sol`](../src/market/interfaces/IMarketViewer.sol).
+Advanced (optional): If you need historical per-epoch stats or system-wide aggregates, see the full interface in [`IBrevisMarket.sol`](../src/market/interfaces/IBrevisMarket.sol). For composite and helper views, use `MarketViewer` via [`IMarketViewer.sol`](../src/market/interfaces/IMarketViewer.sol).
+
+### 3.4 MarketViewer helpers
+
+`MarketViewer` provides UI-friendly, read-only helpers on top of `BrevisMarket`.
+
+Key structs and return types are tailored for frontends and use compact types where possible (for example, successRateBps and counts are `uint64`).
+
+- Prover performance composite
+    - `getProverStatsComposite(prover)` → `{ total, recent, recentStartAt, successRateBps, fulfilled, refunded, pendingCount, overdueCount }`
+    - `successRateBps` is `fulfilled / (fulfilled + refunded + overduePending)` in basis points (0–10000), type `uint64`.
+    - Batch variant: `batchGetProverStatsComposite(provers[])` preserves input order.
+
+- Pending and overdue requests
+    - Pending counts: `getProverPendingCount(prover)`, `getSenderPendingCount(sender)`.
+    - Overdue counts: `getProverOverdueCount(prover)`, `getSenderOverdueCount(sender)`.
+    - All pending items with context (deadline, winner, overdue flag):
+        - `getProverPendingRequests(prover)` → `PendingItemView[]`
+        - `getSenderPendingRequests(sender)` → `PendingItemView[]`
+    - Selected subset by IDs (order preserved):
+        - `getProverPendingRequests(prover, reqids[])` → `PendingItemView[]`
+        - `getSenderPendingRequests(sender, reqids[])` → `PendingItemView[]`
+    - Overdue IDs only: `getProverOverdueRequests(prover)`, `getSenderOverdueRequests(sender)`.
+
+- Epoch helpers
+    - `getStatsEpochs()` → `(startAts[], endAts[])`
+    - `getStatsEpochs(epochIds[])` → `(startAts[], endAts[])`
+
+Batch request helpers are also available: `batchGetRequests`, `batchGetBidders`, `batchGetBidHashes`, `batchGetProofs`.
 
 ## 4. Action Reference
 

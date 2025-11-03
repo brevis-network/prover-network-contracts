@@ -896,8 +896,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         return (_diffStats(cur, prev), statsEpochs[epochId].startAt, statsEpochs[epochId].endAt);
     }
 
-    // getProverSuccessRate removed from core; compute in MarketViewer/off-chain to allow different definitions.
-
     /**
      * @notice Get lifetime (cumulative) global stats
      */

@@ -91,14 +91,14 @@ contract MarketViewer is IMarketViewer {
     // PENDING LISTS, PAGINATION, OVERDUE
     // =========================================================================
 
-    function getProverPendingCount(address prover) external view returns (uint256 count) {
+    function getProverPendingCount(address prover) external view returns (uint64 count) {
         bytes32[] memory all = brevisMarket.getProverPendingRequests(prover);
-        return all.length;
+        return uint64(all.length);
     }
 
-    function getSenderPendingCount(address sender) external view returns (uint256 count) {
+    function getSenderPendingCount(address sender) external view returns (uint64 count) {
         bytes32[] memory all = brevisMarket.getSenderPendingRequests(sender);
-        return all.length;
+        return uint64(all.length);
     }
 
     function getProverPendingRequests(address prover)
