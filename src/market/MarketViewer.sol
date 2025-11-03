@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "./IBrevisMarket.sol";
+import "./interfaces/IBrevisMarket.sol";
+import "./interfaces/IMarketViewer.sol";
 
-contract MarketViewer {
+contract MarketViewer is IMarketViewer {
     IBrevisMarket public immutable brevisMarket;
 
     constructor(address _brevisMarketAddress) {
@@ -11,61 +12,16 @@ contract MarketViewer {
     }
 
     // =========================================================================
-    // TYPES
-    // =========================================================================
-
-    struct RequestView {
-        bytes32 reqid;
-        IBrevisMarket.ReqStatus status;
-        uint64 timestamp;
-        address sender;
-        uint256 maxFee;
-        uint256 minStake;
-        uint64 deadline;
-        bytes32 vk;
-        bytes32 publicValuesDigest;
-    }
-
-    struct BiddersView {
-        bytes32 reqid;
-        address winner;
-        uint256 winnerFee;
-        address second;
-        uint256 secondFee;
-    }
-
-    struct PendingItemView {
-        bytes32 reqid;
-        uint64 deadline;
-        IBrevisMarket.ReqStatus status;
-        address winner;
-        bool isOverdue;
-    }
-
-    struct ProverStatsComposite {
-        IBrevisMarket.ProverStats total;
-        IBrevisMarket.ProverStats recent;
-        uint64 recentStartAt;
-        uint256 successRateBps; // includes pending overdue in denominator by design
-        uint64 fulfilled;
-        uint64 refunded;
-        uint256 pendingCount;
-        uint256 overdueCount;
-    }
-
-    struct GlobalStatsComposite {
-        IBrevisMarket.GlobalStats total;
-        IBrevisMarket.GlobalStats recent;
-        uint64 recentStartAt;
-    }
-
-    // =========================================================================
     // BATCH GETTERS
     // =========================================================================
 
-    function batchGetRequests(bytes32[] calldata reqids) external view returns (RequestView[] memory out) {
+    function batchGetRequests(bytes32[] calldata reqids)
+        external
+        view
+        returns (IMarketViewer.RequestView[] memory out)
+    {
         uint256 n = reqids.length;
-        out = new RequestView[](n);
+        out = new IMarketViewer.RequestView[](n);
         for (uint256 i = 0; i < n; i++) {
             (
                 IBrevisMarket.ReqStatus status,
@@ -77,7 +33,7 @@ contract MarketViewer {
                 bytes32 vk,
                 bytes32 publicValuesDigest
             ) = brevisMarket.getRequest(reqids[i]);
-            out[i] = RequestView({
+            out[i] = IMarketViewer.RequestView({
                 reqid: reqids[i],
                 status: status,
                 timestamp: timestamp,
@@ -91,13 +47,17 @@ contract MarketViewer {
         }
     }
 
-    function batchGetBidders(bytes32[] calldata reqids) external view returns (BiddersView[] memory out) {
+    function batchGetBidders(bytes32[] calldata reqids)
+        external
+        view
+        returns (IMarketViewer.BiddersView[] memory out)
+    {
         uint256 n = reqids.length;
-        out = new BiddersView[](n);
+        out = new IMarketViewer.BiddersView[](n);
         for (uint256 i = 0; i < n; i++) {
             (address winner, uint256 winnerFee, address secondPlace, uint256 secondFee) =
                 brevisMarket.getBidders(reqids[i]);
-            out[i] = BiddersView({
+            out[i] = IMarketViewer.BiddersView({
                 reqid: reqids[i],
                 winner: winner,
                 winnerFee: winnerFee,
@@ -144,18 +104,18 @@ contract MarketViewer {
     function getProverPendingSlice(address prover, uint256 offset, uint256 limit)
         external
         view
-        returns (PendingItemView[] memory items, uint256 total)
+        returns (IMarketViewer.PendingItemView[] memory items, uint256 total)
     {
         bytes32[] memory all = brevisMarket.getProverPendingRequests(prover);
         total = all.length;
         (uint256 start, uint256 end) = _sliceBounds(total, offset, limit);
         uint256 m = end - start;
-        items = new PendingItemView[](m);
+        items = new IMarketViewer.PendingItemView[](m);
         for (uint256 i = 0; i < m; i++) {
             bytes32 reqid = all[start + i];
             (IBrevisMarket.ReqStatus status,,,,, uint64 deadline,,) = brevisMarket.getRequest(reqid);
             (address winner,,,) = brevisMarket.getBidders(reqid);
-            items[i] = PendingItemView({
+            items[i] = IMarketViewer.PendingItemView({
                 reqid: reqid,
                 deadline: deadline,
                 status: status,
@@ -168,18 +128,18 @@ contract MarketViewer {
     function getSenderPendingSlice(address sender, uint256 offset, uint256 limit)
         external
         view
-        returns (PendingItemView[] memory items, uint256 total)
+        returns (IMarketViewer.PendingItemView[] memory items, uint256 total)
     {
         bytes32[] memory all = brevisMarket.getSenderPendingRequests(sender);
         total = all.length;
         (uint256 start, uint256 end) = _sliceBounds(total, offset, limit);
         uint256 m = end - start;
-        items = new PendingItemView[](m);
+        items = new IMarketViewer.PendingItemView[](m);
         for (uint256 i = 0; i < m; i++) {
             bytes32 reqid = all[start + i];
             (IBrevisMarket.ReqStatus status,,,,, uint64 deadline,,) = brevisMarket.getRequest(reqid);
             (address winner,,,) = brevisMarket.getBidders(reqid);
-            items[i] = PendingItemView({
+            items[i] = IMarketViewer.PendingItemView({
                 reqid: reqid,
                 deadline: deadline,
                 status: status,
@@ -252,7 +212,11 @@ contract MarketViewer {
     // STATS COMPOSITES
     // =========================================================================
 
-    function getProverStatsComposite(address prover) external view returns (ProverStatsComposite memory v) {
+    function getProverStatsComposite(address prover)
+        external
+        view
+        returns (IMarketViewer.ProverStatsComposite memory v)
+    {
         (IBrevisMarket.ProverStats memory recent, uint64 startAt) = brevisMarket.getProverRecentStats(prover);
         IBrevisMarket.ProverStats memory total = brevisMarket.getProverStatsTotal(prover);
         uint64 fulfilled = total.requestsFulfilled;
@@ -261,7 +225,7 @@ contract MarketViewer {
         uint256 overdueCount = this.getProverOverdueCount(prover);
         uint256 denom = uint256(fulfilled) + uint256(refunded) + overdueCount;
         uint256 rateWithOverdueBps = denom == 0 ? 0 : (uint256(fulfilled) * 10_000) / denom;
-        v = ProverStatsComposite({
+        v = IMarketViewer.ProverStatsComposite({
             total: total,
             recent: recent,
             recentStartAt: startAt,
@@ -273,10 +237,10 @@ contract MarketViewer {
         });
     }
 
-    function getGlobalStatsComposite() external view returns (GlobalStatsComposite memory v) {
+    function getGlobalStatsComposite() external view returns (IMarketViewer.GlobalStatsComposite memory v) {
         (IBrevisMarket.GlobalStats memory recent, uint64 startAt) = brevisMarket.getGlobalRecentStats();
         IBrevisMarket.GlobalStats memory total = brevisMarket.getGlobalStatsTotal();
-        v = GlobalStatsComposite({total: total, recent: recent, recentStartAt: startAt});
+        v = IMarketViewer.GlobalStatsComposite({total: total, recent: recent, recentStartAt: startAt});
     }
 
     // =========================================================================

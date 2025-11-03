@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import "../../src/market/BrevisMarket.sol";
-import "../../src/market/IBrevisMarket.sol";
+import "../../src/market/interfaces/IBrevisMarket.sol";
 import "../../src/pico/IPicoVerifier.sol";
 import "../../src/staking/interfaces/IStakingController.sol";
 import "../mocks/MockERC20.sol";

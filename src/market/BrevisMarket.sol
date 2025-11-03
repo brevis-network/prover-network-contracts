@@ -8,7 +8,7 @@ import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import "@security/access/AccessControl.sol";
 import "../pico/IPicoVerifier.sol";
 import "../staking/interfaces/IStakingController.sol";
-import "./IBrevisMarket.sol";
+import "./interfaces/IBrevisMarket.sol";
 import "./ProverSubmitters.sol";
 
 /**
