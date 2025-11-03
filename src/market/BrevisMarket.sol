@@ -896,28 +896,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         return (_diffStats(cur, prev), statsEpochs[epochId].startAt, statsEpochs[epochId].endAt);
     }
 
-    /**
-     * @notice Get a prover's lifetime success rate and raw counters
-     * @dev Success rate is computed in basis points (0-10000) as:
-     *      rateBps = requestsFulfilled / (requestsFulfilled + requestsRefunded).
-     *      If denominator is zero, returns 0.
-     */
-    function getProverSuccessRate(address prover)
-        external
-        view
-        override
-        returns (uint256 rateBps, uint64 fulfilled, uint64 refunded)
-    {
-        uint64 eid = statsEpochId;
-        ProverStats memory cur = proverStats[prover][eid];
-        if (eid > 0 && cur.lastActiveAt == 0) {
-            cur = proverStats[prover][eid - 1];
-        }
-        fulfilled = cur.requestsFulfilled;
-        refunded = cur.requestsRefunded;
-        uint256 denom = uint256(fulfilled) + uint256(refunded);
-        rateBps = denom == 0 ? 0 : (uint256(fulfilled) * BPS_DENOMINATOR) / denom;
-    }
+    // getProverSuccessRate removed from core; compute in MarketViewer/off-chain to allow different definitions.
 
     /**
      * @notice Get lifetime (cumulative) global stats

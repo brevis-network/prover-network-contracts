@@ -499,21 +499,6 @@ interface IBrevisMarket {
         view
         returns (ProverStats memory stats, uint64 startAt, uint64 endAt);
 
-    /**
-     * @notice Get a prover's lifetime success rate and raw counters
-     * @dev Success rate is computed in basis points (0-10000) as:
-     *      rateBps = requestsFulfilled / (requestsFulfilled + requestsRefunded).
-     *      If denominator is zero, returns 0.
-     * @param prover The prover address to query
-     * @return rateBps Success rate in basis points
-     * @return fulfilled Lifetime fulfilled count
-     * @return refunded Lifetime refunded-after-deadline count (with a final winner)
-     */
-    function getProverSuccessRate(address prover)
-        external
-        view
-        returns (uint256 rateBps, uint64 fulfilled, uint64 refunded);
-
     // =========================================================================
     // GLOBAL STATS VIEW
     // =========================================================================

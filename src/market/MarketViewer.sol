@@ -46,7 +46,7 @@ contract MarketViewer {
         IBrevisMarket.ProverStats total;
         IBrevisMarket.ProverStats recent;
         uint64 recentStartAt;
-        uint256 successRateBps;
+        uint256 successRateBps; // includes pending overdue in denominator by design
         uint64 fulfilled;
         uint64 refunded;
         uint256 pendingCount;
@@ -213,14 +213,17 @@ contract MarketViewer {
     function getProverStatsComposite(address prover) external view returns (ProverStatsComposite memory v) {
         (IBrevisMarket.ProverStats memory recent, uint64 startAt) = brevisMarket.getProverRecentStats(prover);
         IBrevisMarket.ProverStats memory total = brevisMarket.getProverStatsTotal(prover);
-        (uint256 rateBps, uint64 fulfilled, uint64 refunded) = brevisMarket.getProverSuccessRate(prover);
+        uint64 fulfilled = total.requestsFulfilled;
+        uint64 refunded = total.requestsRefunded;
         uint256 pendingCount = brevisMarket.getProverPendingRequests(prover).length;
         uint256 overdueCount = this.getProverOverdueCount(prover);
+        uint256 denom = uint256(fulfilled) + uint256(refunded) + overdueCount;
+        uint256 rateWithOverdueBps = denom == 0 ? 0 : (uint256(fulfilled) * 10_000) / denom;
         v = ProverStatsComposite({
             total: total,
             recent: recent,
             recentStartAt: startAt,
-            successRateBps: rateBps,
+            successRateBps: rateWithOverdueBps,
             fulfilled: fulfilled,
             refunded: refunded,
             pendingCount: pendingCount,
