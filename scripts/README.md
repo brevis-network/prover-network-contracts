@@ -56,6 +56,10 @@ For advanced or partial rollouts, you can deploy components separately. These co
    ```bash
    forge script scripts/StakingViewer.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
    ```
+- MarketViewer (read-only, no proxy):
+   ```bash
+   forge script scripts/MarketViewer.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
+   ```
 - Mock PicoVerifier (testing only):
    ```bash
    forge script scripts/MockPicoVerifier.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
@@ -63,6 +67,7 @@ For advanced or partial rollouts, you can deploy components separately. These co
 
 Notes:
 - `DeployProverNetwork.s.sol` requires `proxyAdmin.address` in `config.json` and never auto-deploys a ProxyAdmin.
+- `MarketViewer.s.sol` requires `addresses.brevisMarket` in `config.json` (the BrevisMarket proxy/address to read from).
 - Component-only scripts may deploy a new ProxyAdmin if one is not provided (check each script’s header if needed).
 
 ## 4) After deployment (Etherscan + MetaMask)
