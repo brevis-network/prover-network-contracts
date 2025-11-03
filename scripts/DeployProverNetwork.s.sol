@@ -97,9 +97,11 @@ contract DeployProverNetwork is Script {
         address existingProxyAdmin = _json.readAddress("$.proxyAdmin.address");
         require(existingProxyAdmin != address(0), "config.proxyAdmin.address is zero");
 
-        sharedProxyAdmin = ProxyAdmin(existingProxyAdmin);
-        console.log("Using existing ProxyAdmin:", address(sharedProxyAdmin));
-        console.log("ProxyAdmin owner:", sharedProxyAdmin.owner());
+        console.log("Using existing ProxyAdmin:", existingProxyAdmin);
+        sharedProxyAdmin = ProxyAdmin(existingProxyAdmin); 
+        if (existingProxyAdmin.code.length > 0) {
+            console.log("ProxyAdmin owner:", sharedProxyAdmin.owner());
+        }
     }
 
     function _deployStakingSystem() internal {
