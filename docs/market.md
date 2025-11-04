@@ -216,7 +216,6 @@ Epoch helpers:
 - Recent: current epoch values as a diff vs the previous snapshot.
 - requestsFulfilled: increments on successful `submitProof()` (before deadline).
 - requestsRefunded: counts refunds after deadline when a final winner exists; excludes no-winner refunds.
-- Success rate: computed off-chain or via MarketViewer as `fulfilled / (fulfilled + refunded + overduePending)` in basis points (0–10000). See MarketViewer below.
 - lastActiveAt: set on prover actions (bid/reveal/submit); non-zero in Recent only if activity this epoch.
 - Totals fallback: if no activity in current epoch, totals getters return the previous snapshot.
 
@@ -246,9 +245,6 @@ Key endpoints:
     - `successRateBps` = `fulfilled / (fulfilled + refunded + overdueCount)` in basis points (0–10000)
   - `getGlobalStatsComposite()` returns `{ total, recent, recentStartAt }`
 - Epoch helpers: `getStatsEpochs()`, `getStatsEpochs(epochIds)`
-
-Notes:
-- Success rate has multiple valid product definitions. We intentionally compute it in `MarketViewer` (or off-chain) to avoid coupling the core contract. The default viewer includes overdue pending requests in the denominator to reflect backlog risk.
 
 ---
 
