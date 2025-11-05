@@ -29,21 +29,23 @@ contract DeployBrevisMarket is Script {
         console.log("Deploying BrevisMarket with deployer as initial owner:", deployer);
         console.log("NOTE: Transfer ownership to multisig after deployment for production security");
 
-        // Optional: implementation-only deployment for upgrades
-        bool implementationOnly =
-            json.keyExists("$.market.implementationOnly") ? json.readBool("$.market.implementationOnly") : false;
-
         // Always deploy a fresh implementation (uninitialized)
         address implementation =
             address(new BrevisMarket(IPicoVerifier(address(0)), IStakingController(address(0)), 0, 0, 0));
         console.log("BrevisMarket implementation:", implementation);
+        
+        {
+            // Optional: implementation-only deployment for upgrades
+            bool implementationOnly =
+                json.keyExists("$.market.implementationOnly") ? json.readBool("$.market.implementationOnly") : false;
 
-        if (implementationOnly) {
-            console.log(
-                "implementationOnly=true: Skipping proxy deployment and initialization. Use ProxyAdmin.upgrade() to point an existing proxy at this implementation."
-            );
-            vm.stopBroadcast();
-            return;
+            if (implementationOnly) {
+                console.log(
+                    "implementationOnly=true: Skipping proxy deployment and initialization. Use ProxyAdmin.upgrade() to point an existing proxy at this implementation."
+                );
+                vm.stopBroadcast();
+                return;
+            }
         }
 
         // Deploy or use existing ProxyAdmin
@@ -74,17 +76,21 @@ contract DeployBrevisMarket is Script {
         // Configure optional parameters if non-zero
         BrevisMarket market = BrevisMarket(payable(address(proxy)));
 
-        // Set slashing parameters (if specified)
-        uint256 slashBps = json.readUintOr("$.market.slashBps", 0);
-        if (slashBps > 0) {
-            console.log("Setting slashBps:", slashBps);
-            market.setSlashBps(slashBps);
-        }
+        {
+            // Set slashing parameters (if specified)
+            uint256 slashBps = json.readUintOr("$.market.slashBps", 0);
+            if (slashBps > 0) {
+                console.log("Setting slashBps:", slashBps);
+                market.setSlashBps(slashBps);
+                console.log("Configured slashBps:", slashBps);
+            }
 
-        uint256 slashWindow = json.readUintOr("$.market.slashWindow", 0);
-        if (slashWindow > 0) {
-            console.log("Setting slashWindow:", slashWindow);
-            market.setSlashWindow(slashWindow);
+            uint256 slashWindow = json.readUintOr("$.market.slashWindow", 0);
+            if (slashWindow > 0) {
+                console.log("Setting slashWindow:", slashWindow);
+                market.setSlashWindow(slashWindow);
+                console.log("Configured slashWindow:", slashWindow);
+            }
         }
 
         // Set protocol fee (if specified)
@@ -92,6 +98,7 @@ contract DeployBrevisMarket is Script {
         if (protocolFeeBps > 0) {
             console.log("Setting protocolFeeBps:", protocolFeeBps);
             market.setProtocolFeeBps(protocolFeeBps);
+            console.log("Configured protocolFeeBps:", protocolFeeBps);
         }
 
         // Optional overcommitBps
@@ -106,11 +113,6 @@ contract DeployBrevisMarket is Script {
         console.log("BrevisMarket implementation:", implementation);
         console.log("BrevisMarket proxy:", address(proxy));
         console.log("Initial owner:", deployer);
-
-        // Log configured parameters
-        if (slashBps > 0) console.log("Configured slashBps:", slashBps);
-        if (slashWindow > 0) console.log("Configured slashWindow:", slashWindow);
-        if (protocolFeeBps > 0) console.log("Configured protocolFeeBps:", protocolFeeBps);
     }
 
     /// @notice Deploy new ProxyAdmin or use existing one from config
