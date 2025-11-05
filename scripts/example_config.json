@@ -6,7 +6,8 @@
         "token": "0x0000000000000000000000000000000000000000",
         "unstakeDelay": 604800,
         "minSelfStake": 0,
-        "maxSlashBps": 1000
+        "maxSlashBps": 1000,
+        "implementationOnly": false
     },
     "market": {
         "picoVerifier": "0x0000000000000000000000000000000000000000",
@@ -16,7 +17,8 @@
         "slashBps": 0,
         "slashWindow": 0,
         "protocolFeeBps": 0,
-        "overcommitBps": 500
+        "overcommitBps": 500,
+        "implementationOnly": false
     },
     "addresses": {
         "stakingController": "",

@@ -44,6 +44,11 @@ For advanced or partial rollouts, you can deploy components separately. These co
    ```bash
    forge script scripts/StakingController.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
    ```
+   - To deploy implementation only (for upgrades), add in `config.json`:
+     ```json
+     { "staking": { "implementationOnly": true } }
+     ```
+     The script will deploy and print the new implementation address without creating a proxy.
 - VaultFactory (upgradeable via Transparent Proxy):
    ```bash
    forge script scripts/VaultFactory.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
@@ -52,6 +57,11 @@ For advanced or partial rollouts, you can deploy components separately. These co
    ```bash
    forge script scripts/BrevisMarket.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
    ```
+   - To deploy implementation only (for upgrades), add in `config.json`:
+     ```json
+     { "market": { "implementationOnly": true } }
+     ```
+     The script will deploy and print the new implementation address without creating a proxy.
 - StakingViewer (read-only, no proxy):
    ```bash
    forge script scripts/StakingViewer.s.sol --rpc-url $RPC_URL --broadcast --verify -vv

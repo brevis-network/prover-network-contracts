@@ -29,13 +29,25 @@ contract DeployBrevisMarket is Script {
         console.log("Deploying BrevisMarket with deployer as initial owner:", deployer);
         console.log("NOTE: Transfer ownership to multisig after deployment for production security");
 
+        // Optional: implementation-only deployment for upgrades
+        bool implementationOnly =
+            json.keyExists("$.market.implementationOnly") ? json.readBool("$.market.implementationOnly") : false;
+
+        // Always deploy a fresh implementation (uninitialized)
+        address implementation =
+            address(new BrevisMarket(IPicoVerifier(address(0)), IStakingController(address(0)), 0, 0, 0));
+        console.log("BrevisMarket implementation:", implementation);
+
+        if (implementationOnly) {
+            console.log(
+                "implementationOnly=true: Skipping proxy deployment and initialization. Use ProxyAdmin.upgrade() to point an existing proxy at this implementation."
+            );
+            vm.stopBroadcast();
+            return;
+        }
+
         // Deploy or use existing ProxyAdmin
         ProxyAdmin proxyAdmin = _deployOrUseProxyAdmin(json);
-
-        address implementation = address(
-            // Zero values for upgradeable deployment
-            new BrevisMarket(IPicoVerifier(address(0)), IStakingController(address(0)), 0, 0, 0)
-        );
         // Required config keys
         require(json.keyExists("$.addresses.stakingController"), "config.addresses.stakingController missing");
         require(json.keyExists("$.market.picoVerifier"), "config.market.picoVerifier missing");

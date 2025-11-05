@@ -28,11 +28,24 @@ contract DeployStakingController is Script {
         console.log("Deploying StakingController with deployer as initial owner:", deployer);
         console.log("NOTE: Transfer ownership to multisig after deployment for production security");
 
-        // Deploy or use existing ProxyAdmin
-        ProxyAdmin proxyAdmin = _deployOrUseProxyAdmin(json);
+        // Optional: implementation-only deployment for upgrades
+        bool implementationOnly =
+            json.keyExists("$.staking.implementationOnly") ? json.readBool("$.staking.implementationOnly") : false;
 
         // Deploy implementation with zero values for upgradeable deployment
         address implementation = address(new StakingController(address(0), address(0), 0, 0, 0));
+        console.log("StakingController implementation:", implementation);
+
+        if (implementationOnly) {
+            console.log(
+                "implementationOnly=true: Skipping proxy deployment and initialization. Use ProxyAdmin.upgrade() to point an existing proxy at this implementation."
+            );
+            vm.stopBroadcast();
+            return;
+        }
+
+        // Deploy or use existing ProxyAdmin
+        ProxyAdmin proxyAdmin = _deployOrUseProxyAdmin(json);
 
         // Prepare initialization data (required keys)
         require(json.keyExists("$.staking.token"), "config.staking.token missing");
