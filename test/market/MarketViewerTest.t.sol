@@ -90,7 +90,7 @@ contract MarketViewerTest is Test {
 
     function _bid(bytes32 reqid, address prover, uint256 fee, uint256 nonce) internal {
         vm.prank(prover);
-        market.bid(reqid, keccak256(abi.encodePacked(fee, nonce)));
+        market.bid(reqid, keccak256(abi.encode(reqid, prover, fee, nonce)));
     }
 
     function _reveal(bytes32 reqid, address prover, uint256 fee, uint256 nonce) internal {
@@ -143,8 +143,8 @@ contract MarketViewerTest is Test {
         provers[1] = prover2;
         bytes32[] memory hashes = viewer.batchGetBidHashes(reqid, provers);
         assertEq(hashes.length, 2);
-        assertEq(hashes[0], keccak256(abi.encodePacked(uint256(10), uint256(111))));
-        assertEq(hashes[1], keccak256(abi.encodePacked(uint256(20), uint256(222))));
+        assertEq(hashes[0], keccak256(abi.encode(reqid, prover1, uint256(10), uint256(111))));
+        assertEq(hashes[1], keccak256(abi.encode(reqid, prover2, uint256(20), uint256(222))));
 
         // No proof yet
         uint256[8][] memory proofs = viewer.batchGetProofs(_asReqids(reqid));

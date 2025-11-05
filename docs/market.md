@@ -62,14 +62,14 @@ struct FeeParams {
 
 ### Phase 1: Bidding**
 - Duration: `biddingPhaseDuration` seconds from request time
-- Provers submit `keccak256(fee, nonce)` to hide bids
+- Provers submit sealed bid commitments: `keccak256(abi.encode(reqid, prover, fee, nonce))`
 - Eligibility: must be an active prover with sufficient stake, computed as:
   - `required = request.minStake + assignedStake[prover] * overcommitBps / 10000`
   - where `assignedStake` is the sum of `minStake` from requests currently assigned to the prover (i.e., they are current winner but not yet fulfilled or slashed)
 
 ### Phase 2: Revealing** 
 - Duration: `revealPhaseDuration` seconds after bidding ends
-- Must provide original `fee` and `nonce` matching hash
+- Must provide original `fee` and `nonce`; the commitment is checked against `keccak256(abi.encode(reqid, prover, fee, nonce))`
 - System tracks winner (lowest bidder) and second-place (second-lowest)
 - Eligibility re-verified with the same formula as bidding
 

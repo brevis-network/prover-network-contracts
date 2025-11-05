@@ -90,8 +90,12 @@ contract BrevisMarketTest is Test {
         reqid = keccak256(abi.encodePacked(req.nonce, req.vk, req.publicValuesDigest));
     }
 
-    function _createBidHash(uint256 fee, uint256 nonce) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(fee, nonce));
+    function _createBidHash(bytes32 reqid, address prover, uint256 fee, uint256 nonce)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(reqid, prover, fee, nonce));
     }
 
     function test_RequestProof_Success() public {
@@ -173,7 +177,9 @@ contract BrevisMarketTest is Test {
         vm.prank(requester);
         market.requestProof(req);
 
-        bytes32 bidHash = _createBidHash(5e17, 123);
+        uint256 fee = 5e17;
+        uint256 nonce = 123;
+        bytes32 bidHash = _createBidHash(reqid, prover1, fee, nonce);
 
         vm.expectEmit(true, true, false, true);
         emit NewBid(reqid, prover1, bidHash);
@@ -187,7 +193,9 @@ contract BrevisMarketTest is Test {
 
     function test_Bid_RevertRequestNotFound() public {
         bytes32 nonexistentReqid = keccak256("nonexistent");
-        bytes32 bidHash = _createBidHash(5e17, 123);
+        uint256 fee = 5e17;
+        uint256 nonce = 123;
+        bytes32 bidHash = _createBidHash(nonexistentReqid, prover1, fee, nonce);
 
         vm.prank(prover1);
         vm.expectRevert(abi.encodeWithSelector(IBrevisMarket.MarketRequestNotFound.selector, nonexistentReqid));
@@ -203,7 +211,9 @@ contract BrevisMarketTest is Test {
         // Fast forward past bidding phase
         vm.warp(block.timestamp + BIDDING_DURATION + 1);
 
-        bytes32 bidHash = _createBidHash(5e17, 123);
+        uint256 fee = 5e17;
+        uint256 nonce = 123;
+        bytes32 bidHash = _createBidHash(reqid, prover1, fee, nonce);
         uint256 biddingEndTime = block.timestamp - 1; // Should be the actual end time
 
         vm.prank(prover1);
@@ -219,7 +229,9 @@ contract BrevisMarketTest is Test {
         vm.prank(requester);
         market.requestProof(req);
 
-        bytes32 bidHash = _createBidHash(5e17, 123);
+        uint256 fee = 5e17;
+        uint256 nonce = 123;
+        bytes32 bidHash = _createBidHash(reqid, prover3, fee, nonce);
 
         vm.prank(prover3); // Has insufficient stake
         vm.expectRevert(
@@ -236,7 +248,7 @@ contract BrevisMarketTest is Test {
 
         uint256 fee = 5e17;
         uint256 nonce = 123;
-        bytes32 bidHash = _createBidHash(fee, nonce);
+        bytes32 bidHash = _createBidHash(reqid, prover1, fee, nonce);
 
         // Place bid
         vm.prank(prover1);
@@ -267,7 +279,7 @@ contract BrevisMarketTest is Test {
 
         uint256 fee = 5e17;
         uint256 nonce = 123;
-        bytes32 bidHash = _createBidHash(fee, nonce);
+        bytes32 bidHash = _createBidHash(reqid, prover1, fee, nonce);
 
         // Place bid
         vm.prank(prover1);
@@ -277,7 +289,7 @@ contract BrevisMarketTest is Test {
         vm.warp(block.timestamp + BIDDING_DURATION + 1);
 
         uint256 wrongFee = 6e17;
-        bytes32 expectedHash = _createBidHash(wrongFee, nonce);
+        bytes32 expectedHash = _createBidHash(reqid, prover1, wrongFee, nonce);
 
         vm.prank(prover1);
         vm.expectRevert(abi.encodeWithSelector(IBrevisMarket.MarketBidRevealMismatch.selector, expectedHash, bidHash));
@@ -292,7 +304,7 @@ contract BrevisMarketTest is Test {
 
         uint256 excessiveFee = MAX_FEE + 1;
         uint256 nonce = 123;
-        bytes32 bidHash = _createBidHash(excessiveFee, nonce);
+        bytes32 bidHash = _createBidHash(reqid, prover1, excessiveFee, nonce);
 
         // Place bid
         vm.prank(prover1);
@@ -314,7 +326,7 @@ contract BrevisMarketTest is Test {
 
         uint256 fee = 5e17;
         uint256 nonce = 123;
-        bytes32 bidHash = _createBidHash(fee, nonce);
+        bytes32 bidHash = _createBidHash(reqid, prover1, fee, nonce);
 
         // Place bid
         vm.prank(prover1);
@@ -357,8 +369,8 @@ contract BrevisMarketTest is Test {
         uint256 nonce1 = 123;
         uint256 nonce2 = 456;
 
-        bytes32 bidHash1 = _createBidHash(fee1, nonce1);
-        bytes32 bidHash2 = _createBidHash(fee2, nonce2);
+        bytes32 bidHash1 = _createBidHash(reqid, prover1, fee1, nonce1);
+        bytes32 bidHash2 = _createBidHash(reqid, prover2, fee2, nonce2);
 
         // Place bids
         vm.prank(prover1);
@@ -483,7 +495,7 @@ contract BrevisMarketTest is Test {
 
         uint256 fee = 5e17;
         uint256 nonce = 123;
-        bytes32 bidHash = _createBidHash(fee, nonce);
+        bytes32 bidHash = _createBidHash(reqid, prover1, fee, nonce);
 
         // Place bid and reveal
         vm.prank(prover1);
@@ -510,7 +522,7 @@ contract BrevisMarketTest is Test {
 
         uint256 fee = 5e17;
         uint256 nonce = 123;
-        bytes32 bidHash = _createBidHash(fee, nonce);
+        bytes32 bidHash = _createBidHash(reqid, prover1, fee, nonce);
 
         // Place bid and reveal
         vm.prank(prover1);
@@ -545,7 +557,7 @@ contract BrevisMarketTest is Test {
 
         uint256 fee = 5e17;
         uint256 nonce = 123;
-        bytes32 bidHash = _createBidHash(fee, nonce);
+        bytes32 bidHash = _createBidHash(reqid, prover1, fee, nonce);
 
         // Place bid while prover1 is eligible
         vm.prank(prover1);
@@ -572,8 +584,8 @@ contract BrevisMarketTest is Test {
         uint256 sameFee = 5e17;
         uint256 nonce1 = 123;
         uint256 nonce2 = 456;
-        bytes32 bidHash1 = _createBidHash(sameFee, nonce1);
-        bytes32 bidHash2 = _createBidHash(sameFee, nonce2);
+        bytes32 bidHash1 = _createBidHash(reqid, prover1, sameFee, nonce1);
+        bytes32 bidHash2 = _createBidHash(reqid, prover2, sameFee, nonce2);
 
         // Place bids
         vm.prank(prover1);
@@ -608,7 +620,7 @@ contract BrevisMarketTest is Test {
         bytes32 reqid = keccak256(abi.encodePacked(req.nonce, req.vk, req.publicValuesDigest));
         uint256 fee = 5e17;
         uint256 nonce = 123;
-        bytes32 bidHash = _createBidHash(fee, nonce);
+        bytes32 bidHash = _createBidHash(reqid, prover1, fee, nonce);
 
         // Place bid and reveal
         vm.prank(prover1);
@@ -635,7 +647,7 @@ contract BrevisMarketTest is Test {
 
         uint256 fee = 5e17;
         uint256 nonce = 123;
-        bytes32 bidHash = _createBidHash(fee, nonce);
+        bytes32 bidHash = _createBidHash(reqid, prover1, fee, nonce);
 
         // Place bid but don't reveal
         vm.prank(prover1);
@@ -710,7 +722,7 @@ contract BrevisMarketTest is Test {
 
         uint256 fee = 5e17;
         uint256 nonce = 123;
-        bytes32 bidHash = _createBidHash(fee, nonce);
+        bytes32 bidHash = _createBidHash(reqid, prover1, fee, nonce);
 
         // Place bid but don't reveal
         vm.prank(prover1);
@@ -764,7 +776,7 @@ contract BrevisMarketTest is Test {
         uint256 requestTime = block.timestamp;
         uint256 fee = 5e17;
         uint256 nonce = 123;
-        bytes32 bidHash = _createBidHash(fee, nonce);
+        bytes32 bidHash = _createBidHash(reqid, prover1, fee, nonce);
 
         // Place bid
         vm.prank(prover1);
@@ -798,7 +810,7 @@ contract BrevisMarketTest is Test {
         uint256 requestTime = block.timestamp;
         uint256 fee = 5e17;
         uint256 nonce = 123;
-        bytes32 bidHash = _createBidHash(fee, nonce);
+        bytes32 bidHash = _createBidHash(reqid, prover1, fee, nonce);
 
         // Place and reveal bid (creates a winner)
         vm.prank(prover1);
@@ -836,20 +848,21 @@ contract BrevisMarketTest is Test {
         uint256 requestTime = block.timestamp;
         uint256 fee = 5e17;
         uint256 nonce = 123;
-        bytes32 bidHash = _createBidHash(fee, nonce);
+        bytes32 bidHash = _createBidHash(reqid, prover1, fee, nonce);
 
         // Place bid from prover1
         vm.prank(prover1);
         market.bid(reqid, bidHash);
 
         // Replace bid from same prover (should not increase count)
-        bytes32 newBidHash = _createBidHash(4e17, 456);
+        bytes32 newBidHash = _createBidHash(reqid, prover1, 4e17, 456);
         vm.prank(prover1);
         market.bid(reqid, newBidHash);
 
         // Add bid from different prover
+        bytes32 bidHashP2 = _createBidHash(reqid, prover2, fee, nonce);
         vm.prank(prover2);
-        market.bid(reqid, bidHash);
+        market.bid(reqid, bidHashP2);
 
         // Fast forward past bidding phase
         vm.warp(requestTime + BIDDING_DURATION + 1);
@@ -878,13 +891,14 @@ contract BrevisMarketTest is Test {
 
         uint256 fee = 5e17;
         uint256 nonce = 123;
-        bytes32 bidHash = _createBidHash(fee, nonce);
+        bytes32 bidHash = _createBidHash(reqid, prover1, fee, nonce);
 
         // Place bids from multiple provers
         vm.prank(prover1);
         market.bid(reqid, bidHash);
+        bytes32 bidHash2 = _createBidHash(reqid, prover2, fee, nonce);
         vm.prank(prover2);
-        market.bid(reqid, bidHash);
+        market.bid(reqid, bidHash2);
 
         // Fast forward past reveal phase without revealing any bids
         vm.warp(block.timestamp + BIDDING_DURATION + REVEAL_DURATION + 1);
@@ -1259,7 +1273,7 @@ contract BrevisMarketTest is Test {
         vm.warp(block.timestamp + BIDDING_DURATION + 1);
 
         // Submit and reveal winning bid
-        bytes32 bidHash = keccak256(abi.encodePacked(fee, uint256(1)));
+        bytes32 bidHash = keccak256(abi.encode(reqid, winner, fee, uint256(1)));
 
         // Go back to bidding phase to submit bid
         vm.warp(block.timestamp - BIDDING_DURATION - 1);
@@ -1512,7 +1526,7 @@ contract BrevisMarketTest is Test {
 
         // Prover1 bids and reveals on A -> becomes winner
         uint256 feeA = 4e17;
-        bytes32 bidHashA = _createBidHash(feeA, 1);
+        bytes32 bidHashA = _createBidHash(reqidA, prover1, feeA, 1);
         vm.prank(prover1);
         market.bid(reqidA, bidHashA);
         vm.warp(block.timestamp + BIDDING_DURATION + 1);
@@ -1528,7 +1542,7 @@ contract BrevisMarketTest is Test {
         reqidB = _requestAndGetId(reqB);
 
         // Attempt to bid on B should fail at bid time as required = MIN_STAKE + MIN_STAKE*100% = 2*MIN_STAKE
-        bytes32 bidHashB = _createBidHash(5e17, 2);
+        bytes32 bidHashB = _createBidHash(reqidB, prover1, 5e17, 2);
         vm.prank(prover1);
         vm.expectRevert(
             abi.encodeWithSelector(IBrevisMarket.MarketProverNotEligible.selector, prover1, MIN_STAKE * 2, MIN_STAKE)
@@ -1552,8 +1566,8 @@ contract BrevisMarketTest is Test {
         reqidB = _requestAndGetId(reqB);
 
         // Place bids for both before any reveal (should pass as assignedMinStake is 0)
-        bytes32 bidHashA = _createBidHash(5e17, 1);
-        bytes32 bidHashB = _createBidHash(5e17, 2);
+        bytes32 bidHashA = _createBidHash(reqidA, prover1, 5e17, 1);
+        bytes32 bidHashB = _createBidHash(reqidB, prover1, 5e17, 2);
         vm.prank(prover1);
         market.bid(reqidA, bidHashA);
         vm.prank(prover1);
@@ -1588,7 +1602,7 @@ contract BrevisMarketTest is Test {
         // Win A
         uint256 feeA = 5e17;
         vm.prank(prover1);
-        market.bid(reqidA, _createBidHash(feeA, 1));
+        market.bid(reqidA, _createBidHash(reqidA, prover1, feeA, 1));
         vm.warp(block.timestamp + BIDDING_DURATION + 1);
         vm.prank(prover1);
         market.reveal(reqidA, feeA, 1);
@@ -1605,7 +1619,7 @@ contract BrevisMarketTest is Test {
         reqB.nonce = 600;
         reqidB = _requestAndGetId(reqB);
         vm.prank(prover1);
-        market.bid(reqidB, _createBidHash(4e17, 2));
+        market.bid(reqidB, _createBidHash(reqidB, prover1, 4e17, 2));
         vm.warp(block.timestamp + BIDDING_DURATION + 1);
         vm.prank(prover1);
         market.reveal(reqidB, 4e17, 2);
@@ -1624,7 +1638,7 @@ contract BrevisMarketTest is Test {
         reqidA = _requestAndGetId(reqA);
         // Win A
         vm.prank(prover1);
-        market.bid(reqidA, _createBidHash(5e17, 1));
+        market.bid(reqidA, _createBidHash(reqidA, prover1, 5e17, 1));
         vm.warp(block.timestamp + BIDDING_DURATION + 1);
         vm.prank(prover1);
         market.reveal(reqidA, 5e17, 1);
@@ -1646,7 +1660,7 @@ contract BrevisMarketTest is Test {
         reqB.nonce = 800;
         reqidB = _requestAndGetId(reqB);
         vm.prank(prover1);
-        market.bid(reqidB, _createBidHash(4e17, 2));
+        market.bid(reqidB, _createBidHash(reqidB, prover1, 4e17, 2));
         vm.warp(block.timestamp + BIDDING_DURATION + 1);
         vm.prank(prover1);
         market.reveal(reqidB, 4e17, 2);
