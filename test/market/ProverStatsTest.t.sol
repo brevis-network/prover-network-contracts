@@ -88,8 +88,12 @@ contract ProverStatsTest is Test {
         return _createBasicRequest(0);
     }
 
-    function _createBidHash(uint256 fee, uint256 nonce) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(fee, nonce));
+    function _createBidHash(bytes32 reqid, address prover, uint256 fee, uint256 nonce)
+        internal
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encodePacked(reqid, prover, fee, nonce));
     }
 
     function _bid(bytes32 reqid, uint256 fee, uint256 nonce, address who) internal {
@@ -286,7 +290,7 @@ contract ProverStatsTest is Test {
         market.requestProof(req);
 
         // Bid
-        bytes32 bidHash = _createBidHash(5e17, 123);
+        bytes32 bidHash = _createBidHash(reqid, prover1, 5e17, 123);
         vm.prank(prover1);
         market.bid(reqid, bidHash);
 
@@ -340,9 +344,9 @@ contract ProverStatsTest is Test {
 
         // Both place bids
         vm.prank(prover1);
-        market.bid(reqid, _createBidHash(6e17, 111));
+        market.bid(reqid, _createBidHash(reqid, prover1, 6e17, 111));
         vm.prank(prover2);
-        market.bid(reqid, _createBidHash(4e17, 222));
+        market.bid(reqid, _createBidHash(reqid, prover2, 4e17, 222));
 
         // Reveal phase
         vm.warp(block.timestamp + BIDDING_DURATION + 1);
@@ -380,7 +384,7 @@ contract ProverStatsTest is Test {
 
         // Some activity for prover1
         vm.prank(prover1);
-        market.bid(reqid, _createBidHash(5e17, 123));
+        market.bid(reqid, _createBidHash(reqid, prover1, 5e17, 123));
 
         (uint64 startAtBefore, uint64 epochBefore) = market.getRecentStatsInfo();
 
@@ -416,7 +420,7 @@ contract ProverStatsTest is Test {
 
         // Some activity by prover1 only
         vm.prank(prover1);
-        market.bid(reqid, _createBidHash(5e17, 123));
+        market.bid(reqid, _createBidHash(reqid, prover1, 5e17, 123));
 
         // Reset epoch; ensure monotonic start by advancing time
         vm.warp(block.timestamp + 1);
@@ -437,7 +441,7 @@ contract ProverStatsTest is Test {
 
         // Prover1 bids and reveals, becomes winner
         vm.prank(prover1);
-        market.bid(reqid, _createBidHash(5e17, 123));
+        market.bid(reqid, _createBidHash(reqid, prover1, 5e17, 123));
         vm.warp(block.timestamp + BIDDING_DURATION + 1);
         vm.prank(prover1);
         market.reveal(reqid, 5e17, 123);
@@ -465,7 +469,7 @@ contract ProverStatsTest is Test {
         market.requestProof(req);
 
         vm.prank(prover1);
-        market.bid(reqid, _createBidHash(5e17, 123));
+        market.bid(reqid, _createBidHash(reqid, prover1, 5e17, 123));
 
         // Recent == current epoch stats
         (IBrevisMarket.ProverStats memory recent1e1,) = market.getProverRecentStats(prover1);
@@ -503,7 +507,8 @@ contract ProverStatsTest is Test {
 
         // New activity in epoch2 should affect only epoch2 bucket and recent
         vm.prank(prover2);
-        market.bid(reqid, _createBidHash(6e17, 456));
+        bytes32 _bh = _createBidHash(reqid, prover2, 6e17, 456);
+        market.bid(reqid, _bh);
 
         (IBrevisMarket.ProverStats memory recent2e2,) = market.getProverRecentStats(prover2);
         (IBrevisMarket.ProverStats memory e2p2,,) = market.getProverStatsForStatsEpoch(prover2, epoch2);
@@ -545,7 +550,7 @@ contract ProverStatsTest is Test {
         uint256 bidFee = 5e17;
         uint256 bidNonce = 123;
         vm.prank(prover1);
-        market.bid(reqid, _createBidHash(bidFee, bidNonce));
+        market.bid(reqid, _createBidHash(reqid, prover1, bidFee, bidNonce));
         vm.warp(block.timestamp + BIDDING_DURATION + 1);
         vm.prank(prover1);
         market.reveal(reqid, bidFee, bidNonce);
@@ -571,7 +576,7 @@ contract ProverStatsTest is Test {
         vm.prank(requester);
         market.requestProof(req);
         vm.prank(prover1);
-        market.bid(reqid, _createBidHash(4e17, 1));
+        market.bid(reqid, _createBidHash(reqid, prover1, 4e17, 1));
         vm.warp(block.timestamp + BIDDING_DURATION + 1);
         vm.prank(prover1);
         market.reveal(reqid, 4e17, 1);
@@ -628,9 +633,9 @@ contract ProverStatsTest is Test {
         market.requestProof(rA);
         // Bids
         vm.prank(prover1);
-        market.bid(reqA, _createBidHash(6e17, 111));
+        market.bid(reqA, _createBidHash(reqA, prover1, 6e17, 111));
         vm.prank(prover2);
-        market.bid(reqA, _createBidHash(4e17, 222));
+        market.bid(reqA, _createBidHash(reqA, prover2, 4e17, 222));
         // Reveal both
         vm.warp(block.timestamp + BIDDING_DURATION + 1);
         vm.prank(prover1);
@@ -647,7 +652,7 @@ contract ProverStatsTest is Test {
         vm.prank(requester);
         market.requestProof(rB);
         vm.prank(prover1);
-        market.bid(reqB, _createBidHash(8e17, 333));
+        market.bid(reqB, _createBidHash(reqB, prover1, 8e17, 333));
         vm.warp(block.timestamp + BIDDING_DURATION + 1);
         vm.prank(prover1);
         market.reveal(reqB, 8e17, 333);

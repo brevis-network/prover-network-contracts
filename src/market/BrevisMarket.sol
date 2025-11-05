@@ -243,7 +243,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
      * @notice Submit a sealed bid for a proof request
      * @dev Can override previous bids during bidding phase
      * @param reqid The request ID to bid on
-     * @param bidHash Keccak256 hash of (fee, nonce) - keeps bid secret until reveal
+     * @param bidHash Commitment: keccak256(abi.encodePacked(reqid, prover, fee, nonce))
      */
     function bid(bytes32 reqid, bytes32 bidHash) external override {
         // Advance epoch id if any scheduled epoch start has passed
@@ -316,7 +316,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         _requireProverEligible(prover, requiredForReveal);
 
         // Verify the revealed bid matches the hash
-        bytes32 expectedHash = keccak256(abi.encodePacked(fee, nonce));
+        // Commitment binds to request id and effective prover to prevent hash-copy front-running
+        bytes32 expectedHash = keccak256(abi.encodePacked(reqid, prover, fee, nonce));
         if (req.bids[prover] != expectedHash) {
             revert MarketBidRevealMismatch(expectedHash, req.bids[prover]);
         }
@@ -440,6 +441,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
         req.status = ReqStatus.Refunded;
         feeToken.safeTransfer(req.sender, req.fee.maxFee);
+        // Release any reserved obligation tied to this request upon refund
+        _releaseObligation(req);
 
         // If deadline passed and there was a final winner, count a missed assignment for that prover
         if (block.timestamp > req.fee.deadline && req.winner.prover != address(0)) {
@@ -477,8 +480,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         stakingController.slashByAmount(req.winner.prover, slashAmount);
         // Update status to prevent double slashing
         req.status = ReqStatus.Slashed;
-        // Release any reserved obligation tied to this request now that it is finalized by slashing
-        _releaseObligation(req);
         emit ProverSlashed(reqid, req.winner.prover, slashAmount);
     }
 

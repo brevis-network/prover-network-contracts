@@ -367,7 +367,7 @@ contract ProverSubmittersTest is Test {
 
         // Create a request
         bytes32 reqid = _createProofRequest();
-        bytes32 bidHash = keccak256(abi.encodePacked(uint256(1e17), uint256(123)));
+        bytes32 bidHash = keccak256(abi.encodePacked(reqid, prover1, uint256(1e17), uint256(123)));
 
         // Submitter bids on behalf of prover1
         vm.expectEmit(true, true, true, true);
@@ -390,7 +390,7 @@ contract ProverSubmittersTest is Test {
         bytes32 reqid = _createProofRequest();
         uint256 fee = 1e17;
         uint256 nonce = 123;
-        bytes32 bidHash = keccak256(abi.encodePacked(fee, nonce));
+        bytes32 bidHash = keccak256(abi.encodePacked(reqid, prover1, fee, nonce));
 
         vm.prank(submitter1);
         market.bid(reqid, bidHash);
@@ -416,7 +416,7 @@ contract ProverSubmittersTest is Test {
         bytes32 reqid = _createProofRequest();
         uint256 fee = 1e17;
         uint256 nonce = 123;
-        bytes32 bidHash = keccak256(abi.encodePacked(fee, nonce));
+        bytes32 bidHash = keccak256(abi.encodePacked(reqid, prover1, fee, nonce));
 
         // Bid and reveal
         vm.prank(submitter1);
@@ -447,7 +447,7 @@ contract ProverSubmittersTest is Test {
 
     function test_unregisteredSubmitterCannotBid() public {
         bytes32 reqid = _createProofRequest();
-        bytes32 bidHash = keccak256(abi.encodePacked(uint256(1e17), uint256(123)));
+        bytes32 bidHash = keccak256(abi.encodePacked(reqid, prover1, uint256(1e17), uint256(123)));
 
         // Unregistered address tries to bid (will bid as themselves, but they're not a prover)
         vm.expectRevert();
@@ -465,7 +465,7 @@ contract ProverSubmittersTest is Test {
         market.unregisterSubmitter(submitter1);
 
         bytes32 reqid = _createProofRequest();
-        bytes32 bidHash = keccak256(abi.encodePacked(uint256(1e17), uint256(123)));
+        bytes32 bidHash = keccak256(abi.encodePacked(reqid, prover1, uint256(1e17), uint256(123)));
 
         // Revoked submitter tries to bid (will bid as themselves, but they're not a prover)
         vm.expectRevert();
@@ -508,7 +508,7 @@ contract ProverSubmittersTest is Test {
     function test_getEffectiveProver_DirectProver() public {
         // Test internal function through public behavior
         bytes32 reqid = _createProofRequest();
-        bytes32 bidHash = keccak256(abi.encodePacked(uint256(1e17), uint256(123)));
+        bytes32 bidHash = keccak256(abi.encodePacked(reqid, prover1, uint256(1e17), uint256(123)));
 
         // Direct prover bids
         vm.prank(prover1);
