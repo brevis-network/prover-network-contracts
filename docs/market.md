@@ -60,14 +60,14 @@ struct FeeParams {
 
 ## 4. Reverse Auction Process
 
-### Phase 1: Bidding**
+### Phase 1: Bidding
 - Duration: `biddingPhaseDuration` seconds from request time
 - Provers submit sealed bid commitments: `keccak256(abi.encode(reqid, prover, fee, nonce))`
 - Eligibility: must be an active prover with sufficient stake, computed as:
   - `required = request.minStake + assignedStake[prover] * overcommitBps / 10000`
-  - where `assignedStake` is the sum of `minStake` from requests currently assigned to the prover (i.e., they are current winner but not yet fulfilled or slashed)
+  - where `assignedStake` is the sum of `minStake` from requests currently assigned to the prover
 
-### Phase 2: Revealing** 
+### Phase 2: Revealing
 - Duration: `revealPhaseDuration` seconds after bidding ends
 - Must provide original `fee` and `nonce`; the commitment is checked against `keccak256(abi.encode(reqid, prover, fee, nonce))`
 - System tracks winner (lowest bidder) and second-place (second-lowest)
@@ -92,7 +92,7 @@ stakingController.isProverEligible(prover, minimumStake)
 - Checked at both bid and reveal phases.
 - Requires Active prover state with sufficient vault assets for the dynamic requirement:
   - `minimumStake = request.minStake + assignedStake[prover] * overcommitBps / 10000`.
-  - `assignedStake[prover]` increases when a prover becomes the current winner on reveal, and decreases when the request is fulfilled (`submitProof`) or the prover is slashed for that request.
+  - `assignedStake[prover]` increases when a prover becomes the current winner on reveal, and decreases when the request is fulfilled or refunded.
   - If the winner changes during reveal (because a lower bid is revealed), the `assignedStake` is moved from the previous winner to the new winner.
 
 ### Fee Distribution
@@ -105,7 +105,7 @@ stakingController.isProverEligible(prover, minimumStake)
   - Request must be refunded first
   - Must be within slash window after deadline
 - Calculation: `slashAmount = (request.minStake × slashBps) / 10000`
-  - Uses request's required minStake (not prover's total assets) for and predictable and consistent penalties
+  - Uses request's required minStake (not prover's total assets) for predictable and consistent penalties
 
 ---
 

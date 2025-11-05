@@ -441,6 +441,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
         req.status = ReqStatus.Refunded;
         feeToken.safeTransfer(req.sender, req.fee.maxFee);
+        // Release any reserved obligation tied to this request upon refund
+        _releaseObligation(req);
 
         // If deadline passed and there was a final winner, count a missed assignment for that prover
         if (block.timestamp > req.fee.deadline && req.winner.prover != address(0)) {
@@ -478,8 +480,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         stakingController.slashByAmount(req.winner.prover, slashAmount);
         // Update status to prevent double slashing
         req.status = ReqStatus.Slashed;
-        // Release any reserved obligation tied to this request now that it is finalized by slashing
-        _releaseObligation(req);
         emit ProverSlashed(reqid, req.winner.prover, slashAmount);
     }
 
