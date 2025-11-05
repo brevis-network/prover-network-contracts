@@ -95,7 +95,7 @@ contract BrevisMarketTest is Test {
         pure
         returns (bytes32)
     {
-        return keccak256(abi.encode(reqid, prover, fee, nonce));
+        return keccak256(abi.encodePacked(reqid, prover, fee, nonce));
     }
 
     function test_RequestProof_Success() public {
@@ -1273,7 +1273,7 @@ contract BrevisMarketTest is Test {
         vm.warp(block.timestamp + BIDDING_DURATION + 1);
 
         // Submit and reveal winning bid
-        bytes32 bidHash = keccak256(abi.encode(reqid, winner, fee, uint256(1)));
+        bytes32 bidHash = keccak256(abi.encodePacked(reqid, winner, fee, uint256(1)));
 
         // Go back to bidding phase to submit bid
         vm.warp(block.timestamp - BIDDING_DURATION - 1);

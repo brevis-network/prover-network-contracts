@@ -93,7 +93,7 @@ contract ProverStatsTest is Test {
         pure
         returns (bytes32)
     {
-        return keccak256(abi.encode(reqid, prover, fee, nonce));
+        return keccak256(abi.encodePacked(reqid, prover, fee, nonce));
     }
 
     function _bid(bytes32 reqid, uint256 fee, uint256 nonce, address who) internal {

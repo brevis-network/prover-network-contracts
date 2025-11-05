@@ -158,7 +158,7 @@ interface IBrevisMarket {
      * @notice Submit a sealed bid for a proof request
      * @dev In reverse auction: lower fee bids have better chance of winning
      * @param reqid The request ID to bid on
-     * @param bidHash Commitment: keccak256(abi.encode(reqid, prover, fee, nonce))
+     * @param bidHash Commitment: keccak256(abi.encodePacked(reqid, prover, fee, nonce))
      * @dev Can override previous bids during bidding phase
      */
     function bid(bytes32 reqid, bytes32 bidHash) external;
@@ -166,7 +166,7 @@ interface IBrevisMarket {
     /**
      * @notice Reveal a previously submitted sealed bid
      * @dev Must be called during reveal phase with matching commitment
-     *      Commitment format: keccak256(abi.encode(reqid, prover, fee, nonce))
+     *      Commitment format: keccak256(abi.encodePacked(reqid, prover, fee, nonce))
      * @param reqid The request ID that was bid on
      * @param fee The actual fee amount that was hashed
      * @param nonce The nonce that was used in the hash

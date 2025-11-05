@@ -243,7 +243,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
      * @notice Submit a sealed bid for a proof request
      * @dev Can override previous bids during bidding phase
      * @param reqid The request ID to bid on
-     * @param bidHash Commitment: keccak256(abi.encode(reqid, prover, fee, nonce))
+     * @param bidHash Commitment: keccak256(abi.encodePacked(reqid, prover, fee, nonce))
      */
     function bid(bytes32 reqid, bytes32 bidHash) external override {
         // Advance epoch id if any scheduled epoch start has passed
@@ -317,7 +317,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
         // Verify the revealed bid matches the hash
         // Commitment binds to request id and effective prover to prevent hash-copy front-running
-        bytes32 expectedHash = keccak256(abi.encode(reqid, prover, fee, nonce));
+        bytes32 expectedHash = keccak256(abi.encodePacked(reqid, prover, fee, nonce));
         if (req.bids[prover] != expectedHash) {
             revert MarketBidRevealMismatch(expectedHash, req.bids[prover]);
         }
