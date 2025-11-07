@@ -33,7 +33,7 @@ contract DeployBrevisMarket is Script {
         address implementation =
             address(new BrevisMarket(IPicoVerifier(address(0)), IStakingController(address(0)), 0, 0, 0));
         console.log("BrevisMarket implementation:", implementation);
-        
+
         {
             // Optional: implementation-only deployment for upgrades
             bool implementationOnly =
