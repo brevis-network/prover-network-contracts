@@ -7,8 +7,9 @@ import "../interfaces/IProverVault.sol";
 
 /**
  * @title StakingViewer
- * @notice Provides unified view functions for frontend to minimize RPC calls
- * @dev This contract is read-only and gas cost is not a primary concern
+ * @notice Standalone, stateless read-only helper for efficient off-chain queries over staking data;
+ *         it reduces frontend RPC round trips and keeps the core StakingController lean. New view
+ *         features can be added by deploying a new viewer without upgrading the controller.
  */
 contract StakingViewer is IStakingViewer {
     IStakingController public immutable stakingController;

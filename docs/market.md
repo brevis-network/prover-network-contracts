@@ -229,7 +229,7 @@ Global stats mirror the above:
 
 ## 9. Market Viewer
 
-To keep `BrevisMarket` lean and within size limits, richer read-only aggregation is provided by `MarketViewer.sol` (see [`IMarketViewer.sol`](../src/market/interfaces/IMarketViewer.sol)).
+`MarketViewer.sol` is a standalone, stateless read-only helper for efficient off‑chain queries; it keeps `BrevisMarket` lean, and lets us add new query features by simply deploying a new viewer (no market upgrade). See [`IMarketViewer.sol`](../src/market/interfaces/IMarketViewer.sol) for the interface.
 
 Key endpoints:
 
@@ -269,8 +269,7 @@ Additional:
 ### Constants
 - Fee token automatically synced with staking system
 - `MAX_DEADLINE_DURATION` - Maximum request lifetime (30 days)
+
 ---
 
 **For exact function signatures and interface definitions, see [`IBrevisMarket.sol`](../src/market/interfaces/IBrevisMarket.sol) and [`IMarketViewer.sol`](../src/market/interfaces/IMarketViewer.sol)**
-
----
