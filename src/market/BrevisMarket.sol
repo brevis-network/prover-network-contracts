@@ -418,7 +418,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
      *      3. After reveal phase ends with no bids revealed (winner not set)
      * @param reqid The request ID to refund
      */
-    function refund(bytes32 reqid) external override nonReentrant {
+    function refund(bytes32 reqid) public override nonReentrant {
         ReqState storage req = requests[reqid];
 
         if (req.status != ReqStatus.Pending) revert MarketInvalidRequestStatus(req.status);
@@ -453,6 +453,16 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         senderPendingRequests[req.sender].remove(reqid);
 
         emit Refunded(reqid, req.sender, req.fee.maxFee);
+    }
+
+    /**
+     * @notice Batch refund multiple requests
+     * @param reqids The array of request IDs to refund
+     */
+    function batchRefund(bytes32[] calldata reqids) external override {
+        for (uint256 i = 0; i < reqids.length; i++) {
+            refund(reqids[i]);
+        }
     }
 
     /**

@@ -189,6 +189,12 @@ interface IBrevisMarket {
     function refund(bytes32 reqid) external;
 
     /**
+     * @notice Batch refund multiple requests
+     * @param reqids The array of request IDs to refund
+     */
+    function batchRefund(bytes32[] calldata reqids) external;
+
+    /**
      * @notice Slash the assigned prover for failing to submit proof within deadline
      * @dev Can be called by anyone within slash window after deadline passes
      * @param reqid The request ID for which to slash the assigned prover
