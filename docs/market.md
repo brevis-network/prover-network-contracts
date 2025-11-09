@@ -236,8 +236,9 @@ Key endpoints:
 - Batch request data: `batchGetRequests`, `batchGetBidders`, `batchGetBidHashes`, `batchGetProofs`
 - Pending and overdue:
   - Counts: `getProverPendingCount`, `getSenderPendingCount`, `getProverOverdueCount`, `getSenderOverdueCount`
-  - Pending: `getProverPendingRequests(prover)`, `getProverPendingRequests(prover, reqids)`
-  - Pending (sender): `getSenderPendingRequests(sender)`, `getSenderPendingRequests(sender, reqids)`
+  - Pending (prover): `getProverPendingRequests(prover)` → `ProverPendingItem[]` (fields: `reqid`, `deadline`, `isOverdue`)
+  - Pending (sender): `getSenderPendingRequests(sender)` → `SenderPendingItem[]` (fields: `reqid`, `deadline`, `winner`, `isOverdue`)
+  - (Subset variants with explicit reqids are retrieved client-side by filtering; viewer no longer offers per-reqid subset overloads.)
   - Overdue IDs: `getProverOverdueRequests(prover)`, `getSenderOverdueRequests(sender)`
   - Refundable IDs (sender): `getSenderRefundableRequests(sender)`
 - Stats composites:

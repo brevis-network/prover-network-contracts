@@ -111,35 +111,19 @@ contract MarketViewer is IMarketViewer {
     function getProverPendingRequests(address prover)
         external
         view
-        returns (IMarketViewer.PendingItemView[] memory items)
+        returns (IMarketViewer.ProverPendingItem[] memory items)
     {
         bytes32[] memory all = brevisMarket.getProverPendingRequests(prover);
-        return _pendingViews(all);
-    }
-
-    function getProverPendingRequests(address, /*prover*/ bytes32[] calldata reqids)
-        external
-        view
-        returns (IMarketViewer.PendingItemView[] memory items)
-    {
-        return _pendingViews(reqids);
+        return _proverPendingViews(all);
     }
 
     function getSenderPendingRequests(address sender)
         external
         view
-        returns (IMarketViewer.PendingItemView[] memory items)
+        returns (IMarketViewer.SenderPendingItem[] memory items)
     {
         bytes32[] memory all = brevisMarket.getSenderPendingRequests(sender);
-        return _pendingViews(all);
-    }
-
-    function getSenderPendingRequests(address, /*sender*/ bytes32[] calldata reqids)
-        external
-        view
-        returns (IMarketViewer.PendingItemView[] memory items)
-    {
-        return _pendingViews(reqids);
+        return _senderPendingViews(all);
     }
 
     function getProverOverdueCount(address prover) external view returns (uint64 overdue) {
@@ -303,23 +287,39 @@ contract MarketViewer is IMarketViewer {
     // INTERNAL UTILITIES
     // =========================================================================
 
-    function _pendingViews(bytes32[] memory reqids)
+    function _proverPendingViews(bytes32[] memory reqids)
         internal
         view
-        returns (IMarketViewer.PendingItemView[] memory items)
+        returns (IMarketViewer.ProverPendingItem[] memory items)
     {
         uint256 m = reqids.length;
-        items = new IMarketViewer.PendingItemView[](m);
+        items = new IMarketViewer.ProverPendingItem[](m);
+        for (uint256 i = 0; i < m; i++) {
+            (,,,,, uint64 deadline,,) = brevisMarket.getRequest(reqids[i]);
+            items[i] = IMarketViewer.ProverPendingItem({
+                reqid: reqids[i],
+                deadline: deadline,
+                isOverdue: block.timestamp > deadline
+            });
+        }
+    }
+
+    function _senderPendingViews(bytes32[] memory reqids)
+        internal
+        view
+        returns (IMarketViewer.SenderPendingItem[] memory items)
+    {
+        uint256 m = reqids.length;
+        items = new IMarketViewer.SenderPendingItem[](m);
         for (uint256 i = 0; i < m; i++) {
             bytes32 reqid = reqids[i];
-            (IBrevisMarket.ReqStatus status,,,,, uint64 deadline,,) = brevisMarket.getRequest(reqid);
+            (,,,,, uint64 deadline,,) = brevisMarket.getRequest(reqid);
             (address winner,,,) = brevisMarket.getBidders(reqid);
-            items[i] = IMarketViewer.PendingItemView({
+            items[i] = IMarketViewer.SenderPendingItem({
                 reqid: reqid,
                 deadline: deadline,
-                status: status,
                 winner: winner,
-                isOverdue: (status == IBrevisMarket.ReqStatus.Pending && block.timestamp > deadline)
+                isOverdue: block.timestamp > deadline
             });
         }
     }
