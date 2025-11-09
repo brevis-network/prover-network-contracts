@@ -188,9 +188,18 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
     }
 
     /**
+     * @notice Batch deactivate multiple provers (admin only)
+     */
+    function deactivateProvers(address[] calldata provers) external override onlyOwner {
+        for (uint256 i = 0; i < provers.length; i++) {
+            _changeProverState(provers[i], ProverState.Deactivated);
+        }
+    }
+
+    /**
      * @notice Reactivate a prover (admin can reactivate from any state, prover can only self-reactivate from Deactivated)
      */
-    function reactivateProver(address prover) external override {
+    function reactivateProver(address prover) public override {
         address caller = msg.sender;
         ProverInfo storage proverInfo = _proverInfo[prover];
         if (proverInfo.state == ProverState.Null) revert ControllerProverNotInitialized();
@@ -222,6 +231,15 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
     }
 
     /**
+     * @notice Batch reactivate multiple provers (admin only)
+     */
+    function reactivateProvers(address[] calldata provers) external override {
+        for (uint256 i = 0; i < provers.length; i++) {
+            reactivateProver(provers[i]);
+        }
+    }
+
+    /**
      * @notice Jail a prover (admin only)
      */
     function jailProver(address prover) external override onlyOwner {
@@ -229,11 +247,20 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
     }
 
     /**
+     * @notice Batch jail multiple provers (admin only)
+     */
+    function jailProvers(address[] calldata provers) external override onlyOwner {
+        for (uint256 i = 0; i < provers.length; i++) {
+            _changeProverState(provers[i], ProverState.Jailed);
+        }
+    }
+
+    /**
      * @notice Retire and remove a prover from the system
      * @dev Can only retire a prover if their vault has no assets and they have no pending unstakes
      * @param prover The prover address to retire
      */
-    function retireProver(address prover) external override {
+    function retireProver(address prover) public override {
         // Validate prover exists
         ProverInfo storage proverInfo = _proverInfo[prover];
         if (proverInfo.state == ProverState.Null) revert ControllerProverNotInitialized();
@@ -265,6 +292,15 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
 
         // Emit event
         emit ProverRetired(prover);
+    }
+
+    /**
+     * @notice Batch retire multiple provers at once (admin only)
+     */
+    function retireProvers(address[] calldata provers) external override onlyOwner {
+        for (uint256 i = 0; i < provers.length; i++) {
+            retireProver(provers[i]);
+        }
     }
 
     /**

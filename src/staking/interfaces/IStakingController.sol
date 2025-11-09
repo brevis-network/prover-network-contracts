@@ -119,10 +119,22 @@ interface IStakingController {
     function deactivateProver(address prover) external;
 
     /**
+     * @notice Deactivate multiple provers at once (admin only)
+     * @param provers The list of provers to deactivate
+     */
+    function deactivateProvers(address[] calldata provers) external;
+
+    /**
      * @notice Reactivate a deactivated prover (admin or prover can call)
      * @param prover The prover to reactivate
      */
     function reactivateProver(address prover) external;
+
+    /*
+     * @notice Batch reactivate multiple provers (admin only)
+     * @param provers The list of provers to reactivate
+     */
+    function reactivateProvers(address[] calldata provers) external;
 
     /**
      * @notice Jail a prover (admin only)
@@ -131,11 +143,23 @@ interface IStakingController {
     function jailProver(address prover) external;
 
     /**
+     * @notice Jail multiple provers (admin only)
+     * @param provers The list of provers to jail
+     */
+    function jailProvers(address[] calldata provers) external;
+
+    /**
      * @notice Retire and remove a prover from the system (admin only)
      * @dev Can only retire a prover if their vault has no assets and they have no pending unstakes
      * @param prover The prover address to retire
      */
     function retireProver(address prover) external;
+
+    /**
+     * @notice Batch retire multiple provers at once (admin only)
+     * @param provers The list of provers to retire
+     */
+    function retireProvers(address[] calldata provers) external;
 
     /**
      * @notice Set or update the caller's prover display profile

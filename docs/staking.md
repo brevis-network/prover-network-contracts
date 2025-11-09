@@ -183,12 +183,12 @@ Both slashing methods apply the percentage to two targets, transferring the slas
 
 The interface is organized into logical sections:
 - [Prover Management](../src/staking/interfaces/IStakingController.sol#L105) - Initialization, state changes, retirement
-- [Staking Operations](../src/staking/interfaces/IStakingController.sol#L157) - Stake, unstake, complete withdrawal
-- [Reward & Commission](../src/staking/interfaces/IStakingController.sol#L184) - Reward distribution and commission claims
-- [Slashing](../src/staking/interfaces/IStakingController.sol#L218) - Penalty mechanisms
-- [View Functions](../src/staking/interfaces/IStakingController.sol#L241) - Query prover info, staking data, and unstaking status
-- [Vault Integration](../src/staking/interfaces/IStakingController.sol#L467) - Vault interaction controls
-- [Admin Functions](../src/staking/interfaces/IStakingController.sol#L521) - Parameter management and emergency controls
+- [Staking Operations](../src/staking/interfaces/IStakingController.sol#L181) - Stake, unstake, complete withdrawal
+- [Reward & Commission](../src/staking/interfaces/IStakingController.sol#L208) - Reward distribution and commission claims
+- [Slashing](../src/staking/interfaces/IStakingController.sol#L242) - Penalty mechanisms
+- [View Functions](../src/staking/interfaces/IStakingController.sol#L265) - Query prover info, staking data, and unstaking status
+- [Vault Integration](../src/staking/interfaces/IStakingController.sol#L491) - Vault interaction controls
+- [Admin Functions](../src/staking/interfaces/IStakingController.sol#L545) - Parameter management and emergency controls
 
 ---
 
