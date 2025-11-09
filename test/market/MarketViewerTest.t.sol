@@ -166,13 +166,12 @@ contract MarketViewerTest is Test {
         uint64 minDeadlineDelta = BIDDING_DURATION + REVEAL_DURATION + 1;
         (bytes32 reqid,) = _requestAndAuction(minDeadlineDelta, 10, 20);
 
-        // Before deadline, pending but not overdue
+        // Before deadline, pending; overdue derived off-chain via deadline
         IMarketViewer.ProverPendingItem[] memory items = viewer.getProverPendingRequests(prover1);
         assertEq(items.length, 1);
-        assertEq(items.length, 1);
         assertEq(items[0].reqid, reqid);
-        // winner is not part of ProverPendingItem; check via sender list instead below
-        assertEq(items[0].isOverdue, false);
+        (,,,,, uint64 dBefore,,) = market.getRequest(reqid);
+        assertLt(block.timestamp, dBefore); // not overdue yet
 
         // Advance past deadline: still pending, now overdue
         // Fetch sender pending to inspect winner and to warm any caches; also validates sender path type
@@ -185,7 +184,7 @@ contract MarketViewerTest is Test {
 
         items = viewer.getProverPendingRequests(prover1);
         assertEq(items.length, 1);
-        assertEq(items[0].isOverdue, true);
+        assertGt(block.timestamp, items[0].deadline); // now overdue (derived off-chain)
 
         // Overdue counts and ids
         assertEq(viewer.getProverOverdueCount(prover1), 1);

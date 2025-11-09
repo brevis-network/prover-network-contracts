@@ -390,11 +390,8 @@ Key structs and return types are tailored for frontends and use compact types wh
     - Pending counts: `getProverPendingCount(prover)`, `getSenderPendingCount(sender)`.
     - Overdue counts: `getProverOverdueCount(prover)`, `getSenderOverdueCount(sender)`.
     - All pending items with context:
-        - `getProverPendingRequests(prover)` → `ProverPendingItem[]` (fields: `reqid`, `deadline`, `isOverdue`)
-        - `getSenderPendingRequests(sender)` → `SenderPendingItem[]` (fields: `reqid`, `deadline`, `winner`, `isOverdue`)
-    - Selected subset by IDs (order preserved):
-        - `getProverPendingRequests(prover, reqids[])` → `ProverPendingItem[]`
-        - `getSenderPendingRequests(sender, reqids[])` → `SenderPendingItem[]`
+        - `getProverPendingRequests(prover)` → `ProverPendingItem[]` (fields: `reqid`, `deadline`)
+        - `getSenderPendingRequests(sender)` → `SenderPendingItem[]` (fields: `reqid`, `deadline`, `winner`)
     - Overdue IDs only: `getProverOverdueRequests(prover)`, `getSenderOverdueRequests(sender)`.
     - Refundable IDs (sender): `getSenderRefundableRequests(sender)` → `bytes32[]`
 

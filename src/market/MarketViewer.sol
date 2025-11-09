@@ -296,11 +296,7 @@ contract MarketViewer is IMarketViewer {
         items = new IMarketViewer.ProverPendingItem[](m);
         for (uint256 i = 0; i < m; i++) {
             (,,,,, uint64 deadline,,) = brevisMarket.getRequest(reqids[i]);
-            items[i] = IMarketViewer.ProverPendingItem({
-                reqid: reqids[i],
-                deadline: deadline,
-                isOverdue: block.timestamp > deadline
-            });
+            items[i] = IMarketViewer.ProverPendingItem({reqid: reqids[i], deadline: deadline});
         }
     }
 
@@ -315,12 +311,7 @@ contract MarketViewer is IMarketViewer {
             bytes32 reqid = reqids[i];
             (,,,,, uint64 deadline,,) = brevisMarket.getRequest(reqid);
             (address winner,,,) = brevisMarket.getBidders(reqid);
-            items[i] = IMarketViewer.SenderPendingItem({
-                reqid: reqid,
-                deadline: deadline,
-                winner: winner,
-                isOverdue: block.timestamp > deadline
-            });
+            items[i] = IMarketViewer.SenderPendingItem({reqid: reqid, deadline: deadline, winner: winner});
         }
     }
 

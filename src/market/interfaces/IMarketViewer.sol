@@ -42,19 +42,17 @@ interface IMarketViewer {
         uint256 secondFee;
     }
 
-    /// @notice Pending list item for a prover (winner not relevant)
+    /// @notice Pending list item for a prover (winner not relevant). Overdue can be derived off-chain via now > deadline.
     struct ProverPendingItem {
         bytes32 reqid;
         uint64 deadline;
-        bool isOverdue; // now > deadline
     }
 
-    /// @notice Pending list item for a sender (includes winner)
+    /// @notice Pending list item for a sender (includes winner). Overdue can be derived off-chain via now > deadline.
     struct SenderPendingItem {
         bytes32 reqid;
         uint64 deadline;
         address winner;
-        bool isOverdue; // now > deadline
     }
 
     /**
