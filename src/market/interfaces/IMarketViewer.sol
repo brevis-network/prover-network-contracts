@@ -42,16 +42,17 @@ interface IMarketViewer {
         uint256 secondFee;
     }
 
-    /**
-     * @notice Pending list item with deadline and winner context
-     * @dev isOverdue is true if now > deadline while status is still Pending
-     */
-    struct PendingItemView {
+    /// @notice Pending list item for a prover (winner not relevant). Overdue can be derived off-chain via now > deadline.
+    struct ProverPendingItem {
         bytes32 reqid;
         uint64 deadline;
-        IBrevisMarket.ReqStatus status;
+    }
+
+    /// @notice Pending list item for a sender (includes winner). Overdue can be derived off-chain via now > deadline.
+    struct SenderPendingItem {
+        bytes32 reqid;
+        uint64 deadline;
         address winner;
-        bool isOverdue;
     }
 
     /**
@@ -120,32 +121,14 @@ interface IMarketViewer {
     function getSenderPendingCount(address sender) external view returns (uint64 count);
 
     /**
-     * @notice Get all pending items for a prover with deadline/winner info
+     * @notice Get all pending items for a prover with deadline & overdue info
      */
-    function getProverPendingRequests(address prover) external view returns (PendingItemView[] memory items);
+    function getProverPendingRequests(address prover) external view returns (ProverPendingItem[] memory items);
 
     /**
-     * @notice Batch fetch selected pending items for a prover by reqids
-     * @dev Returns PendingItemView for the provided reqids in-order
+     * @notice Get all pending items for a sender with deadline, winner & overdue info
      */
-    function getProverPendingRequests(address prover, bytes32[] calldata reqids)
-        external
-        view
-        returns (PendingItemView[] memory items);
-
-    /**
-     * @notice Get all pending items for a sender with deadline/winner info
-     */
-    function getSenderPendingRequests(address sender) external view returns (PendingItemView[] memory items);
-
-    /**
-     * @notice Batch fetch selected pending items for a sender by reqids
-     * @dev Returns PendingItemView for the provided reqids in-order
-     */
-    function getSenderPendingRequests(address sender, bytes32[] calldata reqids)
-        external
-        view
-        returns (PendingItemView[] memory items);
+    function getSenderPendingRequests(address sender) external view returns (SenderPendingItem[] memory items);
 
     /**
      * @notice Count of overdue pending requests for a prover (now > deadline)

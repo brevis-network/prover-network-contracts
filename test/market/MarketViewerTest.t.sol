@@ -166,21 +166,25 @@ contract MarketViewerTest is Test {
         uint64 minDeadlineDelta = BIDDING_DURATION + REVEAL_DURATION + 1;
         (bytes32 reqid,) = _requestAndAuction(minDeadlineDelta, 10, 20);
 
-        // Before deadline, pending but not overdue
-        IMarketViewer.PendingItemView[] memory items = viewer.getProverPendingRequests(prover1);
-        assertEq(items.length, 1);
+        // Before deadline, pending; overdue derived off-chain via deadline
+        IMarketViewer.ProverPendingItem[] memory items = viewer.getProverPendingRequests(prover1);
         assertEq(items.length, 1);
         assertEq(items[0].reqid, reqid);
-        assertEq(items[0].winner, prover1);
-        assertEq(items[0].isOverdue, false);
+        (,,,,, uint64 dBefore,,) = market.getRequest(reqid);
+        assertLt(block.timestamp, dBefore); // not overdue yet
 
         // Advance past deadline: still pending, now overdue
-        _noopAndGetSenderPending(requester);
+        // Fetch sender pending to inspect winner and to warm any caches; also validates sender path type
+        (uint256 totalSender, IMarketViewer.SenderPendingItem[] memory sItems) = _noopAndGetSenderPending(requester);
+        assertEq(totalSender, 1);
+        assertEq(sItems.length, 1);
+        assertEq(sItems[0].reqid, reqid);
+        assertEq(sItems[0].winner, prover1);
         vm.warp(items[0].deadline + 1);
 
         items = viewer.getProverPendingRequests(prover1);
         assertEq(items.length, 1);
-        assertEq(items[0].isOverdue, true);
+        assertGt(block.timestamp, items[0].deadline); // now overdue (derived off-chain)
 
         // Overdue counts and ids
         assertEq(viewer.getProverOverdueCount(prover1), 1);
@@ -244,7 +248,7 @@ contract MarketViewerTest is Test {
     function _noopAndGetSenderPending(address sender)
         internal
         view
-        returns (uint256 total, IMarketViewer.PendingItemView[] memory items)
+        returns (uint256 total, IMarketViewer.SenderPendingItem[] memory items)
     {
         items = viewer.getSenderPendingRequests(sender);
         total = items.length;
