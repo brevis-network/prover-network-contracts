@@ -1201,6 +1201,31 @@ contract SlashTest is Test {
         assertEq(actualSlashed, 0, "Should slash 0 due to rounding");
     }
 
+    function testPendingUnstakingTotalsStayInSyncAfterSmallSlashes() public {
+        // Initialize prover and have a staker request unstake so all assets sit in pending queue
+        vm.prank(prover1);
+        controller.initializeProver(0);
+
+        vm.startPrank(staker1);
+        stakingToken.approve(address(controller), 1 ether);
+        controller.stake(prover1, 1 ether);
+        address vault = controller.getProverVault(prover1);
+        uint256 stakerShares = IProverVault(vault).balanceOf(staker1);
+        IProverVault(vault).approve(address(controller), stakerShares);
+        controller.requestUnstake(prover1, stakerShares);
+        vm.stopPrank();
+
+        uint256 slashBps = 1; // 0.01%
+        for (uint256 i = 0; i < 64; i++) {
+            vm.prank(slasher);
+            controller.slash(prover1, slashBps);
+
+            (uint256 totalAmount,) = controller.getUnstakingInfo(prover1, staker1);
+            uint256 storedTotal = controller.getProverTotalUnstaking(prover1);
+            assertEq(storedTotal, totalAmount, "Pending totals diverged after small slash");
+        }
+    }
+
     function testSlashByAmount_includesUnstaking() public {
         // Setup: Prover with vault assets + pending unstakes
         setupProverWithAssets(prover1, 1000 ether);
