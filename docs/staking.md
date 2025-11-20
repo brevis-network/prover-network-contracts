@@ -63,7 +63,7 @@ The staking system consists of three main components:
 ## 3. Staking & Unstaking
 
 ### **Staking Flow**
-1. **Validation:** Prover exists and (if delegator) state is Active.
+1. **Validation:** Prover exists and (if delegator) state is Active; minimal amount per stake is 1 full token (1e18 wei).
 2. **Deposit:** Controller pulls user tokens and deposits into the prover's vault, receiving shares
 3. **Accounting:** Share balances updated via hooks; emit `Staked` (prover, staker, assets, shares)
 
@@ -72,6 +72,7 @@ The staking system consists of three main components:
 **Phase 1: Request (`requestUnstake`)**
 - Shares are immediately burned and stop accruing rewards; an `UnstakeRequest`is recorded
 - Enforces minimum self-stake requirements; maximum 10 pending requests per (prover, staker) pair
+- Partial exits enforce the same 1-token minimum on both the withdrawn assets and the remaning assets.
 
 **Phase 2: Completion (`completeUnstake`)**  
 - Must wait at least `unstakeDelay` seconds
