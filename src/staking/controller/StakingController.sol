@@ -1161,7 +1161,7 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
      * @param amount The amount of tokens to recover
      */
     function emergencyRecover(address to, uint256 amount) external override whenPaused onlyOwner {
-        stakingToken.transfer(to, amount);
+        stakingToken.safeTransfer(to, amount);
         emit EmergencyRecovered(to, amount);
     }
 }
