@@ -305,14 +305,12 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
         activeProvers.remove(prover);
 
         // Clear commission rates before deleting prover info
-        // Get all keys and remove them one by one
         address[] memory commissionSources = proverInfo.commissionRates.keys();
         for (uint256 i = 0; i < commissionSources.length; i++) {
             proverInfo.commissionRates.remove(commissionSources[i]);
         }
 
         // Completely delete the prover data structures
-        // Note: stakers set should already be empty since totalAssets == 0
         delete _proverInfo[prover];
         delete pendingUnstakes[prover];
 
