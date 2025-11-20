@@ -433,7 +433,6 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
      * @return amount The amount of tokens transferred to Unstaking contract
      */
     function requestUnstake(address prover, uint256 shares) external override nonReentrant returns (uint256 amount) {
-        if (shares == 0) revert ControllerZeroAmount();
         address staker = msg.sender;
 
         // Validate prover exists and user has enough shares
@@ -1119,7 +1118,7 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
      * @dev Must be greater than zero
      */
     function setMinSelfStake(uint256 value) external override onlyOwner {
-        if (value < MIN_STAKING_AMOUNT) revert ControllerInvalidStakeAmount();
+        if (value < MIN_STAKING_AMOUNT) revert ControllerInvalidArg();
         uint256 oldValue = minSelfStake;
         minSelfStake = value;
         emit MinSelfStakeUpdated(oldValue, value);
