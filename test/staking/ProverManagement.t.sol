@@ -456,23 +456,16 @@ contract ProverManagementTest is Test {
         controller.retireProver(makeAddr("nonexistent"));
     }
 
-    function testRetireProverOnlyAdmin() public {
-        // Setup prover approval
-        vm.prank(prover1);
-        stakingToken.approve(address(controller), MIN_SELF_STAKE);
+    function testRetireProverAuthorization() public {
+        _prepareProverForRetirement(prover1);
 
-        // Initialize prover
-        vm.startPrank(prover1);
-        controller.initializeProver(1000); // 10% commission
-        vm.stopPrank();
-
-        // Try to retire as non-admin - should fail
-        vm.prank(prover1);
-        vm.expectRevert();
+        // Random caller cannot retire someone else's prover
+        vm.prank(staker1);
+        vm.expectRevert(IStakingController.ControllerOnlyAdminOrProver.selector);
         controller.retireProver(prover1);
 
-        vm.prank(staker1);
-        vm.expectRevert();
+        // Prover can retire themselves
+        vm.prank(prover1);
         controller.retireProver(prover1);
     }
 
@@ -823,5 +816,22 @@ contract ProverManagementTest is Test {
         vm.prank(staker1);
         uint256 shares = controller.stake(prover1, 5 ether);
         assertGt(shares, 0);
+    }
+
+    function _prepareProverForRetirement(address prover) internal returns (address vault) {
+        vm.prank(prover);
+        stakingToken.approve(address(controller), type(uint256).max);
+
+        vm.startPrank(prover);
+        vault = controller.initializeProver(1000);
+
+        IProverVault proverVault = IProverVault(vault);
+        uint256 shares = proverVault.balanceOf(prover);
+        proverVault.approve(address(controller), shares);
+        controller.requestUnstake(prover, shares);
+
+        skip(INITIAL_UNBOND_DELAY + 1);
+        controller.completeUnstake(prover);
+        vm.stopPrank();
     }
 }

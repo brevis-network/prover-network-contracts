@@ -80,6 +80,7 @@ interface IStakingController {
 
     error ControllerOnlyProver();
     error ControllerOnlyAdmin();
+    error ControllerOnlyAdminOrProver();
     error ControllerNotAuthorized();
     error ControllerProverNotInitialized();
     error ControllerProverAlreadyInitialized();
@@ -149,7 +150,7 @@ interface IStakingController {
     function jailProvers(address[] calldata provers) external;
 
     /**
-     * @notice Retire and remove a prover from the system (admin only)
+     * @notice Retire and remove a prover from the system (owner or prover)
      * @dev Can only retire a prover if their vault has no assets and they have no pending unstakes
      * @param prover The prover address to retire
      */

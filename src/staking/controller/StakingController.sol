@@ -261,6 +261,11 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
      * @param prover The prover address to retire
      */
     function retireProver(address prover) public override {
+        address caller = msg.sender;
+        if (caller != owner() && caller != prover) {
+            revert ControllerOnlyAdminOrProver();
+        }
+
         // Validate prover exists
         ProverInfo storage proverInfo = _proverInfo[prover];
         if (proverInfo.state == ProverState.Null) revert ControllerProverNotInitialized();
@@ -297,7 +302,7 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
     /**
      * @notice Batch retire multiple provers at once (admin only)
      */
-    function retireProvers(address[] calldata provers) external override onlyOwner {
+    function retireProvers(address[] calldata provers) external override {
         for (uint256 i = 0; i < provers.length; i++) {
             retireProver(provers[i]);
         }
