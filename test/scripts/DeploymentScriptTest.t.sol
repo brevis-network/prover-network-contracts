@@ -18,10 +18,8 @@ import "../../scripts/DeployProverNetwork.s.sol";
 import "../../test/mocks/MockERC20.sol";
 import "../../src/pico/MockPicoVerifier.sol";
 import "../../src/staking/interfaces/IStakingController.sol";
-import {
-    ITransparentUpgradeableProxy,
-    TransparentUpgradeableProxy
-} from "@openzeppelin/contracts-v4/proxy/transparent/TransparentUpgradeableProxy.sol";
+import {ITransparentUpgradeableProxy} from
+    "@openzeppelin/contracts-v4/proxy/transparent/TransparentUpgradeableProxy.sol";
 import {ProxyAdmin} from "@openzeppelin/contracts-v4/proxy/transparent/ProxyAdmin.sol";
 
 /**

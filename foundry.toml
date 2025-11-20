@@ -19,6 +19,5 @@ exclude_lints = [
     "mixed-case-variable",
     "screaming-snake-case-immutable",
     "erc20-unchecked-transfer",
-    "unused-import",
     "asm-keccak256",
 ]
