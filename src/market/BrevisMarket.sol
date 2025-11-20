@@ -475,6 +475,9 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
         // Must be refunded state
         if (req.status != ReqStatus.Refunded) revert MarketInvalidRequestStatus(req.status);
+        // Update status to prevent double slashing
+        req.status = ReqStatus.Slashed;
+
         // Must be after deadline
         if (block.timestamp <= req.fee.deadline) revert MarketBeforeDeadline(block.timestamp, req.fee.deadline);
         // Must have an assigned prover to slash
@@ -488,8 +491,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         uint256 slashAmount = (req.fee.minStake * slashBps) / BPS_DENOMINATOR;
         // Perform the slash
         stakingController.slashByAmount(req.winner.prover, slashAmount);
-        // Update status to prevent double slashing
-        req.status = ReqStatus.Slashed;
         emit ProverSlashed(reqid, req.winner.prover, slashAmount);
     }
 
