@@ -938,56 +938,49 @@ contract SlashTest is Test {
     }
 
     function testSlashingWithTinyAmounts() public {
-        // Test precision and rounding with very small amounts (wei-level)
+        // Test: Tiny unstake amounts are only allowed once balance drops below the global minimum chunk.
+        // Value: Verifies dust exits unlock only after slash-driven depletion.
 
-        // Initialize prover with regular minimum stake first
         vm.prank(prover1);
         controller.initializeProver(1000);
 
-        // Add regular stake to ensure prover stays active
-        vm.prank(staker1);
-        stakingToken.approve(address(controller), 10 ether);
-        vm.prank(staker1);
-        controller.stake(prover1, 5 ether);
+        // Staker deposits a single token (minimum chunk)
+        vm.startPrank(staker1);
+        stakingToken.approve(address(controller), 1 ether);
+        controller.stake(prover1, 1 ether);
+        vm.stopPrank();
 
         address vault = controller.getProverVault(prover1);
 
-        // Now test with tiny unstake amounts
-        vm.prank(staker1);
-        IProverVault(vault).approve(address(controller), 1000);
-        vm.prank(staker1);
-        controller.requestUnstake(prover1, 1000); // 1000 wei shares
+        // Attempt to unstake less than 1 token while balance >= 1 token -> should revert
+        uint256 halfTokenShares = 0.5 ether;
+        vm.startPrank(staker1);
+        IProverVault(vault).approve(address(controller), halfTokenShares);
+        vm.expectRevert(IStakingController.ControllerInvalidUnstakeAmount.selector);
+        controller.requestUnstake(prover1, halfTokenShares);
+        vm.stopPrank();
 
-        // Slash with small percentage
+        // Heavy slash pushes the staker balance below the minimum chunk
+        vm.prank(admin);
+        controller.setMaxSlashBps(9000);
         vm.prank(slasher);
-        controller.slash(prover1, 1); // 0.01% slash (1 basis point)
+        controller.slash(prover1, 8000);
 
-        // Complete unstaking
+        uint256 stakerShares = IProverVault(vault).balanceOf(staker1);
+        uint256 stakerAssets = IProverVault(vault).convertToAssets(stakerShares);
+        assertLt(stakerAssets, 1 ether, "Slash should drop balance below minimum chunk");
+
+        // Now the staker can exit the remaining dust even though it's below the minimum
+        vm.startPrank(staker1);
+        IProverVault(vault).approve(address(controller), stakerShares);
+        controller.requestUnstake(prover1, stakerShares);
+        vm.stopPrank();
+
         vm.warp(block.timestamp + DEFAULT_UNBOND_DELAY + 1);
         vm.prank(staker1);
         uint256 received = controller.completeUnstake(prover1);
 
-        // Verify precision is maintained (no complete loss due to rounding)
-        assertTrue(received > 0, "Should receive some amount despite tiny values");
-        assertTrue(received <= 1000, "Should not receive more than original");
-
-        // Test with even smaller amounts - 10 wei
-        vm.prank(staker1);
-        IProverVault(vault).approve(address(controller), 10);
-        vm.prank(staker1);
-        controller.requestUnstake(prover1, 10); // 10 wei
-
-        // Slash again with larger percentage
-        vm.prank(slasher);
-        controller.slash(prover1, 100); // 1% slash
-
-        vm.warp(block.timestamp + DEFAULT_UNBOND_DELAY + 1);
-        vm.prank(staker1);
-        uint256 receivedWei = controller.completeUnstake(prover1);
-
-        // For tiny amounts, even with slashing, should get something back or gracefully handle 0
-        assertTrue(receivedWei <= 10, "Should not exceed original amount");
-        // Note: Due to rounding, may receive 0, which is acceptable for such small amounts
+        assertEq(received, stakerAssets, "Should recover entire remaining dust after slash");
     }
 
     function testSlashDoesNotAffectAccumulatedCommission() public {
@@ -1277,15 +1270,20 @@ contract SlashTest is Test {
     }
 
     function testSlashByAmount_autoDeactivateOnAmountSlash() public {
-        // Setup: Prover with exactly minSelfStake, slash amount that drops below minimum
+        // Setup: Prover with modest buffer above minimum so amount-based slash can trip threshold
         uint256 minSelfStake = controller.minSelfStake();
-        setupProverWithAssets(prover1, minSelfStake + 1e15); // Add small buffer
+        uint256 buffer = minSelfStake; // Buffer equals one minimum chunk (1 token when decimals=18)
+        setupProverWithAssets(prover1, minSelfStake + buffer);
+
+        // Allow aggressive slashing in this scenario
+        vm.prank(admin);
+        controller.setMaxSlashBps(8000);
 
         // Verify prover is active
         assertEq(uint256(controller.getProverState(prover1)), uint256(IStakingController.ProverState.Active));
 
         // Slash amount that will drop self-stake below minimum
-        uint256 slashAmount = 2e15; // Drop below minSelfStake
+        uint256 slashAmount = buffer + (minSelfStake / 2); // removes 1.5 chunks, leaving 0.5 < min
 
         vm.prank(slasher);
         controller.slashByAmount(prover1, slashAmount);

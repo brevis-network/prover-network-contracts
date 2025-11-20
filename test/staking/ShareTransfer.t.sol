@@ -246,7 +246,7 @@ contract ShareTransferTest is Test {
         vm.prank(prover);
         vault.approve(address(controller), 1.6 ether);
         vm.prank(prover);
-        vm.expectRevert(IStakingController.ControllerMinSelfStakeNotMet.selector);
+        vm.expectRevert(IStakingController.ControllerInvalidUnstakeAmount.selector);
         controller.requestUnstake(prover, 1.6 ether);
     }
 

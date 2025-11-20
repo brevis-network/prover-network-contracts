@@ -370,19 +370,19 @@ contract MinSelfStakeTest is Test {
         // Test: Edge cases around exact minimum stake amounts
         // Value: Ensures precise enforcement at boundaries
 
-        // Add exactly 1 wei above minimum
+        // Add exactly one token above minimum (smallest permissible chunk)
         vm.startPrank(prover1);
-        stakingToken.approve(address(controller), 1);
-        controller.stake(prover1, 1);
+        stakingToken.approve(address(controller), 1 ether);
+        controller.stake(prover1, 1 ether);
         vm.stopPrank();
 
         address vault = controller.getProverVault(prover1);
 
-        // Should be able to unstake exactly 1 wei (leaving exact minimum)
+        // Should be able to unstake exactly 1 token (leaving exact minimum)
         vm.startPrank(prover1);
-        uint256 oneWeiShares = IProverVault(vault).convertToShares(1);
-        IProverVault(vault).approve(address(controller), oneWeiShares);
-        controller.requestUnstake(prover1, oneWeiShares);
+        uint256 oneTokenShares = IProverVault(vault).convertToShares(1 ether);
+        IProverVault(vault).approve(address(controller), oneTokenShares);
+        controller.requestUnstake(prover1, oneTokenShares);
         vm.stopPrank();
 
         // Complete unstaking
@@ -401,7 +401,7 @@ contract MinSelfStakeTest is Test {
         uint256 tinyShares = IProverVault(vault).convertToShares(1);
         if (tinyShares > 0) {
             IProverVault(vault).approve(address(controller), tinyShares);
-            vm.expectRevert(IStakingController.ControllerMinSelfStakeNotMet.selector);
+            vm.expectRevert(IStakingController.ControllerInvalidUnstakeAmount.selector);
             controller.requestUnstake(prover1, tinyShares);
         }
         vm.stopPrank();
@@ -892,7 +892,7 @@ contract MinSelfStakeTest is Test {
                 vm.prank(prover1);
                 IProverVault(vault).approve(address(controller), excessShares);
                 vm.prank(prover1);
-                vm.expectRevert(IStakingController.ControllerMinSelfStakeNotMet.selector);
+                vm.expectRevert(IStakingController.ControllerInvalidUnstakeAmount.selector);
                 controller.requestUnstake(prover1, excessShares);
             }
         }

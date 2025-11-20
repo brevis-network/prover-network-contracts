@@ -96,12 +96,14 @@ interface IStakingController {
     error ControllerCannotRetireProverWithPendingUnstakes();
     error ControllerCannotRetireProverWithPendingCommission();
     error ControllerInvalidArg();
+    error ControllerInvalidStakeAmount();
 
     // Unstaking errors
     error ControllerNoUnstakeRequest();
     error ControllerUnstakeNotReady();
     error ControllerTooManyPendingUnstakes();
     error ControllerZeroAmount();
+    error ControllerInvalidUnstakeAmount();
 
     // =========================================================================
     // PROVER MANAGEMENT
