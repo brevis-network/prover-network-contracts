@@ -49,7 +49,7 @@ The staking system consists of three main components:
 - Initialize prover -> `Active` (requires minimum self-stake)
 - Self exit or slashing below minimum -> `Deactivated` (automatic)
 - Admin actions -> `Deactivated`/`Jailed`/`Active`
-- Retire prover -> `Null` (vault empty, no pending unstakes/commission, retirement is permanent due to CREATE2 vault reuse)
+- Retire prover -> `Null` (no stakers, no pending unstakes/commission, dust auto-swept to treasury, retirement permanent)
 
 ### **Self-Stake Policy**
 

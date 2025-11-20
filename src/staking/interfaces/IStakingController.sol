@@ -92,7 +92,7 @@ interface IStakingController {
     error ControllerShareAccountingMismatch();
     error ControllerInsufficientTreasury();
     error ControllerSlashTooHigh();
-    error ControllerCannotRetireProverWithAssets();
+    error ControllerCannotRetireProverWithStakers();
     error ControllerCannotRetireProverWithPendingUnstakes();
     error ControllerCannotRetireProverWithPendingCommission();
     error ControllerInvalidArg();
@@ -152,7 +152,8 @@ interface IStakingController {
 
     /**
      * @notice Retire and remove a prover from the system (owner or prover)
-     * @dev Can only retire a prover if their vault has no assets and they have no pending unstakes
+     * @dev Requires: no active stakers, no pending unstakes, zero pending commission. Any dust left in the CREATE2
+     *      vault is swept to the treasury and the prover address cannot be reinitialized afterward.
      * @param prover The prover address to retire
      */
     function retireProver(address prover) external;

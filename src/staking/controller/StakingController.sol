@@ -258,7 +258,9 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
     /**
      * @notice Retire and remove a prover from the system
      * @dev Retirement is irreversible for a prover address: the CREATE2 vault remains deployed, so the
-     *      vault factory will refuse to initialize the same prover again.
+     *      vault factory will refuse to initialize the same prover again. Requires zero tracked stakers,
+     *      no pending unstakes, and zero pending commission. Any stranded vault assets are swept into the
+     *      treasury prior to deletion.
      * @param prover The prover address to retire
      */
     function retireProver(address prover) public override {
@@ -271,10 +273,10 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
         ProverInfo storage proverInfo = _proverInfo[prover];
         if (proverInfo.state == ProverState.Null) revert ControllerProverNotInitialized();
 
-        // Check that vault has no assets
-        address vault = proverInfo.vault;
-        uint256 vaultAssets = IProverVault(vault).totalAssets();
-        if (vaultAssets > 0) revert ControllerCannotRetireProverWithAssets();
+        // Require that no tracked stakers remain (all shares exited)
+        if (proverInfo.stakers.length() > 0) {
+            revert ControllerCannotRetireProverWithStakers();
+        }
 
         // Check that prover has no pending unstakes
         uint256 totalUnstaking = pendingUnstakes[prover].totalUnstaking;
@@ -282,6 +284,14 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
 
         // Check that prover has no pending commission
         if (proverInfo.pendingCommission > 0) revert ControllerCannotRetireProverWithPendingCommission();
+
+        // Sweep dust that might remain in the vault (e.g., rewards donated after exit)
+        address vault = proverInfo.vault;
+        uint256 vaultAssets = IProverVault(vault).totalAssets();
+        if (vaultAssets > 0) {
+            IProverVault(vault).controllerSlash(vaultAssets, address(this));
+            treasuryPool += vaultAssets;
+        }
 
         // Remove from enumeration sets
         proverList.remove(prover);
