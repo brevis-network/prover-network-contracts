@@ -279,6 +279,9 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
         uint256 totalUnstaking = pendingUnstakes[prover].totalUnstaking;
         if (totalUnstaking > 0) revert ControllerCannotRetireProverWithPendingUnstakes();
 
+        // Check that prover has no pending commission
+        if (proverInfo.pendingCommission > 0) revert ControllerCannotRetireProverWithPendingCommission();
+
         // Remove from enumeration sets
         proverList.remove(prover);
         activeProvers.remove(prover);

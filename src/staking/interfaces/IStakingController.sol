@@ -94,6 +94,7 @@ interface IStakingController {
     error ControllerSlashTooHigh();
     error ControllerCannotRetireProverWithAssets();
     error ControllerCannotRetireProverWithPendingUnstakes();
+    error ControllerCannotRetireProverWithPendingCommission();
     error ControllerInvalidArg();
 
     // Unstaking errors
