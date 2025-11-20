@@ -465,11 +465,11 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
             }
         }
 
-        // Redeem shares from vault to this controller (for unstaking management)
+        // Redeem shares from vault to this controller
         amount = IProverVault(vault).redeem(shares, address(this), staker);
 
-        // Update stake info (remove from active shares)
-        proverInfo.shares[staker] = stakerShares - shares;
+        // Update stake info
+        proverInfo.shares[staker] = remainingShares;
 
         // Remove owner from stakers set if they have no more shares
         if (proverInfo.shares[staker] == 0) {
