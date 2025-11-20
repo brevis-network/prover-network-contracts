@@ -257,7 +257,8 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
 
     /**
      * @notice Retire and remove a prover from the system
-     * @dev Can only retire a prover if their vault has no assets and they have no pending unstakes
+     * @dev Retirement is irreversible for a prover address: the CREATE2 vault remains deployed, so the
+     *      vault factory will refuse to initialize the same prover again.
      * @param prover The prover address to retire
      */
     function retireProver(address prover) public override {
