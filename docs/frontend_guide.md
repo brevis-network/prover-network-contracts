@@ -106,12 +106,10 @@ function stake(address prover, uint256 amount) external returns (uint256 shares)
 
 **Implementation Steps:**
 1. Verify prover is in `Active` state using `getProverState(prover)`
-2. Verify user has sufficient token balance for desired stake amount
+2. Verify user has sufficient token balance for desired stake amount, which must be at least 1 full token (1e18 wei).
 3. Handle token approval (see [Token Approval](#13-token-approval))
 4. Call `stake()` with prover address and amount
 5. Display shares received and updated stake balance to user
-
-**Note**: Shares are fixed once issued; rewards increase the asset-per-share ratio (no new shares minted).
 
 **Optional Enhancements:**
 - Show prover information using `getProverInfo(prover)`
@@ -147,6 +145,7 @@ function completeUnstake(address prover) external returns (uint256 amount)
 - **Request limit**: Maximum 10 pending requests per (prover, user) pair
 - **Batch completion**: `completeUnstake()` processes all ready requests at once
 - **Prover self-stake**: If caller is the prover, partial unstake that would leave remaining assets > 0 but < `minSelfStake()` reverts; full exit (remaining assets == 0) is allowed and auto-deactivates the prover
+- **Minimum amount**: Partial exits must withdraw ≥ 1 token (1e18 wei) and also leave ≥ 1 token behind; otherwise the transaction reverts.
 
 ### 2.4 Prover Commission Management
 

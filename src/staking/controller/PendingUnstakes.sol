@@ -154,7 +154,8 @@ abstract contract PendingUnstakes is IStakingController {
         if (bps > BPS_DENOMINATOR) revert ControllerInvalidArg();
 
         // Calculate what the new scale would be after slashing
-        uint256 newScale = (pendingUnstakes[prover].slashingScale * (BPS_DENOMINATOR - bps)) / BPS_DENOMINATOR;
+        uint256 oldScale = pendingUnstakes[prover].slashingScale;
+        uint256 newScale = (oldScale * (BPS_DENOMINATOR - bps)) / BPS_DENOMINATOR;
 
         // Prevent slashing that would push scale below hard floor (20%)
         if (newScale < MIN_SCALE_FLOOR) {
@@ -173,14 +174,12 @@ abstract contract PendingUnstakes is IStakingController {
             return (0, shouldDeactivate); // No unstaking tokens to slash, but scale is updated
         }
 
-        // Calculate slash amount
-        slashedAmount = (proverTotalUnstaking * bps) / BPS_DENOMINATOR;
+        // Keep totals aligned with the truncated slashing scale by recomputing the new total first
+        pendingUnstakes[prover].totalUnstaking = (proverTotalUnstaking * newScale) / oldScale;
+        slashedAmount = proverTotalUnstaking - pendingUnstakes[prover].totalUnstaking;
         if (slashedAmount == 0) {
             return (0, shouldDeactivate); // Nothing to slash
         }
-
-        // Update prover total (reduce by slashed amount)
-        pendingUnstakes[prover].totalUnstaking -= slashedAmount;
 
         // Update global total unstaking (reduce by slashed amount)
         totalUnstaking -= slashedAmount;

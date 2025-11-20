@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
@@ -30,6 +31,10 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
 
     // 77a8d217b4b31e7c722578c208f5ba9973f8291ae83d602d73c54039808746ae
     bytes32 public constant AUTHORIZED_PROVER_ROLE = keccak256("AUTHORIZED_PROVER_ROLE");
+
+    // Compile-time decimal assumption (adjust and recompile for temporary non-18 decimal testnets)
+    uint8 private constant STAKING_TOKEN_DECIMAL = 18;
+    uint256 private constant MIN_STAKING_AMOUNT = 10 ** STAKING_TOKEN_DECIMAL;
 
     // =========================================================================
     // STORAGE
@@ -117,6 +122,8 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
         uint256 _minSelfStake,
         uint256 _maxSlashBps
     ) internal {
+        if (_minSelfStake < MIN_STAKING_AMOUNT) revert ControllerInvalidStakeAmount();
+        if (IERC20Metadata(_stakingToken).decimals() != STAKING_TOKEN_DECIMAL) revert ControllerInvalidArg();
         stakingToken = IERC20(_stakingToken);
         vaultFactory = IVaultFactory(_vaultFactory);
         unstakeDelay = _unstakeDelay;
@@ -257,22 +264,41 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
 
     /**
      * @notice Retire and remove a prover from the system
-     * @dev Can only retire a prover if their vault has no assets and they have no pending unstakes
+     * @dev Retirement is irreversible for a prover address: the CREATE2 vault remains deployed, so the
+     *      vault factory will refuse to initialize the same prover again. Requires zero tracked stakers,
+     *      no pending unstakes, and zero pending commission. Any stranded vault assets are swept into the
+     *      treasury prior to deletion.
      * @param prover The prover address to retire
      */
     function retireProver(address prover) public override {
+        address caller = msg.sender;
+        if (caller != owner() && caller != prover) {
+            revert ControllerOnlyAdminOrProver();
+        }
+
         // Validate prover exists
         ProverInfo storage proverInfo = _proverInfo[prover];
         if (proverInfo.state == ProverState.Null) revert ControllerProverNotInitialized();
 
-        // Check that vault has no assets
-        address vault = proverInfo.vault;
-        uint256 vaultAssets = IProverVault(vault).totalAssets();
-        if (vaultAssets > 0) revert ControllerCannotRetireProverWithAssets();
+        // Require that no tracked stakers remain (all shares exited)
+        if (proverInfo.stakers.length() > 0) {
+            revert ControllerCannotRetireProverWithStakers();
+        }
 
         // Check that prover has no pending unstakes
         uint256 totalUnstaking = pendingUnstakes[prover].totalUnstaking;
         if (totalUnstaking > 0) revert ControllerCannotRetireProverWithPendingUnstakes();
+
+        // Check that prover has no pending commission
+        if (proverInfo.pendingCommission > 0) revert ControllerCannotRetireProverWithPendingCommission();
+
+        // Sweep dust that might remain in the vault (e.g., rewards donated after exit)
+        address vault = proverInfo.vault;
+        uint256 vaultAssets = IProverVault(vault).totalAssets();
+        if (vaultAssets > 0) {
+            IProverVault(vault).controllerSlash(vaultAssets, address(this));
+            treasuryPool += vaultAssets;
+        }
 
         // Remove from enumeration sets
         proverList.remove(prover);
@@ -297,7 +323,7 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
     /**
      * @notice Batch retire multiple provers at once (admin only)
      */
-    function retireProvers(address[] calldata provers) external override onlyOwner {
+    function retireProvers(address[] calldata provers) external override {
         for (uint256 i = 0; i < provers.length; i++) {
             retireProver(provers[i]);
         }
@@ -351,7 +377,7 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
         nonReentrant
         returns (uint256 shares)
     {
-        if (amount == 0) revert ControllerZeroAmount();
+        if (amount < MIN_STAKING_AMOUNT) revert ControllerInvalidStakeAmount();
         address staker = msg.sender;
 
         // Validate prover exists
@@ -407,7 +433,6 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
      * @return amount The amount of tokens transferred to Unstaking contract
      */
     function requestUnstake(address prover, uint256 shares) external override nonReentrant returns (uint256 amount) {
-        if (shares == 0) revert ControllerZeroAmount();
         address staker = msg.sender;
 
         // Validate prover exists and user has enough shares
@@ -417,30 +442,34 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
         uint256 stakerShares = proverInfo.shares[staker];
         if (shares > stakerShares) revert ControllerInsufficientShares();
 
+        address vault = proverInfo.vault;
+        uint256 unstakingAssets = IProverVault(vault).convertToAssets(shares);
+        uint256 remainingShares = stakerShares - shares;
+        uint256 remainingAssets = IProverVault(vault).convertToAssets(remainingShares);
+
+        // If staker keeps any shares, both the withdrawn chunk and leftover must clear the min amount
+        if (remainingShares > 0) {
+            if (unstakingAssets < MIN_STAKING_AMOUNT || remainingAssets < MIN_STAKING_AMOUNT) {
+                revert ControllerInvalidUnstakeAmount();
+            }
+        }
+
         // Check MinSelfStake requirement if prover is unstaking
         if (staker == prover) {
-            // Calculate assets that would remain after this unstake
-            address vaultAddr = proverInfo.vault;
-            uint256 proverShares = IProverVault(vaultAddr).balanceOf(prover);
-            uint256 proverAssets = IProverVault(vaultAddr).convertToAssets(proverShares);
-            uint256 unstakingAssets = IProverVault(vaultAddr).convertToAssets(shares);
-            uint256 remainingAssets = proverAssets - unstakingAssets;
-
             // Allow going below MinSelfStake only if it results in zero self-stake (complete exit)
-            if (remainingAssets > 0 && remainingAssets < minSelfStake) {
+            if (remainingShares > 0 && remainingAssets < minSelfStake) {
                 revert ControllerMinSelfStakeNotMet();
-            } else if (remainingAssets == 0 && proverInfo.state == ProverState.Active) {
+            } else if (remainingShares == 0 && proverInfo.state == ProverState.Active) {
                 // Auto-deactivate prover immediately when they request complete exit
                 _changeProverState(prover, ProverState.Deactivated);
             }
         }
 
-        // Redeem shares from vault to this controller (for unstaking management)
-        address vault = proverInfo.vault;
+        // Redeem shares from vault to this controller
         amount = IProverVault(vault).redeem(shares, address(this), staker);
 
-        // Update stake info (remove from active shares)
-        proverInfo.shares[staker] = stakerShares - shares;
+        // Update stake info
+        proverInfo.shares[staker] = remainingShares;
 
         // Remove owner from stakers set if they have no more shares
         if (proverInfo.shares[staker] == 0) {
@@ -1089,7 +1118,7 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
      * @dev Must be greater than zero
      */
     function setMinSelfStake(uint256 value) external override onlyOwner {
-        if (value == 0) revert ControllerInvalidArg();
+        if (value < MIN_STAKING_AMOUNT) revert ControllerInvalidArg();
         uint256 oldValue = minSelfStake;
         minSelfStake = value;
         emit MinSelfStakeUpdated(oldValue, value);
@@ -1142,7 +1171,7 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
      * @param amount The amount of tokens to recover
      */
     function emergencyRecover(address to, uint256 amount) external override whenPaused onlyOwner {
-        stakingToken.transfer(to, amount);
+        stakingToken.safeTransfer(to, amount);
         emit EmergencyRecovered(to, amount);
     }
 }

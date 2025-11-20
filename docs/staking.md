@@ -49,7 +49,7 @@ The staking system consists of three main components:
 - Initialize prover -> `Active` (requires minimum self-stake)
 - Self exit or slashing below minimum -> `Deactivated` (automatic)
 - Admin actions -> `Deactivated`/`Jailed`/`Active`
-- Retire prover -> `Null` (only if vault empty and no pending unstakes)
+- Retire prover -> `Null` (no stakers, no pending unstakes/commission, dust auto-swept to treasury, retirement permanent)
 
 ### **Self-Stake Policy**
 
@@ -63,7 +63,7 @@ The staking system consists of three main components:
 ## 3. Staking & Unstaking
 
 ### **Staking Flow**
-1. **Validation:** Prover exists and (if delegator) state is Active.
+1. **Validation:** Prover exists and (if delegator) state is Active; minimal amount per stake is 1 full token (1e18 wei).
 2. **Deposit:** Controller pulls user tokens and deposits into the prover's vault, receiving shares
 3. **Accounting:** Share balances updated via hooks; emit `Staked` (prover, staker, assets, shares)
 
@@ -72,6 +72,7 @@ The staking system consists of three main components:
 **Phase 1: Request (`requestUnstake`)**
 - Shares are immediately burned and stop accruing rewards; an `UnstakeRequest`is recorded
 - Enforces minimum self-stake requirements; maximum 10 pending requests per (prover, staker) pair
+- Partial exits enforce the same 1-token minimum on both the withdrawn assets and the remaning assets.
 
 **Phase 2: Completion (`completeUnstake`)**  
 - Must wait at least `unstakeDelay` seconds
@@ -182,13 +183,13 @@ Both slashing methods apply the percentage to two targets, transferring the slas
 **Complete function documentation:** [`IStakingController.sol`](../src/staking/interfaces/IStakingController.sol)
 
 The interface is organized into logical sections:
-- [Prover Management](../src/staking/interfaces/IStakingController.sol#L105) - Initialization, state changes, retirement
-- [Staking Operations](../src/staking/interfaces/IStakingController.sol#L181) - Stake, unstake, complete withdrawal
-- [Reward & Commission](../src/staking/interfaces/IStakingController.sol#L208) - Reward distribution and commission claims
-- [Slashing](../src/staking/interfaces/IStakingController.sol#L242) - Penalty mechanisms
-- [View Functions](../src/staking/interfaces/IStakingController.sol#L265) - Query prover info, staking data, and unstaking status
-- [Vault Integration](../src/staking/interfaces/IStakingController.sol#L491) - Vault interaction controls
-- [Admin Functions](../src/staking/interfaces/IStakingController.sol#L545) - Parameter management and emergency controls
+- **Prover Management** - Initialization, state changes, retirement
+- **Staking Operations** - Stake, unstake, complete withdrawal
+- **Reward & Commission** - Reward distribution and commission claims
+- **Slashing** - Penalty mechanisms
+- **View Functions** - Query prover info, staking data, and unstaking status
+- **Vault Integration** - Vault interaction controls
+- **Admin Functions** - Parameter management and emergency controls
 
 ---
 

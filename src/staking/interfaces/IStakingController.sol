@@ -80,6 +80,7 @@ interface IStakingController {
 
     error ControllerOnlyProver();
     error ControllerOnlyAdmin();
+    error ControllerOnlyAdminOrProver();
     error ControllerNotAuthorized();
     error ControllerProverNotInitialized();
     error ControllerProverAlreadyInitialized();
@@ -91,15 +92,18 @@ interface IStakingController {
     error ControllerShareAccountingMismatch();
     error ControllerInsufficientTreasury();
     error ControllerSlashTooHigh();
-    error ControllerCannotRetireProverWithAssets();
+    error ControllerCannotRetireProverWithStakers();
     error ControllerCannotRetireProverWithPendingUnstakes();
+    error ControllerCannotRetireProverWithPendingCommission();
     error ControllerInvalidArg();
+    error ControllerInvalidStakeAmount();
 
     // Unstaking errors
     error ControllerNoUnstakeRequest();
     error ControllerUnstakeNotReady();
     error ControllerTooManyPendingUnstakes();
     error ControllerZeroAmount();
+    error ControllerInvalidUnstakeAmount();
 
     // =========================================================================
     // PROVER MANAGEMENT
@@ -149,8 +153,9 @@ interface IStakingController {
     function jailProvers(address[] calldata provers) external;
 
     /**
-     * @notice Retire and remove a prover from the system (admin only)
-     * @dev Can only retire a prover if their vault has no assets and they have no pending unstakes
+     * @notice Retire and remove a prover from the system (owner or prover)
+     * @dev Requires: no active stakers, no pending unstakes, zero pending commission. Any dust left in the CREATE2
+     *      vault is swept to the treasury and the prover address cannot be reinitialized afterward.
      * @param prover The prover address to retire
      */
     function retireProver(address prover) external;

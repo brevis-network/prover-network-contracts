@@ -2,7 +2,6 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {StakingController} from "../../src/staking/controller/StakingController.sol";
 import {VaultFactory} from "../../src/staking/vault/VaultFactory.sol";
 import {ProverVault} from "../../src/staking/vault/ProverVault.sol";
@@ -379,52 +378,28 @@ contract ProverManagementTest is Test {
         controller.initializeProver(1000); // 10% commission
         vm.stopPrank();
 
-        // The prover will have MIN_SELF_STAKE assets due to auto-staking
+        // The prover still has active stake and therefore active stakers
         // Try to retire - should fail
         vm.prank(admin);
-        vm.expectRevert(IStakingController.ControllerCannotRetireProverWithAssets.selector);
+        vm.expectRevert(IStakingController.ControllerCannotRetireProverWithStakers.selector);
         controller.retireProver(prover1);
     }
 
-    function testCannotRetireProverWithTinyDustAssets() public {
-        // Setup prover approval
-        vm.prank(prover1);
-        stakingToken.approve(address(controller), type(uint256).max);
+    function testRetireProverSweepsVaultDust() public {
+        address vault = _prepareProverForRetirement(prover1);
 
-        // Initialize prover with minimum stake
-        vm.startPrank(prover1);
-        address vault = controller.initializeProver(1000);
-
-        // Add significant stake to test dust scenario (within prover's balance)
-        controller.stake(prover1, 500e18); // Total will be 600e18 (100 + 500)
-
-        // Unstake most of it, leaving just slightly above MIN_SELF_STAKE + dust
-        IProverVault proverVault = IProverVault(vault);
-        uint256 totalShares = proverVault.balanceOf(prover1);
-
-        // Leave MIN_SELF_STAKE + 1000 wei (this is "dust" above the minimum requirement)
-        uint256 dustAssets = MIN_SELF_STAKE + 1000; // Minimum + 1000 wei dust
-        uint256 totalAssets = proverVault.totalAssets();
-        uint256 dustShares = (dustAssets * totalShares) / totalAssets;
-        uint256 unstakeShares = totalShares - dustShares;
-
-        proverVault.approve(address(controller), unstakeShares);
-        controller.requestUnstake(prover1, unstakeShares);
-
-        // Complete the unstaking
-        skip(INITIAL_UNBOND_DELAY + 1);
-        controller.completeUnstake(prover1);
-        vm.stopPrank();
-
-        // Verify vault has minimal amount above MIN_SELF_STAKE (the "dust" scenario)
-        uint256 remainingAssets = IProverVault(vault).totalAssets();
-        assertGt(remainingAssets, MIN_SELF_STAKE);
-        assertLt(remainingAssets, MIN_SELF_STAKE + 10000); // Very small amount above minimum
-
-        // Try to retire - should fail even with this tiny amount above minimum
+        // Simulate stray tokens being sent directly to the vault after everyone exited
         vm.prank(admin);
-        vm.expectRevert(IStakingController.ControllerCannotRetireProverWithAssets.selector);
+        stakingToken.transfer(vault, 1 ether);
+
+        (,,,, uint256 numStakers,,) = controller.getProverInfo(prover1);
+        assertEq(numStakers, 0);
+        uint256 treasuryBefore = controller.treasuryPool();
+
+        vm.prank(admin);
         controller.retireProver(prover1);
+
+        assertEq(controller.treasuryPool(), treasuryBefore + 1 ether);
     }
 
     function testCannotRetireProverWithPendingUnstakes() public {
@@ -456,23 +431,16 @@ contract ProverManagementTest is Test {
         controller.retireProver(makeAddr("nonexistent"));
     }
 
-    function testRetireProverOnlyAdmin() public {
-        // Setup prover approval
-        vm.prank(prover1);
-        stakingToken.approve(address(controller), MIN_SELF_STAKE);
+    function testRetireProverAuthorization() public {
+        _prepareProverForRetirement(prover1);
 
-        // Initialize prover
-        vm.startPrank(prover1);
-        controller.initializeProver(1000); // 10% commission
-        vm.stopPrank();
-
-        // Try to retire as non-admin - should fail
-        vm.prank(prover1);
-        vm.expectRevert();
+        // Random caller cannot retire someone else's prover
+        vm.prank(staker1);
+        vm.expectRevert(IStakingController.ControllerOnlyAdminOrProver.selector);
         controller.retireProver(prover1);
 
-        vm.prank(staker1);
-        vm.expectRevert();
+        // Prover can retire themselves
+        vm.prank(prover1);
         controller.retireProver(prover1);
     }
 
@@ -823,5 +791,22 @@ contract ProverManagementTest is Test {
         vm.prank(staker1);
         uint256 shares = controller.stake(prover1, 5 ether);
         assertGt(shares, 0);
+    }
+
+    function _prepareProverForRetirement(address prover) internal returns (address vault) {
+        vm.prank(prover);
+        stakingToken.approve(address(controller), type(uint256).max);
+
+        vm.startPrank(prover);
+        vault = controller.initializeProver(1000);
+
+        IProverVault proverVault = IProverVault(vault);
+        uint256 shares = proverVault.balanceOf(prover);
+        proverVault.approve(address(controller), shares);
+        controller.requestUnstake(prover, shares);
+
+        skip(INITIAL_UNBOND_DELAY + 1);
+        controller.completeUnstake(prover);
+        vm.stopPrank();
     }
 }
