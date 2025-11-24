@@ -116,7 +116,7 @@ contract MarketViewerTest is Test {
         _reveal(reqid, prover2, fee2, 222);
     }
 
-    function test_BatchGetters_And_Proofs() public {
+    function test_BatchGetters() public {
         // Create request with comfortable deadline
         (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _requestAndAuction(2 days, 10, 20);
 
@@ -146,19 +146,10 @@ contract MarketViewerTest is Test {
         assertEq(hashes[0], keccak256(abi.encodePacked(reqid, prover1, uint256(10), uint256(111))));
         assertEq(hashes[1], keccak256(abi.encodePacked(reqid, prover2, uint256(20), uint256(222))));
 
-        // No proof yet
-        uint256[8][] memory proofs = viewer.batchGetProofs(_asReqids(reqid));
-        assertEq(proofs.length, 1);
-        assertEq(proofs[0][0], 0);
-
-        // Submit proof after reveal but before deadline
+        // Submit proof after reveal but before deadline to exercise the rest of the flow
         vm.warp(block.timestamp + REVEAL_DURATION + 1);
         vm.prank(prover1);
         market.submitProof(reqid, VALID_PROOF);
-
-        proofs = viewer.batchGetProofs(_asReqids(reqid));
-        assertEq(proofs[0][0], VALID_PROOF[0]);
-        assertEq(proofs[0][1], VALID_PROOF[1]);
     }
 
     function test_PendingSlices_And_Overdue() public {

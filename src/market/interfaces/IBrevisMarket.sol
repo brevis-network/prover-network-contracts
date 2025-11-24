@@ -416,13 +416,6 @@ interface IBrevisMarket {
         returns (address winner, uint256 winnerFee, address secondPlace, uint256 secondFee);
 
     /**
-     * @notice Get submitted proof for a fulfilled request
-     * @param reqid The request ID to query
-     * @return proof The submitted zk proof (returns empty array if not fulfilled)
-     */
-    function getProof(bytes32 reqid) external view returns (uint256[8] memory proof);
-
-    /**
      * @notice Get sealed bid hash for a specific prover
      * @param reqid The request ID to query
      * @param prover The prover address to query

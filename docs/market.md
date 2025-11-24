@@ -233,7 +233,8 @@ Global stats mirror the above:
 
 Key endpoints:
 
-- Batch request data: `batchGetRequests`, `batchGetBidders`, `batchGetBidHashes`, `batchGetProofs`
+- Batch request data: `batchGetRequests`, `batchGetBidders`, `batchGetBidHashes`
+- Proof payloads are only emitted via the `ProofSubmitted` event, so indexers should track logs instead of querying storage.
 - Pending and overdue:
   - Counts: `getProverPendingCount`, `getSenderPendingCount`, `getProverOverdueCount`, `getSenderOverdueCount`
   - Pending (prover): `getProverPendingRequests(prover)` → `ProverPendingItem[]` (fields: `reqid`, `deadline`)
