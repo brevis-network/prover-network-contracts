@@ -86,14 +86,6 @@ contract MarketViewer is IMarketViewer {
         }
     }
 
-    function batchGetProofs(bytes32[] calldata reqids) external view returns (uint256[8][] memory proofs) {
-        uint256 n = reqids.length;
-        proofs = new uint256[8][](n);
-        for (uint256 i = 0; i < n; i++) {
-            proofs[i] = brevisMarket.getProof(reqids[i]);
-        }
-    }
-
     // =========================================================================
     // PENDING LISTS, PAGINATION, OVERDUE
     // =========================================================================

@@ -101,11 +101,6 @@ interface IMarketViewer {
         view
         returns (bytes32[] memory bidHashes);
 
-    /**
-     * @notice Batch fetch proofs (fulfilled requests)
-     */
-    function batchGetProofs(bytes32[] calldata reqids) external view returns (uint256[8][] memory proofs);
-
     // =========================================================================
     // PENDING LISTS, PAGINATION, OVERDUE
     // =========================================================================

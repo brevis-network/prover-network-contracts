@@ -351,11 +351,7 @@ contract BrevisMarketTest is Test {
         (IBrevisMarket.ReqStatus status,,,,,,,) = market.getRequest(reqid);
         assertEq(uint256(status), uint256(IBrevisMarket.ReqStatus.Fulfilled));
 
-        // Verify proof was stored
-        uint256[8] memory storedProof = market.getProof(reqid);
-        for (uint256 i = 0; i < 8; i++) {
-            assertEq(storedProof[i], VALID_PROOF[i]);
-        }
+        // Proof payloads are emitted via events only; storage fetch is no longer available.
     }
 
     function test_FullAuctionFlow_MultipleBidders() public {

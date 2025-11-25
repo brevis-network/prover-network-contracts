@@ -233,7 +233,7 @@ Global stats mirror the above:
 
 Key endpoints:
 
-- Batch request data: `batchGetRequests`, `batchGetBidders`, `batchGetBidHashes`, `batchGetProofs`
+- Batch request data: `batchGetRequests`, `batchGetBidders`, `batchGetBidHashes`
 - Pending and overdue:
   - Counts: `getProverPendingCount`, `getSenderPendingCount`, `getProverOverdueCount`, `getSenderOverdueCount`
   - Pending (prover): `getProverPendingRequests(prover)` → `ProverPendingItem[]` (fields: `reqid`, `deadline`)

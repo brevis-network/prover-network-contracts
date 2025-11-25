@@ -398,7 +398,7 @@ Key structs and return types are tailored for frontends and use compact types wh
     - `getStatsEpochs()` → `(startAts[], endAts[])`
     - `getStatsEpochs(epochIds[])` → `(startAts[], endAts[])`
 
-Batch request helpers are also available: `batchGetRequests`, `batchGetBidders`, `batchGetBidHashes`, `batchGetProofs`.
+Batch request helpers are also available: `batchGetRequests`, `batchGetBidders`, `batchGetBidHashes`.
 
 ## 4. Action Reference
 

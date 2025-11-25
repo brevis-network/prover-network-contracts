@@ -35,7 +35,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         uint64 bidCount; // number of bids submitted (to track if any bids were made)
         Bidder winner; // winning bidder (lowest fee)
         Bidder second; // second-lowest bidder (for reverse second-price auction - winner pays second-lowest bid)
-        uint256[8] proof;
     }
 
     // Stats-epoch metadata (start/end times). endAt = 0 marks the tail (last scheduled) epoch.
@@ -361,8 +360,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         // Verify the proof
         picoVerifier.verifyPicoProof(req.vk, req.publicValuesDigest, proof);
 
-        // Update request state
-        req.proof = proof;
+        // Update request state. Proof data is emitted via event for off-chain indexing.
         req.status = ReqStatus.Fulfilled;
         // Release any reserved obligation for this request as it has been fulfilled successfully
         _releaseObligation(req);
@@ -667,15 +665,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     {
         ReqState storage req = requests[reqid];
         return (req.winner.prover, req.winner.fee, req.second.prover, req.second.fee);
-    }
-
-    /**
-     * @notice Get submitted proof for a fulfilled request
-     * @param reqid The request ID to query
-     * @return proof The submitted zk proof (returns empty array if not fulfilled)
-     */
-    function getProof(bytes32 reqid) external view override returns (uint256[8] memory proof) {
-        return requests[reqid].proof;
     }
 
     /**
