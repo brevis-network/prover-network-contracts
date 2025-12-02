@@ -23,9 +23,9 @@ contract MarketViewerTest is Test {
 
     uint64 public constant BIDDING_DURATION = 1 hours;
     uint64 public constant REVEAL_DURATION = 30 minutes;
-    uint256 public constant MIN_MAX_FEE = 1e12;
-    uint256 public constant MAX_FEE = 1e18;
-    uint256 public constant MIN_STAKE = 1e18;
+    uint96 public constant MIN_MAX_FEE = 1e12;
+    uint96 public constant MAX_FEE = 1e18;
+    uint96 public constant MIN_STAKE = 1e18;
 
     bytes32 public constant VK = keccak256("test_vk");
     bytes32 public constant PUBLIC_VALUES_DIGEST = keccak256("test_public_values");

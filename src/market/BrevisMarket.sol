@@ -206,12 +206,14 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         if (req.fee.deadline < block.timestamp + biddingPhaseDuration + revealPhaseDuration) {
             revert MarketDeadlineBeforeRevealPhaseEnd();
         }
-        if (req.fee.maxFee < minMaxFee) revert MarketMaxFeeTooLow(req.fee.maxFee, minMaxFee);
-        if (maxMaxFee > 0 && req.fee.maxFee > maxMaxFee) revert MarketMaxFeeTooHigh(req.fee.maxFee, maxMaxFee);
+        uint256 maxFee = uint256(req.fee.maxFee);
+        if (maxFee < minMaxFee) revert MarketMaxFeeTooLow(maxFee, minMaxFee);
+        if (maxMaxFee > 0 && maxFee > maxMaxFee) revert MarketMaxFeeTooHigh(maxFee, maxMaxFee);
 
         uint256 minSelfStake = stakingController.minSelfStake();
-        if (req.fee.minStake < minSelfStake) {
-            revert MarketMinStakeTooLow(req.fee.minStake, minSelfStake);
+        uint256 minStake = uint256(req.fee.minStake);
+        if (minStake < minSelfStake) {
+            revert MarketMinStakeTooLow(minStake, minSelfStake);
         }
 
         bytes32 reqid = keccak256(abi.encodePacked(req.nonce, req.vk, req.publicValuesDigest));
@@ -220,7 +222,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         if (reqState.timestamp != 0) revert MarketRequestAlreadyExists(reqid);
 
         // Transfer the fee tokens from the caller to this contract
-        feeToken.safeTransferFrom(msg.sender, address(this), req.fee.maxFee);
+        feeToken.safeTransferFrom(msg.sender, address(this), maxFee);
 
         reqState.status = ReqStatus.Pending;
         reqState.timestamp = uint64(block.timestamp);
@@ -262,7 +264,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         // Get the effective prover (the prover the caller is acting on behalf of)
         address prover = _getEffectiveProver(msg.sender);
         // Check eligibility considering existing pending obligations
-        uint256 requiredForBid = req.fee.minStake + ((assignedStake[prover] * overcommitBps) / BPS_DENOMINATOR);
+        uint256 requiredForBid = uint256(req.fee.minStake) + ((assignedStake[prover] * overcommitBps) / BPS_DENOMINATOR);
         _requireProverEligible(prover, requiredForBid);
 
         // Increment bid count only for new bids
@@ -311,7 +313,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         // Get the effective prover (the prover the caller is acting on behalf of)
         address prover = _getEffectiveProver(msg.sender);
         // Check eligibility considering existing pending obligations
-        uint256 requiredForReveal = req.fee.minStake + ((assignedStake[prover] * overcommitBps) / BPS_DENOMINATOR);
+        uint256 requiredForReveal =
+            uint256(req.fee.minStake) + ((assignedStake[prover] * overcommitBps) / BPS_DENOMINATOR);
         _requireProverEligible(prover, requiredForReveal);
 
         // Verify the revealed bid matches the hash
@@ -366,10 +369,10 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         _releaseObligation(req);
 
         // Calculate and distribute fees
-        uint256 actualFee = req.second.fee; // Reverse second-price auction: winner pays second-lowest bid
+        uint256 actualFee = uint256(req.second.fee); // Reverse second-price auction: winner pays second-lowest bid
         if (req.second.prover == address(0)) {
             // Only one bidder - use their bid
-            actualFee = req.winner.fee;
+            actualFee = uint256(req.winner.fee);
         }
 
         // Calculate protocol fee
@@ -390,7 +393,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         }
 
         // Refund remaining fee to requester
-        feeToken.safeTransfer(req.sender, req.fee.maxFee - actualFee);
+        feeToken.safeTransfer(req.sender, uint256(req.fee.maxFee) - actualFee);
 
         // Update cumulative performance stats: successful fulfillment only
         ProverStats storage s2 = _currentCumulativeStats(prover);
@@ -438,7 +441,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         }
 
         req.status = ReqStatus.Refunded;
-        feeToken.safeTransfer(req.sender, req.fee.maxFee);
+        feeToken.safeTransfer(req.sender, uint256(req.fee.maxFee));
         // Release any reserved obligation tied to this request upon refund
         _releaseObligation(req);
 
@@ -486,7 +489,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         }
 
         // Calculate slash amount
-        uint256 slashAmount = (req.fee.minStake * slashBps) / BPS_DENOMINATOR;
+        uint256 slashAmount = (uint256(req.fee.minStake) * slashBps) / BPS_DENOMINATOR;
         // Perform the slash
         stakingController.slashByAmount(req.winner.prover, slashAmount);
         emit ProverSlashed(reqid, req.winner.prover, slashAmount);
@@ -641,8 +644,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
             req.status,
             req.timestamp,
             req.sender,
-            req.fee.maxFee,
-            req.fee.minStake,
+            uint256(req.fee.maxFee),
+            uint256(req.fee.minStake),
             req.fee.deadline,
             req.vk,
             req.publicValuesDigest
@@ -664,7 +667,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         returns (address winner, uint256 winnerFee, address secondPlace, uint256 secondFee)
     {
         ReqState storage req = requests[reqid];
-        return (req.winner.prover, req.winner.fee, req.second.prover, req.second.fee);
+        return (req.winner.prover, uint256(req.winner.fee), req.second.prover, uint256(req.second.fee));
     }
 
     /**
@@ -729,17 +732,18 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         ReqState storage req = requests[reqid];
 
         address prevWinner = req.winner.prover;
+        uint96 fee96 = uint96(fee);
 
         // If no bidders yet, or this is lower than current winner
-        if (req.winner.prover == address(0) || fee < req.winner.fee) {
+        if (req.winner.prover == address(0) || fee < uint256(req.winner.fee)) {
             // Move current winner to second place
             req.second = req.winner;
             // Set new winner
-            req.winner = Bidder({prover: prover, fee: fee});
+            req.winner = Bidder({prover: prover, fee: fee96});
         }
         // If this is lower than second place (but not winner)
-        else if (req.second.prover == address(0) || fee < req.second.fee) {
-            req.second = Bidder({prover: prover, fee: fee});
+        else if (req.second.prover == address(0) || fee < uint256(req.second.fee)) {
+            req.second = Bidder({prover: prover, fee: fee96});
         }
 
         // Adjust pending obligations on winner change (no longer track instantaneous `wins`)
@@ -771,7 +775,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
      * @param newWinner Address of the new winner
      */
     function _reassignObligation(ReqState storage req, address prevWinner, address newWinner) internal {
-        uint256 ms = req.fee.minStake;
+        uint256 ms = uint256(req.fee.minStake);
         if (prevWinner != address(0)) {
             if (assignedStake[prevWinner] >= ms) {
                 assignedStake[prevWinner] -= ms;
@@ -791,7 +795,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     function _releaseObligation(ReqState storage req) internal {
         address p = req.winner.prover;
         if (p != address(0)) {
-            uint256 ms = req.fee.minStake;
+            uint256 ms = uint256(req.fee.minStake);
             if (assignedStake[p] >= ms) {
                 assignedStake[p] -= ms;
             } else {

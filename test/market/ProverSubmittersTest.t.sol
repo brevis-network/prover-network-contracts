@@ -26,9 +26,9 @@ contract ProverSubmittersTest is Test {
 
     uint64 public constant BIDDING_DURATION = 1 hours;
     uint64 public constant REVEAL_DURATION = 30 minutes;
-    uint256 public constant MIN_MAX_FEE = 1e12;
-    uint256 public constant MAX_FEE = 1e18;
-    uint256 public constant MIN_STAKE = 1e18;
+    uint96 public constant MIN_MAX_FEE = 1e12;
+    uint96 public constant MAX_FEE = 1e18;
+    uint96 public constant MIN_STAKE = 1e18;
 
     // Events
     event SubmitterConsentUpdated(address indexed submitter, address indexed oldProver, address indexed newProver);

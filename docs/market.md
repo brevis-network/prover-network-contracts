@@ -50,9 +50,9 @@ struct ProofRequest {
 ### FeeParams
 ```solidity
 struct FeeParams {
-    uint256 maxFee;    // Maximum fee requester is willing to pay
-    uint256 minStake;  // Required prover minimum stake
-    uint64 deadline;   // Proof submission deadline
+    uint96 maxFee;    // Maximum fee requester is willing to pay (packed in storage)
+    uint96 minStake;  // Required prover minimum stake (packed in storage)
+    uint64 deadline;  // Proof submission deadline
 }
 ```
 
