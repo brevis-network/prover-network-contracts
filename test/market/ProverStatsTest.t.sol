@@ -76,6 +76,7 @@ contract ProverStatsTest is Test {
             nonce: uint64(1 + extraNonce),
             vk: VK,
             publicValuesDigest: PUBLIC_VALUES_DIGEST,
+            version: 0,
             imgURL: "",
             inputData: "",
             inputURL: "",
@@ -447,8 +448,9 @@ contract ProverStatsTest is Test {
         market.reveal(reqid, 5e17, 123);
 
         // Let deadline pass, then refund
-        (,,,, uint256 minStake, uint64 deadline,,) = market.getRequest(reqid);
-        minStake; // silence
+        (,,,, uint256 minStake, uint64 deadline, bytes32 _vk, bytes32 _digest, uint32 _version) =
+            market.getRequest(reqid);
+        (minStake, _vk, _digest, _version);
         vm.warp(deadline + 1);
         market.refund(reqid);
 

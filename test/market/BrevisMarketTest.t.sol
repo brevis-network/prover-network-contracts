@@ -10,6 +10,8 @@ import "../mocks/MockStakingController.sol";
 import "../utils/TestErrors.sol";
 
 contract BrevisMarketTest is Test {
+    using stdStorage for StdStorage;
+
     BrevisMarket public market;
     MockERC20 public feeToken;
     MockVerifier public picoVerifier;
@@ -38,6 +40,7 @@ contract BrevisMarketTest is Test {
     event BidRevealed(bytes32 indexed reqid, address indexed prover, uint256 fee);
     event ProofSubmitted(bytes32 indexed reqid, address indexed prover, uint256[8] proof, uint256 actualFee);
     event Refunded(bytes32 indexed reqid, address indexed requester, uint256 amount);
+    event PicoVerifierUpdated(uint32 indexed version, address indexed oldVerifier, address indexed newVerifier);
 
     function setUp() public {
         // Deploy mock contracts
@@ -82,6 +85,7 @@ contract BrevisMarketTest is Test {
             nonce: 1,
             vk: VK,
             publicValuesDigest: PUBLIC_VALUES_DIGEST,
+            version: 0,
             imgURL: "",
             inputData: "",
             inputURL: "",
@@ -116,7 +120,8 @@ contract BrevisMarketTest is Test {
             uint256 minStake,
             uint64 deadline,
             bytes32 vk,
-            bytes32 publicValuesDigest
+            bytes32 publicValuesDigest,
+            uint32 version
         ) = market.getRequest(reqid);
 
         assertEq(uint256(status), uint256(IBrevisMarket.ReqStatus.Pending));
@@ -127,6 +132,7 @@ contract BrevisMarketTest is Test {
         assertEq(deadline, req.fee.deadline);
         assertEq(vk, VK);
         assertEq(publicValuesDigest, PUBLIC_VALUES_DIGEST);
+        assertEq(version, 0);
     }
 
     function test_RequestProof_RevertDeadlineInPast() public {
@@ -169,6 +175,36 @@ contract BrevisMarketTest is Test {
         vm.prank(requester);
         vm.expectRevert(IBrevisMarket.MarketDeadlineBeforeRevealPhaseEnd.selector);
         market.requestProof(req);
+    }
+
+    function test_RequestProof_RevertUnknownVersion() public {
+        (, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+        req.version = 42;
+
+        vm.prank(requester);
+        vm.expectRevert(abi.encodeWithSelector(IBrevisMarket.MarketVerifierVersionNotSet.selector, req.version));
+        market.requestProof(req);
+    }
+
+    function test_SetPicoVerifier_AllowsNewVersionRequests() public {
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+        req.version = 1;
+
+        MockVerifier newVerifier = new MockVerifier();
+        newVerifier.setValidProof(VK, PUBLIC_VALUES_DIGEST, VALID_PROOF);
+
+        address oldVerifier = address(market.picoVerifiers(1));
+        vm.expectEmit(true, true, true, true);
+        emit PicoVerifierUpdated(1, oldVerifier, address(newVerifier));
+        vm.prank(owner);
+        market.setPicoVerifier(1, IPicoVerifier(address(newVerifier)));
+
+        vm.prank(requester);
+        market.requestProof(req);
+
+        (,,,,,,,, uint32 storedVersion) = market.getRequest(reqid);
+        assertEq(storedVersion, 1);
+        assertEq(address(market.picoVerifiers(1)), address(newVerifier));
     }
 
     function test_Bid_Success() public {
@@ -348,10 +384,34 @@ contract BrevisMarketTest is Test {
         market.submitProof(reqid, VALID_PROOF);
 
         // Verify request is fulfilled
-        (IBrevisMarket.ReqStatus status,,,,,,,) = market.getRequest(reqid);
+        (IBrevisMarket.ReqStatus status,,,,,,,,) = market.getRequest(reqid);
         assertEq(uint256(status), uint256(IBrevisMarket.ReqStatus.Fulfilled));
 
         // Proof payloads are emitted via events only; storage fetch is no longer available.
+    }
+
+    function test_SubmitProof_RevertWhenVerifierVersionMissing() public {
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+        vm.prank(requester);
+        market.requestProof(req);
+
+        uint256 fee = 5e17;
+        uint256 nonce = 123;
+        vm.prank(prover1);
+        market.bid(reqid, _createBidHash(reqid, prover1, fee, nonce));
+
+        vm.warp(block.timestamp + BIDDING_DURATION + 1);
+        vm.prank(prover1);
+        market.reveal(reqid, fee, nonce);
+
+        vm.warp(block.timestamp + REVEAL_DURATION + 1);
+
+        uint256 slot = stdstore.target(address(market)).sig("picoVerifiers(uint32)").with_key(uint256(0)).find();
+        vm.store(address(market), bytes32(slot), bytes32(0));
+
+        vm.prank(prover1);
+        vm.expectRevert(abi.encodeWithSelector(IBrevisMarket.MarketVerifierVersionNotSet.selector, uint32(0)));
+        market.submitProof(reqid, VALID_PROOF);
     }
 
     function test_FullAuctionFlow_MultipleBidders() public {
@@ -416,7 +476,7 @@ contract BrevisMarketTest is Test {
         market.refund(reqid);
 
         // Verify refund was processed
-        (IBrevisMarket.ReqStatus status,,,,,,,) = market.getRequest(reqid);
+        (IBrevisMarket.ReqStatus status,,,,,,,,) = market.getRequest(reqid);
         assertEq(uint256(status), uint256(IBrevisMarket.ReqStatus.Refunded));
         assertEq(feeToken.balanceOf(requester), requesterBalanceBefore + MAX_FEE);
     }
@@ -475,7 +535,7 @@ contract BrevisMarketTest is Test {
         assertEq(market.revealPhaseDuration(), REVEAL_DURATION);
         assertEq(address(market.feeToken()), address(feeToken));
         assertEq(address(market.stakingController()), address(stakingController));
-        assertEq(address(market.picoVerifier()), address(picoVerifier));
+        assertEq(address(market.picoVerifiers(0)), address(picoVerifier));
     }
 
     // =========================================================================
@@ -658,7 +718,7 @@ contract BrevisMarketTest is Test {
         market.refund(reqid);
 
         // Verify refund processed correctly
-        (IBrevisMarket.ReqStatus status,,,,,,,) = market.getRequest(reqid);
+        (IBrevisMarket.ReqStatus status,,,,,,,,) = market.getRequest(reqid);
         assertEq(uint256(status), uint256(IBrevisMarket.ReqStatus.Refunded));
         assertEq(feeToken.balanceOf(requester), requesterBalanceBefore + MAX_FEE);
     }
@@ -678,7 +738,7 @@ contract BrevisMarketTest is Test {
         market.refund(reqid);
 
         // Verify refund processed correctly
-        (IBrevisMarket.ReqStatus status,,,,,,,) = market.getRequest(reqid);
+        (IBrevisMarket.ReqStatus status,,,,,,,,) = market.getRequest(reqid);
         assertEq(uint256(status), uint256(IBrevisMarket.ReqStatus.Refunded));
         assertEq(feeToken.balanceOf(requester), requesterBalanceBefore + MAX_FEE);
     }
@@ -705,7 +765,7 @@ contract BrevisMarketTest is Test {
         market.refund(reqid);
 
         // Verify refund processed correctly
-        (IBrevisMarket.ReqStatus status,,,,,,,) = market.getRequest(reqid);
+        (IBrevisMarket.ReqStatus status,,,,,,,,) = market.getRequest(reqid);
         assertEq(uint256(status), uint256(IBrevisMarket.ReqStatus.Refunded));
         assertEq(feeToken.balanceOf(requester), requesterBalanceBefore + MAX_FEE);
     }
@@ -736,7 +796,7 @@ contract BrevisMarketTest is Test {
         market.refund(reqid);
 
         // Verify refund processed correctly
-        (IBrevisMarket.ReqStatus status,,,,,,,) = market.getRequest(reqid);
+        (IBrevisMarket.ReqStatus status,,,,,,,,) = market.getRequest(reqid);
         assertEq(uint256(status), uint256(IBrevisMarket.ReqStatus.Refunded));
         assertEq(feeToken.balanceOf(requester), requesterBalanceBefore + MAX_FEE);
     }
@@ -905,7 +965,7 @@ contract BrevisMarketTest is Test {
         market.refund(reqid);
 
         // Verify refund processed correctly
-        (IBrevisMarket.ReqStatus status,,,,,,,) = market.getRequest(reqid);
+        (IBrevisMarket.ReqStatus status,,,,,,,,) = market.getRequest(reqid);
         assertEq(uint256(status), uint256(IBrevisMarket.ReqStatus.Refunded));
         assertEq(feeToken.balanceOf(requester), requesterBalanceBefore + MAX_FEE);
     }
@@ -943,7 +1003,7 @@ contract BrevisMarketTest is Test {
         assertFalse(stakingController.wasAnySlashCalled(), "Refund should no longer trigger slashing");
 
         // Verify refund worked correctly
-        (IBrevisMarket.ReqStatus status,,,,,,,) = market.getRequest(reqid);
+        (IBrevisMarket.ReqStatus status,,,,,,,,) = market.getRequest(reqid);
         assertEq(uint256(status), uint256(IBrevisMarket.ReqStatus.Refunded));
     }
 
@@ -1244,7 +1304,7 @@ contract BrevisMarketTest is Test {
         market.slash(reqid);
 
         // Verify request is now in Slashed status
-        (IBrevisMarket.ReqStatus status,,,,,,,) = market.getRequest(reqid);
+        (IBrevisMarket.ReqStatus status,,,,,,,,) = market.getRequest(reqid);
         assertEq(uint256(status), uint256(IBrevisMarket.ReqStatus.Slashed));
 
         // Second slash attempt should fail with invalid status

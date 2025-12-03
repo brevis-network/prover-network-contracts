@@ -31,8 +31,9 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         FeeParams fee;
         bytes32 vk;
         bytes32 publicValuesDigest; // sha256(publicValues) & bytes32(uint256((1 << 253) - 1))
+        uint32 version; // version of the verifier to use
+        uint32 bidCount; // number of bids submitted (to track if any bids were made)
         mapping(address => bytes32) bids; // received sealed bids by provers
-        uint64 bidCount; // number of bids submitted (to track if any bids were made)
         Bidder winner; // winning bidder (lowest fee)
         Bidder second; // second-lowest bidder (for reverse second-price auction - winner pays second-lowest bid)
     }
@@ -65,11 +66,11 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     uint256 public protocolFeeBalance; // accumulated protocol fees
 
     // External contracts
-    IPicoVerifier public picoVerifier; // address of the PicoVerifier contract
+    mapping(uint32 => IPicoVerifier) public picoVerifiers; // versioned PicoVerifier contracts
     IERC20 public feeToken; // ERC20 token used for fees
 
     // Core data structures
-    mapping(bytes32 => ReqState) public requests; // proof req id -> state
+    mapping(bytes32 => ReqState) public override requests; // proof req id -> state
 
     // Unified cumulative global stats per epochId
     // Each entry holds cumulative counters since genesis (carried forward on first use per epoch, then mutated in-place)
@@ -172,7 +173,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
             revert MarketInvalidStakingController();
         }
 
-        picoVerifier = _picoVerifier;
+        picoVerifiers[0] = _picoVerifier;
         stakingController = _stakingController;
         feeToken = stakingController.stakingToken();
         biddingPhaseDuration = _biddingPhaseDuration;
@@ -220,6 +221,9 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
         ReqState storage reqState = requests[reqid];
         if (reqState.timestamp != 0) revert MarketRequestAlreadyExists(reqid);
+        if (address(picoVerifiers[req.version]) == address(0)) {
+            revert MarketVerifierVersionNotSet(req.version);
+        }
 
         // Transfer the fee tokens from the caller to this contract
         feeToken.safeTransferFrom(msg.sender, address(this), maxFee);
@@ -230,6 +234,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         reqState.fee = req.fee;
         reqState.vk = req.vk;
         reqState.publicValuesDigest = req.publicValuesDigest;
+        reqState.version = req.version;
 
         // Update global stats: track total requests
         GlobalStats storage gs = _currentCumulativeGlobalStats();
@@ -360,8 +365,10 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
         if (req.status != ReqStatus.Pending) revert MarketInvalidRequestStatus(req.status);
 
-        // Verify the proof
-        picoVerifier.verifyPicoProof(req.vk, req.publicValuesDigest, proof);
+        // Verify the proof against the configured verifier version
+        IPicoVerifier verifier = picoVerifiers[req.version];
+        if (address(verifier) == address(0)) revert MarketVerifierVersionNotSet(req.version);
+        verifier.verifyPicoProof(req.vk, req.publicValuesDigest, proof);
 
         // Update request state. Proof data is emitted via event for off-chain indexing.
         req.status = ReqStatus.Fulfilled;
@@ -500,14 +507,15 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     // =========================================================================
 
     /**
-     * @notice Update the PicoVerifier contract address
+     * @notice Update the PicoVerifier implementation for a specific version
+     * @param version The verifier version to update
      * @param newVerifier The new PicoVerifier contract address
      */
-    function setPicoVerifier(IPicoVerifier newVerifier) external override onlyOwner {
+    function setPicoVerifier(uint32 version, IPicoVerifier newVerifier) external override onlyOwner {
         if (address(newVerifier) == address(0)) revert MarketZeroAddress();
-        IPicoVerifier oldVerifier = picoVerifier;
-        picoVerifier = newVerifier;
-        emit PicoVerifierUpdated(address(oldVerifier), address(newVerifier));
+        IPicoVerifier oldVerifier = picoVerifiers[version];
+        picoVerifiers[version] = newVerifier;
+        emit PicoVerifierUpdated(version, address(oldVerifier), address(newVerifier));
     }
 
     /**
@@ -615,14 +623,15 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     /**
      * @notice Get complete request information
      * @param reqid The request ID to query
-     * @return status Current request status (Pending/Fulfilled/Refunded)
+     * @return status Current request status (Pending/Fulfilled/Refunded/Slashed)
      * @return timestamp Request creation timestamp
      * @return sender Original requester address
      * @return maxFee Maximum fee willing to pay
      * @return minStake Minimum stake required for bidders
      * @return deadline Proof submission deadline
-     * @return vk Verification key
-     * @return publicValuesDigest Public values hash
+     * @return vk Verification key commitment
+     * @return publicValuesDigest Digest of public inputs tied to the proof
+     * @return version Pico verifier version required to validate this request
      */
     function getRequest(bytes32 reqid)
         external
@@ -636,7 +645,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
             uint256 minStake,
             uint64 deadline,
             bytes32 vk,
-            bytes32 publicValuesDigest
+            bytes32 publicValuesDigest,
+            uint32 version
         )
     {
         ReqState storage req = requests[reqid];
@@ -648,7 +658,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
             uint256(req.fee.minStake),
             req.fee.deadline,
             req.vk,
-            req.publicValuesDigest
+            req.publicValuesDigest,
+            req.version
         );
     }
 

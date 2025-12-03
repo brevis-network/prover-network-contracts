@@ -35,6 +35,7 @@ interface IBrevisMarket {
         uint64 nonce; // allow re-submit same data
         bytes32 vk; // verify key for binary
         bytes32 publicValuesDigest; // sha256(publicValues) & bytes32(uint256((1 << 253) - 1)))
+        uint32 version; // version of the verifier to use
         string imgURL; // URL to ELF binary, can be empty if vk is already known to the prover network
         bytes inputData; // input data for the binary, can be empty if inputURL is provided
         string inputURL; // URL to input data, if inputData is not provided
@@ -71,7 +72,7 @@ interface IBrevisMarket {
     event ProofSubmitted(bytes32 indexed reqid, address indexed prover, uint256[8] proof, uint256 actualFee);
     event Refunded(bytes32 indexed reqid, address indexed requester, uint256 amount);
     event ProverSlashed(bytes32 indexed reqid, address indexed prover, uint256 slashAmount);
-    event PicoVerifierUpdated(address indexed oldVerifier, address indexed newVerifier);
+    event PicoVerifierUpdated(uint32 indexed version, address indexed oldVerifier, address indexed newVerifier);
     event BiddingPhaseDurationUpdated(uint64 oldDuration, uint64 newDuration);
     event RevealPhaseDurationUpdated(uint64 oldDuration, uint64 newDuration);
     event MinMaxFeeUpdated(uint256 oldFee, uint256 newFee);
@@ -108,6 +109,7 @@ interface IBrevisMarket {
     error MarketMaxFeeTooLow(uint256 provided, uint256 minimum);
     error MarketMaxFeeTooHigh(uint256 provided, uint256 maximum);
     error MarketMinStakeTooLow(uint256 provided, uint256 minimum);
+    error MarketVerifierVersionNotSet(uint32 version);
 
     // Bidding & reveal & submission & refund errors
     error MarketBiddingPhaseEnded(uint256 currentTime, uint256 biddingEndTime);
@@ -206,11 +208,12 @@ interface IBrevisMarket {
     // =========================================================================
 
     /**
-     * @notice Update the PicoVerifier contract address
+     * @notice Update the PicoVerifier implementation for a specific version
      * @dev Only owner can call this function
+     * @param version The verifier version to configure
      * @param newVerifier The new PicoVerifier contract address
      */
-    function setPicoVerifier(IPicoVerifier newVerifier) external;
+    function setPicoVerifier(uint32 version, IPicoVerifier newVerifier) external;
 
     /**
      * @notice Update the bidding phase duration
@@ -292,10 +295,11 @@ interface IBrevisMarket {
     function revealPhaseDuration() external view returns (uint64 duration);
 
     /**
-     * @notice Get the PicoVerifier contract address
+     * @notice Get the PicoVerifier contract address for a version
+     * @param version The verifier version to query
      * @return verifier The PicoVerifier contract address
      */
-    function picoVerifier() external view returns (IPicoVerifier verifier);
+    function picoVerifiers(uint32 version) external view returns (IPicoVerifier verifier);
 
     /**
      * @notice Get the fee token contract address
@@ -356,6 +360,7 @@ interface IBrevisMarket {
      * @return fee Fee parameters (maxFee, minStake, deadline)
      * @return vk Verification key
      * @return publicValuesDigest Public values hash
+     * @return version Version of the verifier to use
      * @return bidCount Number of sealed bids submitted
      * @return winner Current winner tuple (prover, fee)
      * @return second Current second-place tuple (prover, fee)
@@ -370,7 +375,8 @@ interface IBrevisMarket {
             FeeParams memory fee,
             bytes32 vk,
             bytes32 publicValuesDigest,
-            uint64 bidCount,
+            uint32 version,
+            uint32 bidCount,
             Bidder memory winner,
             Bidder memory second
         );
@@ -386,6 +392,7 @@ interface IBrevisMarket {
      * @return deadline Proof submission deadline
      * @return vk Verification key
      * @return publicValuesDigest Public values hash
+     * @return version Version of the verifier to use
      */
     function getRequest(bytes32 reqid)
         external
@@ -398,7 +405,8 @@ interface IBrevisMarket {
             uint256 minStake,
             uint64 deadline,
             bytes32 vk,
-            bytes32 publicValuesDigest
+            bytes32 publicValuesDigest,
+            uint32 version
         );
 
     /**

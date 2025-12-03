@@ -487,6 +487,7 @@ contract ProverSubmittersTest is Test {
             nonce: 1,
             vk: keccak256("test_vk"),
             publicValuesDigest: keccak256("test_public_values"),
+            version: 0,
             imgURL: "",
             inputData: "",
             inputURL: "",
