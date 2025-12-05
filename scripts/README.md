@@ -19,15 +19,21 @@ Notes:
 - The deployer is the initial owner of ProxyAdmin and all deployed contracts.
 - For production, transfer ProxyAdmin ownership to a multisig after deployment (via Etherscan UI).
 
-## 2) Deploy (two steps)
+## 2) Deploy (baseline flow)
 
-1) Deploy a shared ProxyAdmin (one-time per network):
+1. Deploy a shared ProxyAdmin (one-time per network):
    ```bash
    forge script scripts/DeploySharedProxyAdmin.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
    ```
    Copy the printed address and set it in `config.json` under `proxyAdmin.address`.
 
-2) Deploy the full Prover Network:
+2. Deploy the Pico verifier:
+   ```bash
+   forge script scripts/PicoVerifier.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
+   ```
+   Copy the printed address and set it in `config.json` under `market.picoVerifier`.
+
+3. Deploy the core Prover Network bundle:
    ```bash
    forge script scripts/DeployProverNetwork.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
    ```
@@ -70,9 +76,9 @@ For advanced or partial rollouts, you can deploy components separately. These co
    ```bash
    forge script scripts/MarketViewer.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
    ```
-- Mock PicoVerifier (testing only):
+- PicoVerifier (mainnet/testnet verifier implementation):
    ```bash
-   forge script scripts/MockPicoVerifier.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
+   forge script scripts/PicoVerifier.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
    ```
 
 Notes:
