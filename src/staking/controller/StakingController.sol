@@ -32,8 +32,8 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
     // 77a8d217b4b31e7c722578c208f5ba9973f8291ae83d602d73c54039808746ae
     bytes32 public constant AUTHORIZED_PROVER_ROLE = keccak256("AUTHORIZED_PROVER_ROLE");
 
-    // Compile-time decimal assumption (adjust and recompile for temporary non-18 decimal testnets)
-    uint8 private constant STAKING_TOKEN_DECIMAL = 18;
+    // Compile-time decimal assumption
+    uint8 private constant STAKING_TOKEN_DECIMAL = 6;
     uint256 private constant MIN_STAKING_AMOUNT = 10 ** STAKING_TOKEN_DECIMAL;
 
     // =========================================================================
