@@ -455,6 +455,91 @@ contract RewardsTest is Test {
         assertEq(pendingAfterClaim, 0);
     }
 
+    function testBatchAddRewardsDistributesAcrossProvers() public {
+        // Initialize two provers with equal commission rates
+        vm.startPrank(prover1);
+        stakingToken.approve(address(controller), MIN_SELF_STAKE);
+        controller.initializeProver(1000);
+        vm.stopPrank();
+
+        vm.startPrank(prover2);
+        stakingToken.approve(address(controller), MIN_SELF_STAKE);
+        controller.initializeProver(1000);
+        vm.stopPrank();
+
+        // Provide external stakes so donation guard cannot trigger
+        vm.startPrank(staker1);
+        stakingToken.approve(address(controller), 200e18);
+        controller.stake(prover1, 200e18);
+        vm.stopPrank();
+
+        vm.startPrank(staker2);
+        stakingToken.approve(address(controller), 200e18);
+        controller.stake(prover2, 200e18);
+        vm.stopPrank();
+
+        address vault1 = controller.getProverVault(prover1);
+        address vault2 = controller.getProverVault(prover2);
+        uint256 vault1AssetsBefore = IProverVault(vault1).totalAssets();
+        uint256 vault2AssetsBefore = IProverVault(vault2).totalAssets();
+
+        address[] memory provers = new address[](2);
+        provers[0] = prover1;
+        provers[1] = prover2;
+
+        uint256 rewardOne = 120e18;
+        uint256 rewardTwo = 80e18;
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = rewardOne;
+        amounts[1] = rewardTwo;
+
+        vm.startPrank(rewardPayer);
+        stakingToken.approve(address(controller), rewardOne + rewardTwo);
+        controller.addRewards(provers, amounts);
+        vm.stopPrank();
+
+        uint256 expectedCommission1 = (rewardOne * 1000) / 10000;
+        uint256 expectedCommission2 = (rewardTwo * 1000) / 10000;
+
+        (,,, uint256 pendingOne,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 pendingTwo,,,) = controller.getProverInfo(prover2);
+        assertEq(pendingOne, expectedCommission1, "prover1 commission should accumulate");
+        assertEq(pendingTwo, expectedCommission2, "prover2 commission should accumulate");
+
+        uint256 vault1AssetsAfter = IProverVault(vault1).totalAssets();
+        uint256 vault2AssetsAfter = IProverVault(vault2).totalAssets();
+        assertEq(
+            vault1AssetsAfter,
+            vault1AssetsBefore + rewardOne - expectedCommission1,
+            "prover1 vault should receive net rewards"
+        );
+        assertEq(
+            vault2AssetsAfter,
+            vault2AssetsBefore + rewardTwo - expectedCommission2,
+            "prover2 vault should receive net rewards"
+        );
+    }
+
+    function testBatchAddRewardsLengthMismatchReverts() public {
+        vm.startPrank(prover1);
+        stakingToken.approve(address(controller), MIN_SELF_STAKE);
+        controller.initializeProver(1000);
+        vm.stopPrank();
+
+        address[] memory provers = new address[](2);
+        provers[0] = prover1;
+        provers[1] = prover2; // unused but ensures array mismatch
+
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 100e18;
+
+        vm.startPrank(rewardPayer);
+        stakingToken.approve(address(controller), 100e18);
+        vm.expectRevert(IStakingController.ControllerInvalidArg.selector);
+        controller.addRewards(provers, amounts);
+        vm.stopPrank();
+    }
+
     function testCommissionRateChangeOnlyAffectsSubsequentRewards() public {
         // Setup prover
         vm.prank(prover1);

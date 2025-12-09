@@ -224,6 +224,13 @@ interface IStakingController {
     function addRewards(address prover, uint256 amount) external returns (uint256 commission, uint256 toStakers);
 
     /**
+     * @notice Batch add rewards for multiple provers
+     * @param provers The list of provers to reward
+     * @param amounts The list of reward amounts corresponding to each prover
+     */
+    function addRewards(address[] calldata provers, uint256[] calldata amounts) external;
+
+    /**
      * @notice Claim accumulated commission (only prover can call)
      * @dev Uses accrual + claim model - commission accumulates and must be explicitly claimed
      * @return amount The commission amount claimed

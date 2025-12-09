@@ -511,13 +511,47 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
         nonReentrant
         returns (uint256 commission, uint256 toStakers)
     {
+        return _addRewards(prover, amount, true);
+    }
+
+    /**
+     * @notice Batch add rewards for multiple provers
+     */
+    function addRewards(address[] calldata provers, uint256[] calldata amounts) external whenNotPaused nonReentrant {
+        if (provers.length != amounts.length) {
+            revert ControllerInvalidArg();
+        }
+        uint256 totalAmount = 0;
+        for (uint256 i = 0; i < provers.length; i++) {
+            totalAmount += amounts[i];
+        }
+        stakingToken.safeTransferFrom(msg.sender, address(this), totalAmount);
+        for (uint256 i = 0; i < provers.length; i++) {
+            _addRewards(provers[i], amounts[i], false);
+        }
+    }
+
+    /**
+     * @notice Internal function to add rewards for a prover
+     * @param prover The prover to add rewards for
+     * @param amount The total reward amount
+     * @param transferFromSender Whether to transfer tokens from msg.sender
+     * @return commission The commission portion allocated to the prover
+     * @return toStakers The staker donation portion sent to the vault
+     */
+    function _addRewards(address prover, uint256 amount, bool transferFromSender)
+        private
+        returns (uint256 commission, uint256 toStakers)
+    {
         // Validate prover is active
         ProverInfo storage proverInfo = _proverInfo[prover];
         if (proverInfo.state == ProverState.Null) revert ControllerProverNotInitialized();
         if (!_isActive(prover)) revert ControllerProverNotActive();
 
-        // Transfer assets from caller
-        stakingToken.safeTransferFrom(msg.sender, address(this), amount);
+        if (transferFromSender) {
+            // Transfer assets from caller
+            stakingToken.safeTransferFrom(msg.sender, address(this), amount);
+        }
 
         // Get commission rate for this source (msg.sender)
         uint256 commissionRate = getCommissionRate(prover, msg.sender);
