@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "../interfaces/IStakingController.sol";
 import "./brevis-proof/BrevisProofApp.sol";
 import "./EpochManager.sol";
 
 contract EpochRewards is BrevisProofApp, EpochManager {
+    using SafeERC20 for IERC20;
+
     // 0x9188644bf0c7a694e572b54fd40005e1230f80a50c59be6fb567a312ab5a1d4d
     bytes32 public constant REWARD_UPDATER_ROLE = keccak256("REWARD_UPDATER_ROLE");
 
@@ -31,22 +35,34 @@ contract EpochRewards is BrevisProofApp, EpochManager {
     error StakingRewardsUnsortedProvers(address previousProver, address currentProver);
 
     /**
-     * @dev For upgradeable: pass zero values and call init() later
-     *      For direct: pass actual values for immediate initialization
+     * @notice Deploy with initial staking controller, Brevis proof verifier, and reward updater.
+     * @dev For upgradeable: pass zero values and call init() later. For direct: pass actual values for immediate initialization.
+     * @param _stakingController Staking controller that holds vaults and distributes rewards.
+     * @param _brevisProof Brevis proof verifier contract address.
+     * @param _rewardUpdater Account granted reward/epoch updater roles.
      */
     constructor(address _stakingController, address _brevisProof, address _rewardUpdater) {
         _init(_stakingController, _brevisProof, _rewardUpdater);
     }
 
     /**
-     * @notice Initialize the staking rewards contract for upgradeable deployment
-     * @dev This function sets up the contract state after deployment.
+     * @notice Initialize the staking rewards contract for upgradeable deployment.
+     * @dev Sets up controller, proof verifier, roles, and owner (when called via proxy init).
+     * @param _stakingController Staking controller that holds vaults and distributes rewards.
+     * @param _brevisProof Brevis proof verifier contract address.
+     * @param _rewardUpdater Account granted reward/epoch updater roles.
      */
     function init(address _stakingController, address _brevisProof, address _rewardUpdater) external {
         _init(_stakingController, _brevisProof, _rewardUpdater);
         initOwner(); // requires _owner == address(0), which is only possible when it's a delegateCall
     }
 
+    /**
+     * @dev Shared initializer for constructor and proxy init.
+     * @param _stakingController Staking controller that holds vaults and distributes rewards.
+     * @param _brevisProof Brevis proof verifier contract address.
+     * @param _rewardUpdater Account granted reward/epoch updater roles.
+     */
     function _init(address _stakingController, address _brevisProof, address _rewardUpdater) internal {
         stakingController = IStakingController(_stakingController);
         brevisProof = IBrevisProof(_brevisProof);
@@ -56,6 +72,12 @@ contract EpochRewards is BrevisProofApp, EpochManager {
         IERC20(stakingController.stakingToken()).approve(address(stakingController), type(uint256).max);
     }
 
+    /**
+     * @notice Record per-prover rewards for an epoch using Brevis proof output.
+     * @dev Validates epoch window, ordering, and max reward cap before storing.
+     * @param proof Brevis proof bytes.
+     * @param circuitOutput Encoded circuit output containing epoch window and prover rewards.
+     */
     function setRewards(bytes calldata proof, bytes calldata circuitOutput) external onlyRole(REWARD_UPDATER_ROLE) {
         uint32 epoch = uint32(bytes4(circuitOutput[0:4]));
         if (epoch == 0 || epoch < lastUpdatedEpoch) {
@@ -106,6 +128,11 @@ contract EpochRewards is BrevisProofApp, EpochManager {
         emit EpochRewardsSet(epoch, newRewards, totalRewardsForEpoch);
     }
 
+    /**
+     * @notice Push stored rewards for a list of provers into the staking controller for distribution.
+     * @param epoch Epoch number whose rewards are being distributed.
+     * @param provers Ordered list of provers to pay out.
+     */
     function distributeRewards(uint32 epoch, address[] calldata provers) external onlyRole(REWARD_UPDATER_ROLE) {
         uint256[] memory amounts = new uint256[](provers.length);
         for (uint256 i = 0; i < provers.length; i++) {
@@ -121,6 +148,19 @@ contract EpochRewards is BrevisProofApp, EpochManager {
         stakingController.addRewards(provers, amounts);
     }
 
+    /**
+     * @notice Owner can rescue reward tokens.
+     * @param to Recipient address.
+     * @param amount Amount of staking token to withdraw.
+     */
+    function withdrawRewards(address to, uint256 amount) external onlyOwner {
+        IERC20(stakingController.stakingToken()).safeTransfer(to, amount);
+    }
+
+    /**
+     * @notice Update the verification key hash used by Brevis proofs.
+     * @param _vkHash New VK hash.
+     */
     function setVkHash(bytes32 _vkHash) external onlyOwner {
         vkHash = _vkHash;
     }

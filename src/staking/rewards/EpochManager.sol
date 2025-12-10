@@ -48,6 +48,12 @@ abstract contract EpochManager is AccessControl {
 
     // ========================== Getters =========================
 
+    /**
+     * @notice Get the current epoch number and active config.
+     * @return currentEpoch Epoch number derived from block timestamp.
+     * @return epochLength Duration of the active epoch in seconds.
+     * @return maxEpochReward Maximum distributable reward for the active epoch.
+     */
     function getCurrentEpochInfo()
         public
         view
@@ -56,6 +62,13 @@ abstract contract EpochManager is AccessControl {
         return getEpochInfoByTimestamp(uint64(block.timestamp));
     }
 
+    /**
+     * @notice Resolve epoch data for an arbitrary timestamp.
+     * @param timestamp Target timestamp to evaluate.
+     * @return currentEpoch Epoch that contains the timestamp.
+     * @return epochLength Duration of the epoch in seconds.
+     * @return maxEpochReward Maximum reward for that epoch.
+     */
     function getEpochInfoByTimestamp(uint64 timestamp)
         public
         view
@@ -76,6 +89,13 @@ abstract contract EpochManager is AccessControl {
         revert EpochManagerInvalidEpochNumber();
     }
 
+    /**
+     * @notice Resolve epoch start time and config by epoch number.
+     * @param epoch Epoch number (must be > 0).
+     * @return epochStartTime Start timestamp of the epoch.
+     * @return epochLength Duration of the epoch in seconds.
+     * @return maxEpochReward Maximum reward for that epoch.
+     */
     function getEpochInfoByEpochNumber(uint32 epoch)
         public
         view
@@ -96,16 +116,28 @@ abstract contract EpochManager is AccessControl {
         revert EpochManagerInvalidEpochNumber();
     }
 
+    /**
+     * @notice Return all configured epoch schedules.
+     */
     function getEpochConfigs() public view returns (EpochConfig[] memory) {
         return epochConfigs;
     }
 
+    /**
+     * @notice Return count of configured epoch schedules.
+     */
     function getEpochConfigNumber() public view returns (uint256) {
         return epochConfigs.length;
     }
 
     // ========================== Setters ==========================
 
+    /**
+     * @notice Initialize epoch parameters and seed the first config.
+     * @param _startTimestamp When epoch counting begins.
+     * @param _epochLength Duration of each epoch in seconds.
+     * @param _maxEpochReward Maximum reward for each epoch.
+     */
     function initEpoch(uint64 _startTimestamp, uint64 _epochLength, uint256 _maxEpochReward)
         external
         onlyRole(EPOCH_UPDATER_ROLE)
@@ -113,6 +145,12 @@ abstract contract EpochManager is AccessControl {
         _initEpoch(_startTimestamp, _epochLength, _maxEpochReward);
     }
 
+    /**
+     * @notice Append a new epoch configuration starting from a specific epoch boundary.
+     * @param fromEpoch Epoch number when this config becomes active.
+     * @param epochLength Duration of each epoch in seconds.
+     * @param maxEpochReward Maximum reward for each epoch.
+     */
     function setEpochConfig(uint32 fromEpoch, uint64 epochLength, uint256 maxEpochReward)
         external
         onlyRole(EPOCH_UPDATER_ROLE)
@@ -120,8 +158,13 @@ abstract contract EpochManager is AccessControl {
         _setEpochConfig(fromEpoch, epochLength, maxEpochReward);
     }
 
-    // Set epoch config by specifying a target time. The function calculates the corresponding
-    // epoch number and ensures the config starts at the beginning of that epoch boundary.
+    /**
+     * @notice Append a new epoch configuration aligned to a given start timestamp.
+     * @dev Calculates the corresponding epoch boundary so the config starts at that epoch.
+     * @param fromTime Target start time for the new configuration.
+     * @param epochLength Duration of each epoch in seconds.
+     * @param maxEpochReward Maximum reward for each epoch.
+     */
     function setEpochConfigByTime(uint64 fromTime, uint64 epochLength, uint256 maxEpochReward)
         external
         onlyRole(EPOCH_UPDATER_ROLE)
@@ -137,6 +180,9 @@ abstract contract EpochManager is AccessControl {
         _setEpochConfig(fromEpoch, epochLength, maxEpochReward);
     }
 
+    /**
+     * @notice Remove the most recently scheduled epoch configuration.
+     */
     function popEpochConfig() external onlyRole(EPOCH_UPDATER_ROLE) {
         if (epochConfigs.length == 0) revert EpochManagerNoConfigs();
         EpochConfig memory lastConfig = epochConfigs[epochConfigs.length - 1];
@@ -146,8 +192,10 @@ abstract contract EpochManager is AccessControl {
         );
     }
 
-    // Pop all future epoch configs that have not yet started based on the current time.
-    // This is useful to overwrite future epoch configurations.
+    /**
+     * @notice Remove all configs that start after the current block time.
+     * @dev Useful for overwriting future epoch configurations.
+     */
     function popFutureEpochConfigs() external onlyRole(EPOCH_UPDATER_ROLE) {
         if (epochConfigs.length == 0) revert EpochManagerNoConfigs();
         uint64 currentTime = uint64(block.timestamp);
@@ -162,6 +210,9 @@ abstract contract EpochManager is AccessControl {
 
     // ========================== Internal Functions ==========================
 
+    /**
+     * @dev Internal initializer invoked once to seed epoch schedule.
+     */
     function _initEpoch(uint64 _startTimestamp, uint64 _epochLength, uint256 _maxEpochReward) internal {
         if (startTimestamp != 0) revert EpochManagerAlreadyInitialized();
         if (_startTimestamp == 0 || _epochLength == 0 || _maxEpochReward == 0) revert EpochManagerInvalidInitParams();
@@ -169,6 +220,9 @@ abstract contract EpochManager is AccessControl {
         _setEpochConfig(1, _epochLength, _maxEpochReward);
     }
 
+    /**
+     * @dev Internal helper to append an epoch configuration after validation.
+     */
     function _setEpochConfig(uint32 fromEpoch, uint64 epochLength, uint256 maxEpochReward) internal {
         if (fromEpoch == 0) revert EpochManagerInvalidFromEpoch(fromEpoch);
         if (epochLength == 0) revert EpochManagerInvalidEpochLength(epochLength);
@@ -186,6 +240,11 @@ abstract contract EpochManager is AccessControl {
         emit EpochConfigSet(fromEpoch, fromTime, epochLength, maxEpochReward);
     }
 
+    /**
+     * @dev Compute start timestamp for a new config given its starting epoch number.
+     * @param fromEpoch Epoch where the new schedule begins.
+     * @return fromTime Corresponding start timestamp.
+     */
     function _computeFromTime(uint32 fromEpoch) internal view returns (uint64) {
         uint256 len = epochConfigs.length;
         if (len == 0) {
