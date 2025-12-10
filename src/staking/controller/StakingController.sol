@@ -198,9 +198,7 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
      * @notice Batch deactivate multiple provers (admin only)
      */
     function deactivateProvers(address[] calldata provers) external override onlyOwner {
-        for (uint256 i = 0; i < provers.length; i++) {
-            _changeProverState(provers[i], ProverState.Deactivated);
-        }
+        _applyState(provers, ProverState.Deactivated);
     }
 
     /**
@@ -257,9 +255,7 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
      * @notice Batch jail multiple provers (admin only)
      */
     function jailProvers(address[] calldata provers) external override onlyOwner {
-        for (uint256 i = 0; i < provers.length; i++) {
-            _changeProverState(provers[i], ProverState.Jailed);
-        }
+        _applyState(provers, ProverState.Jailed);
     }
 
     /**
@@ -889,7 +885,8 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
             uint256 pendingCommission,
             uint256 numStakers,
             uint64 joinedAt,
-            string memory name
+            string memory name,
+            string memory iconUrl
         )
     {
         ProverInfo storage proverInfo = _proverInfo[prover];
@@ -901,7 +898,8 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
             proverInfo.pendingCommission,
             proverInfo.stakers.length(),
             proverInfo.joinedAt,
-            proverInfo.name
+            proverInfo.name,
+            proverInfo.iconUrl
         );
     }
 
@@ -955,80 +953,43 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
     }
 
     /**
-     * @notice Get prover profile display fields
+     * @notice Get provers in a start-inclusive, end-exclusive index range (end=0 uses full length)
      */
-    function getProverProfile(address prover)
-        external
-        view
-        override
-        returns (string memory name, string memory iconUrl)
-    {
-        ProverInfo storage p = _proverInfo[prover];
-        return (p.name, p.iconUrl);
+    function getProvers(bool isActive, uint256 start, uint256 end) external view returns (address[] memory provers) {
+        EnumerableSet.AddressSet storage set = isActive ? activeProvers : proverList;
+        uint256 len = set.length();
+        uint256 s = start;
+        uint256 e = end == 0 ? len : end;
+        if (s >= e || e > len) revert ControllerInvalidArg();
+        uint256 rangeLength = e - s;
+        provers = new address[](rangeLength);
+        for (uint256 i = 0; i < rangeLength; i++) {
+            provers[i] = set.at(s + i);
+        }
     }
 
     /**
-     * @notice Get the list of all registered provers
-     * @return provers Array of prover addresses (includes both active and inactive provers)
+     * @notice Get total number of provers with optional active-only filtering
+     * @param isActive True to count only active provers; false to count all provers
+     * @return count Total number of provers for the selected set
      */
-    function getAllProvers() external view returns (address[] memory provers) {
-        return proverList.values();
+    function getProverCount(bool isActive) external view returns (uint256 count) {
+        return isActive ? activeProvers.length() : proverList.length();
     }
 
     /**
-     * @notice Get the list of currently active provers
-     * @return provers Array of active prover addresses only
+     * @notice Get total vault assets with optional active-only filtering
+     * @param isActive True to sum only active prover vaults; false to sum all provers
+     * @return totalAssets Total vault assets for the selected set
      */
-    function getActiveProvers() external view returns (address[] memory provers) {
-        return activeProvers.values();
-    }
-
-    /**
-     * @notice Get the total number of registered provers
-     * @return count Total number of provers (includes both active and inactive)
-     */
-    function getProverCount() external view returns (uint256 count) {
-        return proverList.length();
-    }
-
-    /**
-     * @notice Get the number of currently active provers
-     * @return count Number of active provers only
-     */
-    function getActiveProverCount() external view returns (uint256 count) {
-        return activeProvers.length();
-    }
-
-    /**
-     * @notice Get total assets currently in all vaults (excluding unstaking assets in controller)
-     * @return totalAssets Total vault assets across all provers
-     */
-    function getTotalVaultAssets() external view returns (uint256 totalAssets) {
-        uint256 proverCount = proverList.length();
-
-        for (uint256 i = 0; i < proverCount; i++) {
-            address prover = proverList.at(i);
+    function getTotalVaultAssets(bool isActive) external view returns (uint256 totalAssets) {
+        EnumerableSet.AddressSet storage set = isActive ? activeProvers : proverList;
+        uint256 count = set.length();
+        for (uint256 i = 0; i < count; i++) {
+            address prover = set.at(i);
             address vault = _proverInfo[prover].vault;
             totalAssets += IProverVault(vault).totalAssets();
         }
-
-        return totalAssets;
-    }
-
-    /**
-     * @notice Get total assets in vaults of active provers only
-     * @return totalAssets Total vault assets of active provers only
-     */
-    function getTotalActiveProverVaultAssets() external view returns (uint256 totalAssets) {
-        uint256 activeCount = activeProvers.length();
-
-        for (uint256 i = 0; i < activeCount; i++) {
-            address prover = activeProvers.at(i);
-            address vault = _proverInfo[prover].vault;
-            totalAssets += IProverVault(vault).totalAssets();
-        }
-
-        return totalAssets;
     }
 
     /**
@@ -1138,6 +1099,15 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
      */
     function _isActive(address prover) internal view returns (bool isActive) {
         return _proverInfo[prover].state == ProverState.Active;
+    }
+
+    /**
+     * @notice Internal helper to apply a state change to multiple provers
+     */
+    function _applyState(address[] calldata provers, ProverState state) internal {
+        for (uint256 i = 0; i < provers.length; i++) {
+            _changeProverState(provers[i], state);
+        }
     }
 
     // =========================================================================

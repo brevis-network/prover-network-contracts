@@ -292,6 +292,8 @@ interface IStakingController {
      * @return pendingCommission Accumulated commission waiting to be claimed
      * @return numStakers Number of stakers for this prover
      * @return joinedAt Timestamp when the prover joined
+     * @return name Prover display name
+     * @return iconUrl Prover icon URL
      */
     function getProverInfo(address prover)
         external
@@ -303,16 +305,9 @@ interface IStakingController {
             uint256 pendingCommission,
             uint256 numStakers,
             uint64 joinedAt,
-            string memory name
+            string memory name,
+            string memory iconUrl
         );
-
-    /**
-     * @notice Get prover profile display fields
-     * @param prover The prover address
-     * @return name Prover display name
-     * @return iconUrl Prover icon URL
-     */
-    function getProverProfile(address prover) external view returns (string memory name, string memory iconUrl);
 
     /**
      * @notice Get current state of a prover
@@ -336,40 +331,28 @@ interface IStakingController {
     function getProverTotalAssets(address prover) external view returns (uint256 totalAssets);
 
     /**
-     * @notice Get the list of all registered provers
-     * @return provers Array of prover addresses (includes both active and inactive provers)
+     * @notice Fetch provers with optional active filtering and index range
+     * @dev Range is start-inclusive, end-exclusive; `end=0` spans to the end of the set.
+     * @param isActive True to read from the active set; false to read from all provers
+     * @param start Start index (inclusive)
+     * @param end End index (exclusive); pass 0 to use the set length
+     * @return provers Array of prover addresses
      */
-    function getAllProvers() external view returns (address[] memory provers);
+    function getProvers(bool isActive, uint256 start, uint256 end) external view returns (address[] memory provers);
 
     /**
-     * @notice Get the list of currently active provers
-     * @return provers Array of active prover addresses only
+     * @notice Get the number of provers
+     * @param isActive When true counts only active provers; false counts all registered provers
+     * @return count Total number of provers in the selected set
      */
-    function getActiveProvers() external view returns (address[] memory provers);
+    function getProverCount(bool isActive) external view returns (uint256 count);
 
     /**
-     * @notice Get the total number of registered provers
-     * @return count Total number of provers (includes both active and inactive)
+     * @notice Get total vault assets with optional active-only filtering (excludes unstaking assets in controller)
+     * @param isActive True to sum only active prover vaults; false to sum all provers
+     * @return totalAssets Total vault assets for the selected set
      */
-    function getProverCount() external view returns (uint256 count);
-
-    /**
-     * @notice Get the number of currently active provers
-     * @return count Number of active provers only
-     */
-    function getActiveProverCount() external view returns (uint256 count);
-
-    /**
-     * @notice Get total assets currently in all vaults (excluding unstaking assets in controller)
-     * @return totalAssets Total vault assets across all provers
-     */
-    function getTotalVaultAssets() external view returns (uint256 totalAssets);
-
-    /**
-     * @notice Get total assets in vaults of active provers only
-     * @return totalAssets Total vault assets of active provers only
-     */
-    function getTotalActiveProverVaultAssets() external view returns (uint256 totalAssets);
+    function getTotalVaultAssets(bool isActive) external view returns (uint256 totalAssets);
 
     /**
      * @notice Check if a prover is eligible for work assignment

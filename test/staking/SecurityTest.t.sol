@@ -488,8 +488,8 @@ contract SecurityTest is Test {
         controller.addRewards(prover2, 100e18);
 
         // Verify rewards are isolated between vaults
-        (,,, uint256 commission1,,,) = controller.getProverInfo(prover1);
-        (,,, uint256 commission2,,,) = controller.getProverInfo(prover2);
+        (,,, uint256 commission1,,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 commission2,,,,) = controller.getProverInfo(prover2);
 
         assertEq(commission1, 10e18); // 10% of 100e18
         assertEq(commission2, 20e18); // 20% of 100e18
@@ -498,7 +498,7 @@ contract SecurityTest is Test {
         vm.prank(prover1);
         controller.claimCommission();
 
-        (,,, uint256 commission2After,,,) = controller.getProverInfo(prover2);
+        (,,, uint256 commission2After,,,,) = controller.getProverInfo(prover2);
         assertEq(commission2After, 20e18);
     }
 
@@ -628,7 +628,7 @@ contract SecurityTest is Test {
         stakingToken.approve(address(controller), 30e18);
         controller.addRewards(prover1, 30e18);
 
-        (,,, uint256 commission1,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 commission1,,,,) = controller.getProverInfo(prover1);
         assertEq(commission1, 3e18); // 10% of 30e18
 
         // Change commission rate
@@ -640,7 +640,7 @@ contract SecurityTest is Test {
         stakingToken.approve(address(controller), 50e18);
         controller.addRewards(prover1, 50e18);
 
-        (,,, uint256 totalCommission,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 totalCommission,,,,) = controller.getProverInfo(prover1);
         assertEq(totalCommission, 13e18); // 3e18 + (20% of 50e18) = 3 + 10 = 13
 
         // Claim and verify
@@ -704,7 +704,7 @@ contract SecurityTest is Test {
         controller.addRewards(prover1, 30e18);
 
         uint256 totalAssetsBefore = vault.totalAssets();
-        (,,, uint256 commissionBefore,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 commissionBefore,,,,) = controller.getProverInfo(prover1);
         uint256 proverSharesBefore = vault.balanceOf(prover1);
         uint256 stakerSharesBefore = vault.balanceOf(staker);
 
@@ -716,7 +716,7 @@ contract SecurityTest is Test {
 
         // State should remain consistent while paused
         assertEq(vault.totalAssets(), totalAssetsBefore);
-        (,,, uint256 commissionDuringPause,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 commissionDuringPause,,,,) = controller.getProverInfo(prover1);
         assertEq(commissionDuringPause, commissionBefore);
         assertEq(vault.balanceOf(prover1), proverSharesBefore);
         assertEq(vault.balanceOf(staker), stakerSharesBefore);
@@ -727,7 +727,7 @@ contract SecurityTest is Test {
 
         // State should still be consistent
         assertEq(vault.totalAssets(), totalAssetsBefore);
-        (,,, uint256 commissionAfterUnpause,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 commissionAfterUnpause,,,,) = controller.getProverInfo(prover1);
         assertEq(commissionAfterUnpause, commissionBefore);
         assertEq(vault.balanceOf(prover1), proverSharesBefore);
         assertEq(vault.balanceOf(staker), stakerSharesBefore);
@@ -735,7 +735,7 @@ contract SecurityTest is Test {
         // Operations should work normally after unpause
         vm.prank(prover1);
         controller.claimCommission();
-        (,,, uint256 finalCommission,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 finalCommission,,,,) = controller.getProverInfo(prover1);
         assertEq(finalCommission, 0);
     }
 }

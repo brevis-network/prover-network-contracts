@@ -276,6 +276,7 @@ function convertAssetsToShares(address prover, uint256 assets) external view ret
 ```solidity
 // Get multiple provers info at once  
 function getProversInfo(address[] calldata provers) external view returns (ProverDisplayInfo[] memory);
+function getProversInfo(bool isActive, uint256 start, uint256 end) external view returns (ProverDisplayInfo[] memory);
 
 // Get user portfolio across all provers
 function getUserPortfolio(address user) external view returns (UserPortfolio memory);
@@ -295,12 +296,11 @@ function unstakeDelay() external view returns (uint256 delay);
 function stakingToken() external view returns (IERC20 token);
 
 // Get prover lists (consider using StakingViewer alternatives)
-function getActiveProvers() external view returns (address[] memory provers);
-function getAllProvers() external view returns (address[] memory provers);
+// start-inclusive, end-exclusive; pass end=0 to span the full set
+function getProvers(bool isActive, uint256 start, uint256 end) external view returns (address[] memory provers);
 
-// Get number of provers
-function getProverCount() external view returns (uint256 count);
-function getActiveProverCount() external view returns (uint256 count);
+// Get number of provers (isActive=true counts only active)
+function getProverCount(bool isActive) external view returns (uint256 count);
 ```
 
 Single Value Queries

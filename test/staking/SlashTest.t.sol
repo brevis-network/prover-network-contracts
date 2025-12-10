@@ -1009,7 +1009,7 @@ contract SlashTest is Test {
         vm.stopPrank();
 
         // Verify commission was accumulated
-        (,,, uint256 pendingCommission,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 pendingCommission,,,,) = controller.getProverInfo(prover1);
         assertEq(pendingCommission, commission, "Commission should be accumulated");
         assertTrue(commission > 0, "Should have positive commission");
 
@@ -1020,7 +1020,7 @@ contract SlashTest is Test {
         controller.slash(prover1, 6000); // 60% slash
 
         // Verify commission remains unchanged after slashing
-        (,,, uint256 pendingAfterSlash,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 pendingAfterSlash,,,,) = controller.getProverInfo(prover1);
         assertEq(pendingAfterSlash, commission, "Commission should be unchanged by slashing");
 
         // Verify prover can still claim full commission
@@ -1033,7 +1033,7 @@ contract SlashTest is Test {
         assertEq(balanceAfter - balanceBefore, commission, "Balance should increase by full commission");
 
         // Verify commission is zeroed after claim
-        (,,, uint256 pendingAfterClaim,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 pendingAfterClaim,,,,) = controller.getProverInfo(prover1);
         assertEq(pendingAfterClaim, 0, "Commission should be zero after claiming");
     }
 
