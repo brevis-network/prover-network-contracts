@@ -1,12 +1,12 @@
 # Epoch Rewards
 
-Reward ingestion and distribution based on epoch windows, Brevis proofs, and capped per-epoch budgets.
+Staking reward submission and distribution based on epoch windows, Brevis proofs, and capped per-epoch budgets. `EpochRewards` accepts proof outputs and holds pending rewards, then batches them into `StakingController` via `addRewards` for actual payout.
 
 ## Table of Contents
 
 - [1. Components & Roles](#1-components--roles)
 - [2. Epoch Configuration](#2-epoch-configuration)
-- [3. Reward Ingestion Flow](#3-reward-ingestion-flow)
+- [3. Reward Submission Flow](#3-reward-submission-flow)
 - [4. Distribution Flow](#4-distribution-flow)
 - [5. Constraints & Invariants](#5-constraints--invariants)
 - [6. Admin & Operations](#6-admin--operations)
@@ -45,11 +45,16 @@ Reward ingestion and distribution based on epoch windows, Brevis proofs, and cap
 
 ---
 
-## 3. Reward Ingestion Flow
+## 3. Reward Submission Flow
 
-1. Off-chain generates Brevis proof output containing:
-   - `epoch`, `startTime`, `endTime`
-   - Sorted `(prover, amount)` pairs (20-byte address + 16-byte amount)
+1. Off-chain generates Brevis proof output (ABI-encoded bytes) containing, in order:
+   - 4 bytes: `epoch` (uint32)
+    - 8 bytes: `startTime` (uint64)
+    - 8 bytes: `endTime` (uint64)
+    - Repeating prover entries, each 36 bytes:
+      - 20 bytes: `prover` address
+      - 16 bytes: `amount` (uint128)
+   - Trailing entries may be zeroed `prover` addresses to pad the array; iteration stops at the first zero address.
 2. Caller with `REWARD_UPDATER_ROLE` calls `setRewards(proof, circuitOutput)`:
    - Validates epoch monotonicity (`epoch >= lastUpdatedEpoch`, epoch > 0)
    - Checks window match against `getEpochInfoByEpochNumber`
@@ -113,9 +118,9 @@ Key external functions (see `EpochRewards.sol` and `EpochManager.sol` for full s
 ### **EpochRewards Storage**
 - `vkHash` — verification key hash for Brevis proofs
 - `epochProverRewards[epoch][prover]` — pending reward amounts
-- `epochLastProver[epoch]` — last prover ingested for ordering check
-- `epochTotalRewards[epoch]` — cumulative rewards ingested for the epoch
-- `lastUpdatedEpoch` — last epoch successfully ingested
+- `epochLastProver[epoch]` — last prover updated for ordering check
+- `epochTotalRewards[epoch]` — cumulative rewards recorded for the epoch
+- `lastUpdatedEpoch` — last epoch successfully updated
 
 ### **EpochManager Storage**
 - `startTimestamp` — initial epoch reference time
