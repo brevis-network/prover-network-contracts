@@ -84,7 +84,7 @@ Reward ingestion and distribution based on epoch windows, Brevis proofs, and cap
 
 ## 6. Admin & Operations
 
-- **Setup**: `_init` grants roles to reward updater, sets Brevis verifier, pre-approves staking token to controller.
+- **Setup**: `_init` grants roles to reward updater and epoch updater, sets Brevis verifier, pre-approves staking token to controller.
 - **VK Updates**: Owner may update `vkHash` used by Brevis verification.
 - **Rescue**: Owner may `withdrawRewards(to, amount)` to recover stuck reward tokens.
 - **Epoch Schedule Changes**:

@@ -44,6 +44,7 @@ contract EpochRewardsTest is Test {
 
     address public admin = makeAddr("admin");
     address public rewardUpdater = makeAddr("rewardUpdater");
+    address public epochUpdater = makeAddr("epochUpdater");
     address public prover1 = address(0x1111);
     address public prover2 = address(0x2222);
     address public prover3 = address(0x3333);
@@ -64,7 +65,7 @@ contract EpochRewardsTest is Test {
         factory.init(address(controller));
 
         brevisProof = new MockBrevisProof();
-        epochRewards = new EpochRewards(address(controller), address(brevisProof), rewardUpdater);
+        epochRewards = new EpochRewards(address(controller), address(brevisProof), rewardUpdater, epochUpdater);
 
         startTime = uint64(block.timestamp);
 
@@ -74,7 +75,7 @@ contract EpochRewardsTest is Test {
         vm.stopPrank();
 
         // Initialize epoch config
-        vm.prank(rewardUpdater);
+        vm.prank(epochUpdater);
         epochRewards.initEpoch(startTime, EPOCH_LENGTH, MAX_EPOCH_REWARD);
     }
 
@@ -92,7 +93,7 @@ contract EpochRewardsTest is Test {
     }
 
     function testCannotReinitializeEpoch() public {
-        vm.prank(rewardUpdater);
+        vm.prank(epochUpdater);
         vm.expectRevert(EpochManager.EpochManagerAlreadyInitialized.selector);
         epochRewards.initEpoch(startTime + 1000, EPOCH_LENGTH, MAX_EPOCH_REWARD);
     }
@@ -122,7 +123,7 @@ contract EpochRewardsTest is Test {
         uint64 newEpochLength = 2 days;
         uint256 newMaxReward = 2000e18;
 
-        vm.prank(rewardUpdater);
+        vm.prank(epochUpdater);
         epochRewards.setEpochConfig(10, newEpochLength, newMaxReward);
 
         (uint64 epochStartTime, uint64 epochLength, uint256 maxReward) = epochRewards.getEpochInfoByEpochNumber(10);
@@ -132,7 +133,7 @@ contract EpochRewardsTest is Test {
     }
 
     function testPopEpochConfig() public {
-        vm.startPrank(rewardUpdater);
+        vm.startPrank(epochUpdater);
         epochRewards.setEpochConfig(10, 2 days, 2000e18);
         uint256 configCount = epochRewards.getEpochConfigNumber();
         assertEq(configCount, 2);

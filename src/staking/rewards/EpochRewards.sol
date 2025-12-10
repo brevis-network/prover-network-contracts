@@ -40,9 +40,10 @@ contract EpochRewards is BrevisProofApp, EpochManager {
      * @param _stakingController Staking controller that holds vaults and distributes rewards.
      * @param _brevisProof Brevis proof verifier contract address.
      * @param _rewardUpdater Account granted reward/epoch updater roles.
+     * @param _epochUpdater Account granted epoch updater role.
      */
-    constructor(address _stakingController, address _brevisProof, address _rewardUpdater) {
-        _init(_stakingController, _brevisProof, _rewardUpdater);
+    constructor(address _stakingController, address _brevisProof, address _rewardUpdater, address _epochUpdater) {
+        _init(_stakingController, _brevisProof, _rewardUpdater, _epochUpdater);
     }
 
     /**
@@ -51,23 +52,29 @@ contract EpochRewards is BrevisProofApp, EpochManager {
      * @param _stakingController Staking controller that holds vaults and distributes rewards.
      * @param _brevisProof Brevis proof verifier contract address.
      * @param _rewardUpdater Account granted reward/epoch updater roles.
+     * @param _epochUpdater Account granted epoch updater role.
      */
-    function init(address _stakingController, address _brevisProof, address _rewardUpdater) external {
-        _init(_stakingController, _brevisProof, _rewardUpdater);
+    function init(address _stakingController, address _brevisProof, address _rewardUpdater, address _epochUpdater)
+        external
+    {
+        _init(_stakingController, _brevisProof, _rewardUpdater, _epochUpdater);
         initOwner(); // requires _owner == address(0), which is only possible when it's a delegateCall
     }
 
     /**
      * @dev Shared initializer for constructor and proxy init.
-     * @param _stakingController Staking controller that holds vaults and distributes rewards.
-     * @param _brevisProof Brevis proof verifier contract address.
-     * @param _rewardUpdater Account granted reward/epoch updater roles.
      */
-    function _init(address _stakingController, address _brevisProof, address _rewardUpdater) internal {
+    function _init(address _stakingController, address _brevisProof, address _rewardUpdater, address _epochUpdater)
+        internal
+    {
         stakingController = IStakingController(_stakingController);
         brevisProof = IBrevisProof(_brevisProof);
-        _grantRole(REWARD_UPDATER_ROLE, _rewardUpdater);
-        _grantRole(EPOCH_UPDATER_ROLE, _rewardUpdater);
+        if (_rewardUpdater != address(0)) {
+            _grantRole(REWARD_UPDATER_ROLE, _rewardUpdater);
+        }
+        if (_epochUpdater != address(0)) {
+            _grantRole(EPOCH_UPDATER_ROLE, _epochUpdater);
+        }
         // Approve unlimited tokens to staking controller for reward distribution
         IERC20(stakingController.stakingToken()).approve(address(stakingController), type(uint256).max);
     }
