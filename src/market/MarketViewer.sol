@@ -123,8 +123,7 @@ contract MarketViewer is IMarketViewer {
     function getProverOverdueCount(address prover) external view returns (uint64 overdue) {
         bytes32[] memory all = brevisMarket.getProverPendingRequests(prover);
         for (uint256 i = 0; i < all.length; i++) {
-            (,,,,, uint64 deadline, bytes32 _vk, bytes32 _digest, uint32 _version) = brevisMarket.getRequest(all[i]);
-            (_vk, _digest, _version);
+            (,,,,, uint64 deadline,,,) = brevisMarket.getRequest(all[i]);
             // Items in proverPendingRequests are Pending by construction; still check deadline
             if (block.timestamp > deadline) overdue++;
         }
@@ -133,8 +132,7 @@ contract MarketViewer is IMarketViewer {
     function getSenderOverdueCount(address sender) external view returns (uint64 overdue) {
         bytes32[] memory all = brevisMarket.getSenderPendingRequests(sender);
         for (uint256 i = 0; i < all.length; i++) {
-            (,,,,, uint64 deadline, bytes32 _vk, bytes32 _digest, uint32 _version) = brevisMarket.getRequest(all[i]);
-            (_vk, _digest, _version);
+            (,,,,, uint64 deadline,,,) = brevisMarket.getRequest(all[i]);
             if (block.timestamp > deadline) overdue++;
         }
     }
@@ -147,15 +145,13 @@ contract MarketViewer is IMarketViewer {
         bytes32[] memory all = brevisMarket.getProverPendingRequests(prover);
         uint256 count;
         for (uint256 i = 0; i < all.length; i++) {
-            (,,,,, uint64 deadline, bytes32 _vk, bytes32 _digest, uint32 _version) = brevisMarket.getRequest(all[i]);
-            (_vk, _digest, _version);
+            (,,,,, uint64 deadline,,,) = brevisMarket.getRequest(all[i]);
             if (block.timestamp > deadline) count++;
         }
         reqids = new bytes32[](count);
         uint256 j;
         for (uint256 i = 0; i < all.length; i++) {
-            (,,,,, uint64 deadline, bytes32 _vk, bytes32 _digest, uint32 _version) = brevisMarket.getRequest(all[i]);
-            (_vk, _digest, _version);
+            (,,,,, uint64 deadline,,,) = brevisMarket.getRequest(all[i]);
             if (block.timestamp > deadline) {
                 reqids[j++] = all[i];
             }
@@ -170,15 +166,13 @@ contract MarketViewer is IMarketViewer {
         bytes32[] memory all = brevisMarket.getSenderPendingRequests(sender);
         uint256 count;
         for (uint256 i = 0; i < all.length; i++) {
-            (,,,,, uint64 deadline, bytes32 _vk, bytes32 _digest, uint32 _version) = brevisMarket.getRequest(all[i]);
-            (_vk, _digest, _version);
+            (,,,,, uint64 deadline,,,) = brevisMarket.getRequest(all[i]);
             if (block.timestamp > deadline) count++;
         }
         reqids = new bytes32[](count);
         uint256 j;
         for (uint256 i = 0; i < all.length; i++) {
-            (,,,,, uint64 deadline, bytes32 _vk, bytes32 _digest, uint32 _version) = brevisMarket.getRequest(all[i]);
-            (_vk, _digest, _version);
+            (,,,,, uint64 deadline,,,) = brevisMarket.getRequest(all[i]);
             if (block.timestamp > deadline) {
                 reqids[j++] = all[i];
             }
@@ -295,8 +289,7 @@ contract MarketViewer is IMarketViewer {
         uint256 m = reqids.length;
         items = new IMarketViewer.ProverPendingItem[](m);
         for (uint256 i = 0; i < m; i++) {
-            (,,,,, uint64 deadline, bytes32 _vk, bytes32 _digest, uint32 _version) = brevisMarket.getRequest(reqids[i]);
-            (_vk, _digest, _version);
+            (,,,,, uint64 deadline,,,) = brevisMarket.getRequest(reqids[i]);
             items[i] = IMarketViewer.ProverPendingItem({reqid: reqids[i], deadline: deadline});
         }
     }
@@ -310,8 +303,7 @@ contract MarketViewer is IMarketViewer {
         items = new IMarketViewer.SenderPendingItem[](m);
         for (uint256 i = 0; i < m; i++) {
             bytes32 reqid = reqids[i];
-            (,,,,, uint64 deadline, bytes32 _vk, bytes32 _digest, uint32 _version) = brevisMarket.getRequest(reqid);
-            (_vk, _digest, _version);
+            (,,,,, uint64 deadline,,,) = brevisMarket.getRequest(reqid);
             (address winner,,,) = brevisMarket.getBidders(reqid);
             items[i] = IMarketViewer.SenderPendingItem({reqid: reqid, deadline: deadline, winner: winner});
         }
