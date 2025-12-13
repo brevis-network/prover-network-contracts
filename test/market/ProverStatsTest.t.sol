@@ -76,10 +76,10 @@ contract ProverStatsTest is Test {
             nonce: uint64(1 + extraNonce),
             vk: VK,
             publicValuesDigest: PUBLIC_VALUES_DIGEST,
-            version: 0,
             imgURL: "",
             inputData: "",
             inputURL: "",
+            version: 0,
             fee: IBrevisMarket.FeeParams({maxFee: MAX_FEE, minStake: MIN_STAKE, deadline: uint64(block.timestamp + 2 days)})
         });
         reqid = keccak256(abi.encodePacked(req.nonce, req.vk, req.publicValuesDigest));

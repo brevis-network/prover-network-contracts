@@ -43,6 +43,7 @@ struct ProofRequest {
     string imgURL;               // ELF binary URL (optional)
     bytes inputData;             // Input data (alternative to URL)
     string inputURL;             // Input data URL (alternative to data)
+    uint32 version;              // PicoVerifier version to use
     FeeParams fee;               // Payment parameters
 }
 ```
@@ -74,7 +75,7 @@ struct FeeParams {
 - Eligibility re-verified with the same formula as bidding
 
 ### Phase 3: Proof Submission
-- Winner submits ZK proof (verified by PicoVerifier) before request deadline
+- Winner submits ZK proof (verified by PicoVerifier) before request deadline, using the request’s `version` to select the verifier implementation
 - Winner gets paid second-lowest bid or their own bid if only one bidder
 - Distribution: Fee -> staking rewards after protocol cut, excess -> requester
 
@@ -258,6 +259,7 @@ Key endpoints:
 - `slashWindow` - Time window for slashing after deadline
 - `protocolFeeBps` - Protocol’s cut of prover payment in basis points (0-10000)
 - `overcommitBps` - Buffer applied to a prover’s currently assigned stake when checking eligibility (0-10000). Higher values more aggressively prevent overcommitment. Default is 500 (5%).
+- `picoVerifiers[version]` - Mapping of verifier versions to deployed PicoVerifier contracts; requests must specify a version that is configured
 
 ### Admin Functions
 - Update parameters

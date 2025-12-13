@@ -76,10 +76,10 @@ contract MarketViewerTest is Test {
             nonce: uint64(uint256(keccak256(abi.encodePacked(block.timestamp, deadlineDelta)))),
             vk: VK,
             publicValuesDigest: PUBLIC_VALUES_DIGEST,
-            version: 0,
             imgURL: "",
             inputData: "",
             inputURL: "",
+            version: 0,
             fee: IBrevisMarket.FeeParams({
                 maxFee: MAX_FEE,
                 minStake: MIN_STAKE,
