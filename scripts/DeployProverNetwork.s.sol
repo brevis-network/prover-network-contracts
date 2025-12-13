@@ -14,6 +14,7 @@ import "../src/market/BrevisMarket.sol";
 import "../src/market/MarketViewer.sol";
 import "../src/staking/interfaces/IStakingController.sol";
 import "../src/pico/IPicoVerifier.sol";
+import "../src/staking/rewards/EpochRewards.sol";
 
 /**
  * @title DeployProverNetwork
@@ -33,6 +34,8 @@ contract DeployProverNetwork is Script {
     address public stakingViewer;
     address public brevisMarketProxy;
     address public marketViewer;
+    address public epochRewardsProxy;
+    address public epochRewardsImpl;
     address public stakingControllerImpl;
     address public vaultFactoryImpl;
     address public brevisMarketImpl;
@@ -61,6 +64,7 @@ contract DeployProverNetwork is Script {
         _deployStakingSystem();
         _deployBrevisMarket();
         _deployMarketViewer();
+        _deployEpochRewards();
         _connectSystems();
 
         vm.stopBroadcast();
@@ -84,6 +88,7 @@ contract DeployProverNetwork is Script {
         _deployStakingSystem();
         _deployBrevisMarket();
         _deployMarketViewer();
+        _deployEpochRewards();
         _connectSystems();
 
         vm.stopBroadcast();
@@ -98,7 +103,7 @@ contract DeployProverNetwork is Script {
         require(existingProxyAdmin != address(0), "config.proxyAdmin.address is zero");
 
         console.log("Using existing ProxyAdmin:", existingProxyAdmin);
-        sharedProxyAdmin = ProxyAdmin(existingProxyAdmin); 
+        sharedProxyAdmin = ProxyAdmin(existingProxyAdmin);
         if (existingProxyAdmin.code.length > 0) {
             console.log("ProxyAdmin owner:", sharedProxyAdmin.owner());
         }
@@ -268,6 +273,45 @@ contract DeployProverNetwork is Script {
         console.log("BrevisMarket Implementation:", brevisMarketImpl);
         console.log("BrevisMarket Proxy:", brevisMarketProxy);
         console.log("MarketViewer:", marketViewer);
+        console.log("EpochRewards Implementation:", epochRewardsImpl);
+        console.log("EpochRewards Proxy:", epochRewardsProxy);
         console.log("\nTransfer ProxyAdmin ownership to multisig for production!");
+    }
+
+    function _deployEpochRewards() internal {
+        console.log("\n=== EPOCH REWARDS DEPLOYMENT ===");
+
+        // Resolve required params
+        require(_json.keyExists("$.epochRewards.brevisProof"), "config.epochRewards.brevisProof missing");
+        require(_json.keyExists("$.epochRewards.rewardUpdater"), "config.epochRewards.rewardUpdater missing");
+        require(_json.keyExists("$.epochRewards.epochUpdater"), "config.epochRewards.epochUpdater missing");
+
+        address stakingControllerAddr = stakingControllerProxy;
+        address brevisProof = _json.readAddress("$.epochRewards.brevisProof");
+        address rewardUpdater = _json.readAddress("$.epochRewards.rewardUpdater");
+        address epochUpdater = _json.readAddress("$.epochRewards.epochUpdater");
+
+        // Deploy EpochRewards implementation
+        console.log("\n3a. Deploying EpochRewards implementation...");
+        epochRewardsImpl = address(new EpochRewards(stakingControllerAddr, brevisProof, rewardUpdater, epochUpdater));
+        console.log("EpochRewards implementation:", epochRewardsImpl);
+
+        bytes memory epochRewardsInitData = abi.encodeWithSignature(
+            "init(address,address,address,address)", stakingControllerAddr, brevisProof, rewardUpdater, epochUpdater
+        );
+
+        console.log("\n3b. Deploying EpochRewards proxy...");
+        TransparentUpgradeableProxy epochRewardsProxy_ =
+            new TransparentUpgradeableProxy(epochRewardsImpl, address(sharedProxyAdmin), epochRewardsInitData);
+        epochRewardsProxy = address(epochRewardsProxy_);
+        console.log("EpochRewards proxy:", epochRewardsProxy);
+
+        // Optional VK hash configuration
+        if (_json.keyExists("$.epochRewards.vkHash")) {
+            bytes32 vkHash = _json.readBytes32("$.epochRewards.vkHash");
+            console.log("Setting vkHash:");
+            console.logBytes32(vkHash);
+            EpochRewards(epochRewardsProxy).setVkHash(vkHash);
+        }
     }
 }

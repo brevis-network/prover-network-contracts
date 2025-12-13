@@ -80,11 +80,24 @@ For advanced or partial rollouts, you can deploy components separately. These co
    ```bash
    forge script scripts/PicoVerifier.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
    ```
+- SimpleBrevisProof:
+   ```bash
+   forge script scripts/SimpleBrevisProof.s.sol --rpc-url $RPC_URL --broadcast -vv
+   ```
+- EpochRewards (upgradeable via Transparent Proxy):
+   ```bash
+   forge script scripts/EpochRewards.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
+   ```
+   - To deploy implementation only (for upgrades), add in `config.json`:
+     ```json
+     { "epochRewards": { "implementationOnly": true } }
+     ```
+     The script will deploy and print the new implementation address without creating a proxy.
 
 Notes:
 - `DeployProverNetwork.s.sol` requires `proxyAdmin.address` in `config.json` and never auto-deploys a ProxyAdmin.
 - `MarketViewer.s.sol` requires `addresses.brevisMarket` in `config.json` (the BrevisMarket proxy/address to read from).
-- Component-only scripts may deploy a new ProxyAdmin if one is not provided (check each script’s header if needed).
+- Upgradeable component scripts (`VaultFactory.s.sol`, `StakingController.s.sol`, `BrevisMarket.s.sol`, `EpochRewards.s.sol`) auto-deploy a ProxyAdmin if `proxyAdmin.address` is missing; the full-network script always uses an existing one.
 
 ## 4) After deployment (Etherscan + MetaMask)
 

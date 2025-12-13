@@ -91,6 +91,18 @@ interface IStakingViewer {
         returns (ProverDisplayInfo[] memory proversInfo);
 
     /**
+     * @notice Get display information for provers in a specified range and state
+     * @param isActive Filter for active or inactive provers
+     * @param start Starting index (inclusive)
+     * @param end End index (exclusive); pass 0 to use the set length
+     * @return proversInfo Array of prover display information
+     */
+    function getProversInfo(bool isActive, uint256 start, uint256 end)
+        external
+        view
+        returns (ProverDisplayInfo[] memory proversInfo);
+
+    /**
      * @notice Get top provers by total assets
      * @param limit Maximum number of provers to return
      * @return proversInfo Array of top provers sorted by total assets (descending)

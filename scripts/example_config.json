@@ -23,6 +23,14 @@
     "addresses": {
         "stakingController": "",
         "vaultFactory": "",
-        "brevisMarket": ""
+        "brevisMarket": "",
+        "epochRewards": ""
+    },
+    "epochRewards": {
+        "brevisProof": "0x0000000000000000000000000000000000000000",
+        "rewardUpdater": "0x0000000000000000000000000000000000000000",
+        "epochUpdater": "0x0000000000000000000000000000000000000000",
+        "vkHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "implementationOnly": false
     }
 }

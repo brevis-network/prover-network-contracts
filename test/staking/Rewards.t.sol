@@ -83,7 +83,7 @@ contract RewardsTest is Test {
         controller.setCommissionRate(address(0), newRate); // Update default rate
 
         // Verify update
-        (,, uint64 commissionRate,,,,) = controller.getProverInfo(prover1);
+        (,, uint64 commissionRate,,,,,) = controller.getProverInfo(prover1);
         assertEq(commissionRate, newRate);
     }
 
@@ -356,7 +356,7 @@ contract RewardsTest is Test {
         assertEq(balanceAfter - balanceBefore, claimed, "Balance should increase correctly");
 
         // Verify no pending commission left
-        (,,, uint256 pendingCommission,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 pendingCommission,,,,) = controller.getProverInfo(prover1);
         assertEq(pendingCommission, 0, "No pending commission should remain");
     }
 
@@ -422,7 +422,7 @@ contract RewardsTest is Test {
         assertEq(firstToStakers, firstReward - expectedFirstCommission);
 
         // Check pending commission
-        (,,, uint256 pendingAfterFirst,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 pendingAfterFirst,,,,) = controller.getProverInfo(prover1);
         assertEq(pendingAfterFirst, expectedFirstCommission);
 
         // Add second rewards
@@ -438,7 +438,7 @@ contract RewardsTest is Test {
         assertEq(secondToStakers, secondReward - expectedSecondCommission);
 
         // Check accumulated pending commission
-        (,,, uint256 pendingAfterSecond,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 pendingAfterSecond,,,,) = controller.getProverInfo(prover1);
         assertEq(pendingAfterSecond, expectedFirstCommission + expectedSecondCommission);
 
         // Claim commission and verify transfer and zeroing
@@ -451,8 +451,93 @@ contract RewardsTest is Test {
         assertEq(balanceAfter - balanceBefore, claimed);
 
         // Verify pending commission is zeroed
-        (,,, uint256 pendingAfterClaim,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 pendingAfterClaim,,,,) = controller.getProverInfo(prover1);
         assertEq(pendingAfterClaim, 0);
+    }
+
+    function testBatchAddRewardsDistributesAcrossProvers() public {
+        // Initialize two provers with equal commission rates
+        vm.startPrank(prover1);
+        stakingToken.approve(address(controller), MIN_SELF_STAKE);
+        controller.initializeProver(1000);
+        vm.stopPrank();
+
+        vm.startPrank(prover2);
+        stakingToken.approve(address(controller), MIN_SELF_STAKE);
+        controller.initializeProver(1000);
+        vm.stopPrank();
+
+        // Provide external stakes so donation guard cannot trigger
+        vm.startPrank(staker1);
+        stakingToken.approve(address(controller), 200e18);
+        controller.stake(prover1, 200e18);
+        vm.stopPrank();
+
+        vm.startPrank(staker2);
+        stakingToken.approve(address(controller), 200e18);
+        controller.stake(prover2, 200e18);
+        vm.stopPrank();
+
+        address vault1 = controller.getProverVault(prover1);
+        address vault2 = controller.getProverVault(prover2);
+        uint256 vault1AssetsBefore = IProverVault(vault1).totalAssets();
+        uint256 vault2AssetsBefore = IProverVault(vault2).totalAssets();
+
+        address[] memory provers = new address[](2);
+        provers[0] = prover1;
+        provers[1] = prover2;
+
+        uint256 rewardOne = 120e18;
+        uint256 rewardTwo = 80e18;
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = rewardOne;
+        amounts[1] = rewardTwo;
+
+        vm.startPrank(rewardPayer);
+        stakingToken.approve(address(controller), rewardOne + rewardTwo);
+        controller.addRewards(provers, amounts);
+        vm.stopPrank();
+
+        uint256 expectedCommission1 = (rewardOne * 1000) / 10000;
+        uint256 expectedCommission2 = (rewardTwo * 1000) / 10000;
+
+        (,,, uint256 pendingOne,,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 pendingTwo,,,,) = controller.getProverInfo(prover2);
+        assertEq(pendingOne, expectedCommission1, "prover1 commission should accumulate");
+        assertEq(pendingTwo, expectedCommission2, "prover2 commission should accumulate");
+
+        uint256 vault1AssetsAfter = IProverVault(vault1).totalAssets();
+        uint256 vault2AssetsAfter = IProverVault(vault2).totalAssets();
+        assertEq(
+            vault1AssetsAfter,
+            vault1AssetsBefore + rewardOne - expectedCommission1,
+            "prover1 vault should receive net rewards"
+        );
+        assertEq(
+            vault2AssetsAfter,
+            vault2AssetsBefore + rewardTwo - expectedCommission2,
+            "prover2 vault should receive net rewards"
+        );
+    }
+
+    function testBatchAddRewardsLengthMismatchReverts() public {
+        vm.startPrank(prover1);
+        stakingToken.approve(address(controller), MIN_SELF_STAKE);
+        controller.initializeProver(1000);
+        vm.stopPrank();
+
+        address[] memory provers = new address[](2);
+        provers[0] = prover1;
+        provers[1] = prover2; // unused but ensures array mismatch
+
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = 100e18;
+
+        vm.startPrank(rewardPayer);
+        stakingToken.approve(address(controller), 100e18);
+        vm.expectRevert(IStakingController.ControllerInvalidArg.selector);
+        controller.addRewards(provers, amounts);
+        vm.stopPrank();
     }
 
     function testCommissionRateChangeOnlyAffectsSubsequentRewards() public {
@@ -495,7 +580,7 @@ contract RewardsTest is Test {
         assertEq(secondCommission, expectedSecondCommission);
 
         // Verify total pending commission uses different rates per call
-        (,,, uint256 totalPending,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 totalPending,,,,) = controller.getProverInfo(prover1);
         assertEq(totalPending, expectedFirstCommission + expectedSecondCommission);
     }
 
@@ -537,7 +622,7 @@ contract RewardsTest is Test {
         controller.initializeProver(1000); // 10% commission
 
         // Verify initial state - no pending commission
-        (,,, uint256 initialPending,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 initialPending,,,,) = controller.getProverInfo(prover1);
         assertEq(initialPending, 0);
 
         // Claim commission when none exists
@@ -551,7 +636,7 @@ contract RewardsTest is Test {
         assertEq(balanceAfter, balanceBefore);
 
         // Verify no state changes occurred
-        (,,, uint256 pendingAfterClaim,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 pendingAfterClaim,,,,) = controller.getProverInfo(prover1);
         assertEq(pendingAfterClaim, 0);
     }
 
@@ -1051,7 +1136,7 @@ contract RewardsTest is Test {
         }
 
         // Final commission claim should have remaining amount
-        (,,, uint256 finalPendingCommission,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 finalPendingCommission,,,,) = controller.getProverInfo(prover1);
         assertTrue(finalPendingCommission > 0, "Should have pending commission from unclaimed periods");
 
         uint256 finalBalanceBefore = stakingToken.balanceOf(prover1);
@@ -1144,7 +1229,7 @@ contract RewardsTest is Test {
         controller.completeUnstake(prover1);
 
         // Prover should still be able to claim accumulated commission
-        (,,, uint256 pendingCommission,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 pendingCommission,,,,) = controller.getProverInfo(prover1);
         assertTrue(pendingCommission > 0, "Prover should have pending commission even after exit");
 
         uint256 proverBalanceBefore = stakingToken.balanceOf(prover1);
@@ -1218,7 +1303,7 @@ contract RewardsTest is Test {
         }
 
         // Final verification
-        (,,, uint256 pendingCommission,,,) = controller.getProverInfo(prover1);
+        (,,, uint256 pendingCommission,,,,) = controller.getProverInfo(prover1);
         uint256 expectedTotalCommission = (totalRewardsAdded * 750) / 10000;
 
         // Account for already claimed commission
