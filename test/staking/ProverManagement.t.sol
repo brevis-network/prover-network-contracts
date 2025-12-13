@@ -84,6 +84,7 @@ contract ProverManagementTest is Test {
             uint256 pendingCommission,
             uint256 numStakers,
             uint64 joinedAt,
+            ,
         ) = controller.getProverInfo(prover1);
 
         assertEq(vault, vaultAddress);
@@ -121,7 +122,7 @@ contract ProverManagementTest is Test {
 
     function testProverEnumeration() public {
         // Initially no active provers
-        address[] memory activeProvers = controller.getActiveProvers();
+        address[] memory activeProvers = _getProvers(true);
         assertEq(activeProvers.length, 0);
 
         // Setup prover approvals
@@ -135,7 +136,7 @@ contract ProverManagementTest is Test {
         controller.initializeProver(1000);
 
         // Check enumeration
-        activeProvers = controller.getActiveProvers();
+        activeProvers = _getProvers(true);
         assertEq(activeProvers.length, 1);
         assertEq(activeProvers[0], prover1);
 
@@ -144,7 +145,7 @@ contract ProverManagementTest is Test {
         controller.initializeProver(1500);
 
         // Check enumeration
-        activeProvers = controller.getActiveProvers();
+        activeProvers = _getProvers(true);
         assertEq(activeProvers.length, 2);
         assertTrue(activeProvers[0] == prover1 || activeProvers[1] == prover1);
         assertTrue(activeProvers[0] == prover2 || activeProvers[1] == prover2);
@@ -154,7 +155,7 @@ contract ProverManagementTest is Test {
         controller.deactivateProver(prover1);
 
         // Check enumeration after deactivation
-        activeProvers = controller.getActiveProvers();
+        activeProvers = _getProvers(true);
         assertEq(activeProvers.length, 1);
         assertEq(activeProvers[0], prover2);
     }
@@ -320,8 +321,8 @@ contract ProverManagementTest is Test {
         vm.stopPrank();
 
         // Verify prover is in lists initially
-        address[] memory allProvers = controller.getAllProvers();
-        address[] memory activeProvers = controller.getActiveProvers();
+        address[] memory allProvers = _getProvers(false);
+        address[] memory activeProvers = _getProvers(true);
         assertEq(allProvers.length, 1);
         assertEq(activeProvers.length, 0); // Should be 0 since prover auto-deactivated when exiting
         assertEq(allProvers[0], prover1);
@@ -341,8 +342,8 @@ contract ProverManagementTest is Test {
         controller.retireProver(prover1);
 
         // Verify prover is removed from lists
-        allProvers = controller.getAllProvers();
-        activeProvers = controller.getActiveProvers();
+        allProvers = _getProvers(false);
+        activeProvers = _getProvers(true);
         assertEq(allProvers.length, 0);
         assertEq(activeProvers.length, 0);
 
@@ -358,6 +359,7 @@ contract ProverManagementTest is Test {
             uint256 infoPendingCommission,
             uint256 infoNumStakers,
             uint64 joinedAt,
+            ,
         ) = controller.getProverInfo(prover1);
 
         assertEq(uint256(infoState), uint256(IStakingController.ProverState.Null));
@@ -392,7 +394,7 @@ contract ProverManagementTest is Test {
         vm.prank(admin);
         stakingToken.transfer(vault, 1 ether);
 
-        (,,,, uint256 numStakers,,) = controller.getProverInfo(prover1);
+        (,,,, uint256 numStakers,,,) = controller.getProverInfo(prover1);
         assertEq(numStakers, 0);
         uint256 treasuryBefore = controller.treasuryPool();
 
@@ -808,5 +810,11 @@ contract ProverManagementTest is Test {
         skip(INITIAL_UNBOND_DELAY + 1);
         controller.completeUnstake(prover);
         vm.stopPrank();
+    }
+
+    function _getProvers(bool isActive) internal view returns (address[] memory provers) {
+        uint256 count = controller.getProverCount(isActive);
+        if (count == 0) return new address[](0);
+        provers = controller.getProvers(isActive, 0, count);
     }
 }

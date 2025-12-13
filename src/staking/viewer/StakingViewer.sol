@@ -26,19 +26,19 @@ contract StakingViewer is IStakingViewer {
      * @notice Get comprehensive system overview
      */
     function getSystemOverview() external view override returns (SystemOverview memory overview) {
-        overview.totalVaultAssets = stakingController.getTotalVaultAssets();
-        overview.totalActiveVaultAssets = stakingController.getTotalActiveProverVaultAssets();
-        overview.totalProvers = stakingController.getProverCount();
-        overview.activeProvers = stakingController.getActiveProverCount();
+        overview.totalVaultAssets = stakingController.getTotalVaultAssets(false);
+        overview.totalActiveVaultAssets = stakingController.getTotalVaultAssets(true);
+        overview.totalProvers = stakingController.getProverCount(false);
+        overview.activeProvers = stakingController.getProverCount(true);
         overview.minSelfStake = stakingController.minSelfStake();
         overview.unstakeDelay = stakingController.unstakeDelay();
         overview.stakingToken = address(stakingController.stakingToken());
 
         // Calculate total unique stakers across all provers
-        address[] memory allProvers = stakingController.getAllProvers();
+        address[] memory allProvers = _getProverList(false);
         uint256 totalStakers = 0;
         for (uint256 i = 0; i < allProvers.length; i++) {
-            (,,,, uint256 numStakers,,) = stakingController.getProverInfo(allProvers[i]);
+            (,,,, uint256 numStakers,,,) = stakingController.getProverInfo(allProvers[i]);
             totalStakers += numStakers;
         }
         overview.totalStakers = totalStakers;
@@ -48,7 +48,7 @@ contract StakingViewer is IStakingViewer {
      * @notice Get display information for all active provers
      */
     function getAllActiveProversInfo() external view override returns (ProverDisplayInfo[] memory proversInfo) {
-        address[] memory activeProvers = stakingController.getActiveProvers();
+        address[] memory activeProvers = _getProverList(true);
         return _getProversDisplayInfo(activeProvers);
     }
 
@@ -65,10 +65,23 @@ contract StakingViewer is IStakingViewer {
     }
 
     /**
+     * @notice Get display information for provers in a specific range
+     */
+    function getProversInfo(bool isActive, uint256 start, uint256 end)
+        external
+        view
+        override
+        returns (ProverDisplayInfo[] memory proversInfo)
+    {
+        address[] memory provers = stakingController.getProvers(isActive, start, end);
+        return _getProversDisplayInfo(provers);
+    }
+
+    /**
      * @notice Get top provers by total assets
      */
     function getTopProvers(uint256 limit) external view override returns (ProverDisplayInfo[] memory proversInfo) {
-        address[] memory allProvers = stakingController.getAllProvers();
+        address[] memory allProvers = _getProverList(false);
         ProverDisplayInfo[] memory allProversInfo = _getProversDisplayInfo(allProvers);
 
         // Sort by total assets (quicksort - O(n log n) average case)
@@ -127,7 +140,7 @@ contract StakingViewer is IStakingViewer {
      */
     function getUserPortfolio(address user) external view override returns (UserPortfolio memory portfolio) {
         // Get all provers and check which ones the user has stakes with
-        address[] memory allProvers = stakingController.getAllProvers();
+        address[] memory allProvers = _getProverList(false);
         UserStakeInfo[] memory tempStakes = new UserStakeInfo[](allProvers.length);
         uint256 actualStakeCount = 0;
 
@@ -190,7 +203,7 @@ contract StakingViewer is IStakingViewer {
         override
         returns (address[] memory provers, uint256[] memory amounts, uint256 totalReady)
     {
-        address[] memory allProvers = stakingController.getAllProvers();
+        address[] memory allProvers = _getProverList(false);
         address[] memory tempProvers = new address[](allProvers.length);
         uint256[] memory tempAmounts = new uint256[](allProvers.length);
         uint256 count = 0;
@@ -287,6 +300,12 @@ contract StakingViewer is IStakingViewer {
     // UTILITY FUNCTIONS
     // =========================================================================
 
+    function _getProverList(bool isActive) internal view returns (address[] memory provers) {
+        uint256 count = stakingController.getProverCount(isActive);
+        if (count == 0) return new address[](0);
+        provers = stakingController.getProvers(isActive, 0, count);
+    }
+
     /**
      * @notice Get stakers count for multiple provers
      */
@@ -298,7 +317,7 @@ contract StakingViewer is IStakingViewer {
     {
         stakerCounts = new uint256[](provers.length);
         for (uint256 i = 0; i < provers.length; i++) {
-            (,,,, uint256 numStakers,,) = stakingController.getProverInfo(provers[i]);
+            (,,,, uint256 numStakers,,,) = stakingController.getProverInfo(provers[i]);
             stakerCounts[i] = numStakers;
         }
     }
@@ -334,7 +353,8 @@ contract StakingViewer is IStakingViewer {
             uint256 pendingCommission,
             uint256 numStakers,
             uint64 joinedAt,
-            string memory proverName
+            string memory proverName,
+            string memory iconUrl
         ) = stakingController.getProverInfo(prover);
 
         // Set basic fields
@@ -365,9 +385,8 @@ contract StakingViewer is IStakingViewer {
             info.commissionRates[j] = ProverCommissionInfo({source: sources[j], rate: rates[j]});
         }
 
-        // Attach profile info (name via getProverInfo, iconUrl via getProverProfile)
+        // Attach profile info from controller
         info.name = proverName;
-        (, string memory iconUrl) = stakingController.getProverProfile(prover);
         info.iconUrl = iconUrl;
     }
 

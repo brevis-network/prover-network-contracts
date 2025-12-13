@@ -423,12 +423,27 @@ contract DeploymentScriptTest is Test {
         string memory stakingJson = _stakingJson(base, tokenStr);
         string memory marketJson = _marketJson(base, picoStr, withOptional);
 
+        // EpochRewards JSON
+        string memory epochRewardsJson = _epochRewardsJson(base, picoStr, testDeployer);
+
         // ProxyAdmin JSON
         string memory proxyAdminJson = string.concat("{", '"address":"', proxyAdminStr, '"', "}");
 
         // Build final JSON using base values + dynamic addresses
         string memory json = string.concat(
-            "{", '"proxyAdmin":', proxyAdminJson, ",", '"staking":', stakingJson, ",", '"market":', marketJson, "}"
+            "{",
+            '"proxyAdmin":',
+            proxyAdminJson,
+            ",",
+            '"staking":',
+            stakingJson,
+            ",",
+            '"market":',
+            marketJson,
+            ",",
+            '"epochRewards":',
+            epochRewardsJson,
+            "}"
         );
         return json;
     }
@@ -489,6 +504,33 @@ contract DeploymentScriptTest is Test {
             ",",
             '"overcommitBps":',
             overcommitBpsStr,
+            "}"
+        );
+    }
+
+    function _epochRewardsJson(string memory base, string memory brevisProofStr, address updater)
+        internal
+        pure
+        returns (string memory)
+    {
+        // Use the same address for rewardUpdater and epochUpdater in tests
+        string memory updaterStr = vm.toString(updater);
+        string memory vkHashStr = stdJson.readString(base, "$.epochRewards.vkHash");
+
+        return string.concat(
+            "{",
+            '"brevisProof":"',
+            brevisProofStr,
+            '",',
+            '"rewardUpdater":"',
+            updaterStr,
+            '",',
+            '"epochUpdater":"',
+            updaterStr,
+            '",',
+            '"vkHash":"',
+            vkHashStr,
+            '"',
             "}"
         );
     }
