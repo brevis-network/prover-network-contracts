@@ -23,9 +23,9 @@ contract ProverStatsTest is Test {
 
     uint64 public constant BIDDING_DURATION = 1 hours;
     uint64 public constant REVEAL_DURATION = 30 minutes;
-    uint256 public constant MIN_MAX_FEE = 1e12;
-    uint256 public constant MAX_FEE = 1e18;
-    uint256 public constant MIN_STAKE = 1e18;
+    uint96 public constant MIN_MAX_FEE = 1e12;
+    uint96 public constant MAX_FEE = 1e18;
+    uint96 public constant MIN_STAKE = 1e18;
 
     bytes32 public constant VK = keccak256("stats_epoch_vk");
     bytes32 public constant PUBLIC_VALUES_DIGEST = keccak256("stats_epoch_public_values");
@@ -79,6 +79,7 @@ contract ProverStatsTest is Test {
             imgURL: "",
             inputData: "",
             inputURL: "",
+            version: 0,
             fee: IBrevisMarket.FeeParams({maxFee: MAX_FEE, minStake: MIN_STAKE, deadline: uint64(block.timestamp + 2 days)})
         });
         reqid = keccak256(abi.encodePacked(req.nonce, req.vk, req.publicValuesDigest));
@@ -447,8 +448,9 @@ contract ProverStatsTest is Test {
         market.reveal(reqid, 5e17, 123);
 
         // Let deadline pass, then refund
-        (,,,, uint256 minStake, uint64 deadline,,) = market.getRequest(reqid);
-        minStake; // silence
+        (,,,, uint256 minStake, uint64 deadline, bytes32 _vk, bytes32 _digest, uint32 _version) =
+            market.getRequest(reqid);
+        (minStake, _vk, _digest, _version);
         vm.warp(deadline + 1);
         market.refund(reqid);
 

@@ -28,6 +28,7 @@ interface IMarketViewer {
         uint64 deadline;
         bytes32 vk;
         bytes32 publicValuesDigest;
+        uint32 version;
     }
 
     /**

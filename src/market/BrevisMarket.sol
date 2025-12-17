@@ -31,8 +31,9 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         FeeParams fee;
         bytes32 vk;
         bytes32 publicValuesDigest; // sha256(publicValues) & bytes32(uint256((1 << 253) - 1))
+        uint32 version; // version of the verifier to use
+        uint32 bidCount; // number of bids submitted (to track if any bids were made)
         mapping(address => bytes32) bids; // received sealed bids by provers
-        uint64 bidCount; // number of bids submitted (to track if any bids were made)
         Bidder winner; // winning bidder (lowest fee)
         Bidder second; // second-lowest bidder (for reverse second-price auction - winner pays second-lowest bid)
     }
@@ -62,14 +63,15 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     uint256 public overcommitBps; // reserve percentage applied to assignedStake when checking eligibility
 
     // Protocol treasury
-    uint256 public protocolFeeBalance; // accumulated protocol fees
+    uint256 public cumulativeProtocolFee; // total protocol fees ever collected
+    uint256 public withdrawnProtocolFee; // total protocol fees withdrawn
 
     // External contracts
-    IPicoVerifier public picoVerifier; // address of the PicoVerifier contract
+    mapping(uint32 => IPicoVerifier) public picoVerifiers; // versioned PicoVerifier contracts
     IERC20 public feeToken; // ERC20 token used for fees
 
     // Core data structures
-    mapping(bytes32 => ReqState) public requests; // proof req id -> state
+    mapping(bytes32 => ReqState) public override requests; // proof req id -> state
 
     // Unified cumulative global stats per epochId
     // Each entry holds cumulative counters since genesis (carried forward on first use per epoch, then mutated in-place)
@@ -172,7 +174,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
             revert MarketInvalidStakingController();
         }
 
-        picoVerifier = _picoVerifier;
+        picoVerifiers[0] = _picoVerifier;
         stakingController = _stakingController;
         feeToken = stakingController.stakingToken();
         biddingPhaseDuration = _biddingPhaseDuration;
@@ -206,21 +208,26 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         if (req.fee.deadline < block.timestamp + biddingPhaseDuration + revealPhaseDuration) {
             revert MarketDeadlineBeforeRevealPhaseEnd();
         }
-        if (req.fee.maxFee < minMaxFee) revert MarketMaxFeeTooLow(req.fee.maxFee, minMaxFee);
-        if (maxMaxFee > 0 && req.fee.maxFee > maxMaxFee) revert MarketMaxFeeTooHigh(req.fee.maxFee, maxMaxFee);
+        uint256 maxFee = uint256(req.fee.maxFee);
+        if (maxFee < minMaxFee) revert MarketMaxFeeTooLow(maxFee, minMaxFee);
+        if (maxMaxFee > 0 && maxFee > maxMaxFee) revert MarketMaxFeeTooHigh(maxFee, maxMaxFee);
 
         uint256 minSelfStake = stakingController.minSelfStake();
-        if (req.fee.minStake < minSelfStake) {
-            revert MarketMinStakeTooLow(req.fee.minStake, minSelfStake);
+        uint256 minStake = uint256(req.fee.minStake);
+        if (minStake < minSelfStake) {
+            revert MarketMinStakeTooLow(minStake, minSelfStake);
         }
 
         bytes32 reqid = keccak256(abi.encodePacked(req.nonce, req.vk, req.publicValuesDigest));
 
         ReqState storage reqState = requests[reqid];
         if (reqState.timestamp != 0) revert MarketRequestAlreadyExists(reqid);
+        if (address(picoVerifiers[req.version]) == address(0)) {
+            revert MarketVerifierVersionNotSet(req.version);
+        }
 
         // Transfer the fee tokens from the caller to this contract
-        feeToken.safeTransferFrom(msg.sender, address(this), req.fee.maxFee);
+        feeToken.safeTransferFrom(msg.sender, address(this), maxFee);
 
         reqState.status = ReqStatus.Pending;
         reqState.timestamp = uint64(block.timestamp);
@@ -228,6 +235,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         reqState.fee = req.fee;
         reqState.vk = req.vk;
         reqState.publicValuesDigest = req.publicValuesDigest;
+        reqState.version = req.version;
 
         // Update global stats: track total requests
         GlobalStats storage gs = _currentCumulativeGlobalStats();
@@ -262,7 +270,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         // Get the effective prover (the prover the caller is acting on behalf of)
         address prover = _getEffectiveProver(msg.sender);
         // Check eligibility considering existing pending obligations
-        uint256 requiredForBid = req.fee.minStake + ((assignedStake[prover] * overcommitBps) / BPS_DENOMINATOR);
+        uint256 requiredForBid = uint256(req.fee.minStake) + ((assignedStake[prover] * overcommitBps) / BPS_DENOMINATOR);
         _requireProverEligible(prover, requiredForBid);
 
         // Increment bid count only for new bids
@@ -311,7 +319,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         // Get the effective prover (the prover the caller is acting on behalf of)
         address prover = _getEffectiveProver(msg.sender);
         // Check eligibility considering existing pending obligations
-        uint256 requiredForReveal = req.fee.minStake + ((assignedStake[prover] * overcommitBps) / BPS_DENOMINATOR);
+        uint256 requiredForReveal =
+            uint256(req.fee.minStake) + ((assignedStake[prover] * overcommitBps) / BPS_DENOMINATOR);
         _requireProverEligible(prover, requiredForReveal);
 
         // Verify the revealed bid matches the hash
@@ -357,8 +366,10 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
         if (req.status != ReqStatus.Pending) revert MarketInvalidRequestStatus(req.status);
 
-        // Verify the proof
-        picoVerifier.verifyPicoProof(req.vk, req.publicValuesDigest, proof);
+        // Verify the proof against the configured verifier version
+        IPicoVerifier verifier = picoVerifiers[req.version];
+        if (address(verifier) == address(0)) revert MarketVerifierVersionNotSet(req.version);
+        verifier.verifyPicoProof(req.vk, req.publicValuesDigest, proof);
 
         // Update request state. Proof data is emitted via event for off-chain indexing.
         req.status = ReqStatus.Fulfilled;
@@ -366,10 +377,10 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         _releaseObligation(req);
 
         // Calculate and distribute fees
-        uint256 actualFee = req.second.fee; // Reverse second-price auction: winner pays second-lowest bid
+        uint256 actualFee = uint256(req.second.fee); // Reverse second-price auction: winner pays second-lowest bid
         if (req.second.prover == address(0)) {
             // Only one bidder - use their bid
-            actualFee = req.winner.fee;
+            actualFee = uint256(req.winner.fee);
         }
 
         // Calculate protocol fee
@@ -378,7 +389,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
         // Accumulate protocol fee
         if (protocolFee > 0) {
-            protocolFeeBalance += protocolFee;
+            cumulativeProtocolFee += protocolFee;
         }
 
         // Send remaining fee to staking controller as reward for the prover
@@ -390,7 +401,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         }
 
         // Refund remaining fee to requester
-        feeToken.safeTransfer(req.sender, req.fee.maxFee - actualFee);
+        feeToken.safeTransfer(req.sender, uint256(req.fee.maxFee) - actualFee);
 
         // Update cumulative performance stats: successful fulfillment only
         ProverStats storage s2 = _currentCumulativeStats(prover);
@@ -438,7 +449,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         }
 
         req.status = ReqStatus.Refunded;
-        feeToken.safeTransfer(req.sender, req.fee.maxFee);
+        feeToken.safeTransfer(req.sender, uint256(req.fee.maxFee));
         // Release any reserved obligation tied to this request upon refund
         _releaseObligation(req);
 
@@ -486,7 +497,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         }
 
         // Calculate slash amount
-        uint256 slashAmount = (req.fee.minStake * slashBps) / BPS_DENOMINATOR;
+        uint256 slashAmount = (uint256(req.fee.minStake) * slashBps) / BPS_DENOMINATOR;
         // Perform the slash
         stakingController.slashByAmount(req.winner.prover, slashAmount);
         emit ProverSlashed(reqid, req.winner.prover, slashAmount);
@@ -497,14 +508,15 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     // =========================================================================
 
     /**
-     * @notice Update the PicoVerifier contract address
+     * @notice Update the PicoVerifier implementation for a specific version
+     * @param version The verifier version to update
      * @param newVerifier The new PicoVerifier contract address
      */
-    function setPicoVerifier(IPicoVerifier newVerifier) external override onlyOwner {
+    function setPicoVerifier(uint32 version, IPicoVerifier newVerifier) external override onlyOwner {
         if (address(newVerifier) == address(0)) revert MarketZeroAddress();
-        IPicoVerifier oldVerifier = picoVerifier;
-        picoVerifier = newVerifier;
-        emit PicoVerifierUpdated(address(oldVerifier), address(newVerifier));
+        IPicoVerifier oldVerifier = picoVerifiers[version];
+        picoVerifiers[version] = newVerifier;
+        emit PicoVerifierUpdated(version, address(oldVerifier), address(newVerifier));
     }
 
     /**
@@ -596,13 +608,13 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
      */
     function withdrawProtocolFee(address to) external override onlyOwner {
         if (to == address(0)) revert MarketZeroAddress();
-        if (protocolFeeBalance == 0) revert MarketNoProtocolFeeToWithdraw();
+        uint256 available = cumulativeProtocolFee - withdrawnProtocolFee;
+        if (available == 0) revert MarketNoProtocolFeeToWithdraw();
 
-        uint256 amount = protocolFeeBalance;
-        protocolFeeBalance = 0;
+        withdrawnProtocolFee = cumulativeProtocolFee;
 
-        feeToken.safeTransfer(to, amount);
-        emit ProtocolFeeWithdrawn(to, amount);
+        feeToken.safeTransfer(to, available);
+        emit ProtocolFeeWithdrawn(to, available);
     }
 
     // =========================================================================
@@ -612,14 +624,15 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     /**
      * @notice Get complete request information
      * @param reqid The request ID to query
-     * @return status Current request status (Pending/Fulfilled/Refunded)
+     * @return status Current request status (Pending/Fulfilled/Refunded/Slashed)
      * @return timestamp Request creation timestamp
      * @return sender Original requester address
      * @return maxFee Maximum fee willing to pay
      * @return minStake Minimum stake required for bidders
      * @return deadline Proof submission deadline
-     * @return vk Verification key
-     * @return publicValuesDigest Public values hash
+     * @return vk Verification key commitment
+     * @return publicValuesDigest Digest of public inputs tied to the proof
+     * @return version Pico verifier version required to validate this request
      */
     function getRequest(bytes32 reqid)
         external
@@ -633,7 +646,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
             uint256 minStake,
             uint64 deadline,
             bytes32 vk,
-            bytes32 publicValuesDigest
+            bytes32 publicValuesDigest,
+            uint32 version
         )
     {
         ReqState storage req = requests[reqid];
@@ -641,11 +655,12 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
             req.status,
             req.timestamp,
             req.sender,
-            req.fee.maxFee,
-            req.fee.minStake,
+            uint256(req.fee.maxFee),
+            uint256(req.fee.minStake),
             req.fee.deadline,
             req.vk,
-            req.publicValuesDigest
+            req.publicValuesDigest,
+            req.version
         );
     }
 
@@ -664,7 +679,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         returns (address winner, uint256 winnerFee, address secondPlace, uint256 secondFee)
     {
         ReqState storage req = requests[reqid];
-        return (req.winner.prover, req.winner.fee, req.second.prover, req.second.fee);
+        return (req.winner.prover, uint256(req.winner.fee), req.second.prover, uint256(req.second.fee));
     }
 
     /**
@@ -680,10 +695,10 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     /**
      * @notice Get the protocol fee percentage and balance
      * @return feeBps Protocol fee percentage in basis points
-     * @return balance Accumulated protocol fee balance
+     * @return balance Available protocol fee balance (cumulative - withdrawn)
      */
     function getProtocolFeeInfo() external view override returns (uint256 feeBps, uint256 balance) {
-        return (protocolFeeBps, protocolFeeBalance);
+        return (protocolFeeBps, cumulativeProtocolFee - withdrawnProtocolFee);
     }
 
     /**
@@ -729,17 +744,18 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         ReqState storage req = requests[reqid];
 
         address prevWinner = req.winner.prover;
+        uint96 fee96 = uint96(fee);
 
         // If no bidders yet, or this is lower than current winner
-        if (req.winner.prover == address(0) || fee < req.winner.fee) {
+        if (req.winner.prover == address(0) || fee < uint256(req.winner.fee)) {
             // Move current winner to second place
             req.second = req.winner;
             // Set new winner
-            req.winner = Bidder({prover: prover, fee: fee});
+            req.winner = Bidder({prover: prover, fee: fee96});
         }
         // If this is lower than second place (but not winner)
-        else if (req.second.prover == address(0) || fee < req.second.fee) {
-            req.second = Bidder({prover: prover, fee: fee});
+        else if (req.second.prover == address(0) || fee < uint256(req.second.fee)) {
+            req.second = Bidder({prover: prover, fee: fee96});
         }
 
         // Adjust pending obligations on winner change (no longer track instantaneous `wins`)
@@ -771,7 +787,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
      * @param newWinner Address of the new winner
      */
     function _reassignObligation(ReqState storage req, address prevWinner, address newWinner) internal {
-        uint256 ms = req.fee.minStake;
+        uint256 ms = uint256(req.fee.minStake);
         if (prevWinner != address(0)) {
             if (assignedStake[prevWinner] >= ms) {
                 assignedStake[prevWinner] -= ms;
@@ -791,7 +807,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     function _releaseObligation(ReqState storage req) internal {
         address p = req.winner.prover;
         if (p != address(0)) {
-            uint256 ms = req.fee.minStake;
+            uint256 ms = uint256(req.fee.minStake);
             if (assignedStake[p] >= ms) {
                 assignedStake[p] -= ms;
             } else {

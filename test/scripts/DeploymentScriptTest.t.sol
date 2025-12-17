@@ -293,7 +293,7 @@ contract DeploymentScriptTest is Test {
         assertNotEq(brevisMarket, address(0), "BrevisMarket should be deployed");
 
         BrevisMarket market = BrevisMarket(payable(brevisMarket));
-        assertEq(address(market.picoVerifier()), address(picoVerifier), "Pico verifier should be configured");
+        assertEq(address(market.picoVerifiers(0)), address(picoVerifier), "Pico verifier should be configured");
         assertEq(
             address(market.stakingController()),
             deployScript.stakingControllerProxy(),
@@ -388,7 +388,7 @@ contract DeploymentScriptTest is Test {
         // Check BrevisMarket
         BrevisMarket brevisMarket = BrevisMarket(payable(deployScript.brevisMarketProxy()));
         assertEq(
-            address(brevisMarket.picoVerifier()),
+            address(brevisMarket.picoVerifiers(0)),
             address(picoVerifier),
             "BrevisMarket should still have correct verifier"
         );

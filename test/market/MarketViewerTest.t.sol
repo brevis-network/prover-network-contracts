@@ -23,9 +23,9 @@ contract MarketViewerTest is Test {
 
     uint64 public constant BIDDING_DURATION = 1 hours;
     uint64 public constant REVEAL_DURATION = 30 minutes;
-    uint256 public constant MIN_MAX_FEE = 1e12;
-    uint256 public constant MAX_FEE = 1e18;
-    uint256 public constant MIN_STAKE = 1e18;
+    uint96 public constant MIN_MAX_FEE = 1e12;
+    uint96 public constant MAX_FEE = 1e18;
+    uint96 public constant MIN_STAKE = 1e18;
 
     bytes32 public constant VK = keccak256("test_vk");
     bytes32 public constant PUBLIC_VALUES_DIGEST = keccak256("test_public_values");
@@ -79,6 +79,7 @@ contract MarketViewerTest is Test {
             imgURL: "",
             inputData: "",
             inputURL: "",
+            version: 0,
             fee: IBrevisMarket.FeeParams({
                 maxFee: MAX_FEE,
                 minStake: MIN_STAKE,
@@ -127,6 +128,7 @@ contract MarketViewerTest is Test {
         assertEq(uint256(rv[0].status), uint256(IBrevisMarket.ReqStatus.Pending));
         assertEq(rv[0].sender, requester);
         assertEq(rv[0].deadline, req.fee.deadline);
+        assertEq(rv[0].version, req.version);
 
         // Bidders
         IMarketViewer.BiddersView[] memory bv = viewer.batchGetBidders(_asReqids(reqid));
@@ -161,7 +163,8 @@ contract MarketViewerTest is Test {
         IMarketViewer.ProverPendingItem[] memory items = viewer.getProverPendingRequests(prover1);
         assertEq(items.length, 1);
         assertEq(items[0].reqid, reqid);
-        (,,,,, uint64 dBefore,,) = market.getRequest(reqid);
+        (,,,,, uint64 dBefore, bytes32 _vk, bytes32 _digest, uint32 _version) = market.getRequest(reqid);
+        (_vk, _digest, _version);
         assertLt(block.timestamp, dBefore); // not overdue yet
 
         // Advance past deadline: still pending, now overdue
@@ -204,7 +207,8 @@ contract MarketViewerTest is Test {
         // B: refunded after deadline (winner = prover1)
         (bytes32 reqB,) = _requestAndAuction(2 days, 5, 20);
         // Warp past deadline and refund
-        (,,,,, uint64 deadline,,) = market.getRequest(reqB);
+        (,,,,, uint64 deadline, bytes32 _vkB, bytes32 _digestB, uint32 _versionB) = market.getRequest(reqB);
+        (_vkB, _digestB, _versionB);
         vm.warp(deadline + 1);
         market.refund(reqB);
 
@@ -212,7 +216,8 @@ contract MarketViewerTest is Test {
         // deadline just after reveal; warp to overdue after
         uint64 minDeadlineDelta = BIDDING_DURATION + REVEAL_DURATION + 1;
         (bytes32 reqC,) = _requestAndAuction(minDeadlineDelta, 7, 20);
-        (,,,,, uint64 deadlineC,,) = market.getRequest(reqC);
+        (,,,,, uint64 deadlineC, bytes32 _vkC, bytes32 _digestC, uint32 _versionC) = market.getRequest(reqC);
+        (_vkC, _digestC, _versionC);
         vm.warp(deadlineC + 1);
 
         // Composite
@@ -251,7 +256,8 @@ contract MarketViewerTest is Test {
         (bytes32 reqid,) = _requestAndAuction(minDeadlineDelta, 7, 20);
 
         // Warp past deadline (no proof submitted)
-        (,,,,, uint64 deadline,,) = market.getRequest(reqid);
+        (,,,,, uint64 deadline, bytes32 _vk2, bytes32 _digest2, uint32 _version2) = market.getRequest(reqid);
+        (_vk2, _digest2, _version2);
         vm.warp(deadline + 1);
 
         // Refundable because now > deadline
