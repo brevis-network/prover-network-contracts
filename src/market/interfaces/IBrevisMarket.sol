@@ -26,8 +26,8 @@ interface IBrevisMarket {
     // =========================================================================
 
     struct FeeParams {
-        uint96 maxFee; // maxFee to pay for the proof
-        uint96 minStake; // provers must stake >= this to be eligible for bid
+        uint96 maxFee; // maxFee to pay for the proof (uint96 max: ~79B tokens)
+        uint96 minStake; // provers must stake >= this to be eligible for bid (uint96 max: ~79B tokens)
         uint64 deadline; // proof need to be submitted by this time in epoch seconds
     }
 
@@ -44,7 +44,7 @@ interface IBrevisMarket {
 
     struct Bidder {
         address prover;
-        uint96 fee;
+        uint96 fee; // uint96 max: ~79B tokens
     }
 
     struct GlobalStats {

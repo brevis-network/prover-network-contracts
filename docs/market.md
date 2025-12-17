@@ -57,6 +57,8 @@ struct FeeParams {
 }
 ```
 
+**Note:** `uint96` fields support up to ~79 billion tokens (with 18 decimals). This per-transaction limit is sufficient even if the token's total supply exceeds this amount, as individual request fees and stake requirements stay well below the system's total supply.
+
 ---
 
 ## 4. Reverse Auction Process
