@@ -63,7 +63,8 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     uint256 public overcommitBps; // reserve percentage applied to assignedStake when checking eligibility
 
     // Protocol treasury
-    uint256 public protocolFeeBalance; // accumulated protocol fees
+    uint256 public cumulativeProtocolFee; // total protocol fees ever collected
+    uint256 public withdrawnProtocolFee; // total protocol fees withdrawn
 
     // External contracts
     mapping(uint32 => IPicoVerifier) public picoVerifiers; // versioned PicoVerifier contracts
@@ -388,7 +389,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
         // Accumulate protocol fee
         if (protocolFee > 0) {
-            protocolFeeBalance += protocolFee;
+            cumulativeProtocolFee += protocolFee;
         }
 
         // Send remaining fee to staking controller as reward for the prover
@@ -607,13 +608,13 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
      */
     function withdrawProtocolFee(address to) external override onlyOwner {
         if (to == address(0)) revert MarketZeroAddress();
-        if (protocolFeeBalance == 0) revert MarketNoProtocolFeeToWithdraw();
+        uint256 available = cumulativeProtocolFee - withdrawnProtocolFee;
+        if (available == 0) revert MarketNoProtocolFeeToWithdraw();
 
-        uint256 amount = protocolFeeBalance;
-        protocolFeeBalance = 0;
+        withdrawnProtocolFee = cumulativeProtocolFee;
 
-        feeToken.safeTransfer(to, amount);
-        emit ProtocolFeeWithdrawn(to, amount);
+        feeToken.safeTransfer(to, available);
+        emit ProtocolFeeWithdrawn(to, available);
     }
 
     // =========================================================================
@@ -694,10 +695,10 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     /**
      * @notice Get the protocol fee percentage and balance
      * @return feeBps Protocol fee percentage in basis points
-     * @return balance Accumulated protocol fee balance
+     * @return balance Available protocol fee balance (cumulative - withdrawn)
      */
     function getProtocolFeeInfo() external view override returns (uint256 feeBps, uint256 balance) {
-        return (protocolFeeBps, protocolFeeBalance);
+        return (protocolFeeBps, cumulativeProtocolFee - withdrawnProtocolFee);
     }
 
     /**
