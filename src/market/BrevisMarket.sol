@@ -23,6 +23,9 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     // STRUCTS & CONSTANTS
     // =========================================================================
 
+    // f6c9577ec051004416f650ed5cde59ebe31c63663b16e28b9da8cda95777240c
+    bytes32 public constant EPOCH_UPDATER_ROLE = keccak256("EPOCH_UPDATER_ROLE");
+
     /// Internal struct to track the state of each proof request
     struct ReqState {
         ReqStatus status;
@@ -123,9 +126,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         // Only initialize if non-zero values are provided (direct deployment)
         if (address(_picoVerifier) != address(0) && address(_stakingController) != address(0)) {
             _init(_picoVerifier, _stakingController, _biddingPhaseDuration, _revealPhaseDuration, _minMaxFee);
-            // Initialize stats epochs for direct deployments
-            statsEpochs.push(StatsEpochInfo({startAt: uint64(block.timestamp), endAt: 0}));
-            statsEpochId = 0;
         }
         // For upgradeable deployment, pass zero addresses and call init() separately
     }
@@ -148,9 +148,6 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
     ) external {
         _init(_picoVerifier, _stakingController, _biddingPhaseDuration, _revealPhaseDuration, _minMaxFee);
         initOwner(); // requires _owner == address(0), which is only possible when it's a delegateCall
-        // Initialize stats epochs
-        statsEpochs.push(StatsEpochInfo({startAt: uint64(block.timestamp), endAt: 0}));
-        statsEpochId = 0;
     }
 
     /**
@@ -186,6 +183,11 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
 
         // Default reserve to 5%
         overcommitBps = 500;
+
+        // Initialize stats epochs
+        statsEpochs.push(StatsEpochInfo({startAt: uint64(block.timestamp), endAt: 0}));
+        statsEpochId = 0;
+        _grantRole(EPOCH_UPDATER_ROLE, msg.sender);
     }
 
     // =========================================================================
@@ -824,7 +826,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
      * @notice Reset stats window start and bump epoch id
      * @param startAt New start timestamp (0 = now)
      */
-    function scheduleStatsEpoch(uint64 startAt) external override onlyOwner {
+    function scheduleStatsEpoch(uint64 startAt) external override onlyRole(EPOCH_UPDATER_ROLE) {
         uint64 s = startAt == 0 ? uint64(block.timestamp) : startAt;
         // Validate strictly increasing start times
         if (statsEpochs.length > 0) {
@@ -846,7 +848,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
      * @notice Pop the last scheduled stats-epoch if it has not started yet
      * @dev Restores the previous epoch's endAt to 0. Does not modify statsEpochId.
      */
-    function popStatsEpoch() external override onlyOwner {
+    function popStatsEpoch() external override onlyRole(EPOCH_UPDATER_ROLE) {
         uint256 len = statsEpochs.length;
         // Must have at least two epochs to pop a future one; never remove the initial epoch
         if (len <= 1) revert MarketNoFutureEpochToPop();
