@@ -33,8 +33,12 @@ contract DeployEpochRewards is Script {
             ? json.readBool("$.epochRewards.implementationOnly")
             : false;
 
+        // Prepare initialization data (required keys)
+        require(json.keyExists("$.addresses.stakingController"), "config.addresses.stakingController missing");
+        address stakingController = json.readAddress("$.addresses.stakingController");
+
         // Deploy implementation with zero values for upgradeable deployment
-        address implementation = address(new EpochRewards(address(0), address(0), address(0), address(0)));
+        address implementation = address(new EpochRewards(stakingController, address(0), address(0), address(0)));
         console.log("EpochRewards implementation:", implementation);
 
         if (implementationOnly) {
@@ -48,13 +52,10 @@ contract DeployEpochRewards is Script {
         // Deploy or use existing ProxyAdmin
         ProxyAdmin proxyAdmin = _deployOrUseProxyAdmin(json);
 
-        // Prepare initialization data (required keys)
-        require(json.keyExists("$.addresses.stakingController"), "config.addresses.stakingController missing");
         require(json.keyExists("$.epochRewards.brevisProof"), "config.epochRewards.brevisProof missing");
         require(json.keyExists("$.epochRewards.rewardUpdater"), "config.epochRewards.rewardUpdater missing");
         require(json.keyExists("$.epochRewards.epochUpdater"), "config.epochRewards.epochUpdater missing");
 
-        address stakingController = json.readAddress("$.addresses.stakingController");
         address brevisProof = json.readAddress("$.epochRewards.brevisProof");
         address rewardUpdater = json.readAddress("$.epochRewards.rewardUpdater");
         address epochUpdater = json.readAddress("$.epochRewards.epochUpdater");
