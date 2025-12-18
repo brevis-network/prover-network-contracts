@@ -161,7 +161,9 @@ contract EpochRewardsTest is Test {
         vm.prank(rewardUpdater);
         epochRewards.setRewards("mockProof", circuitOutput);
 
-        assertEq(epochRewards.epochProverRewards(1, prover1), 100e18);
+        (uint128 amount, bool distributed) = epochRewards.epochProverRewards(1, prover1);
+        assertEq(amount, 100e18);
+        assertFalse(distributed);
         assertEq(epochRewards.epochTotalRewards(1), 100e18);
         assertEq(epochRewards.lastUpdatedEpoch(), 1);
     }
@@ -179,8 +181,12 @@ contract EpochRewardsTest is Test {
         vm.prank(rewardUpdater);
         epochRewards.setRewards("mockProof", circuitOutput);
 
-        assertEq(epochRewards.epochProverRewards(1, prover1), 100e18);
-        assertEq(epochRewards.epochProverRewards(1, prover2), 200e18);
+        (uint128 amount1, bool distributed1) = epochRewards.epochProverRewards(1, prover1);
+        (uint128 amount2, bool distributed2) = epochRewards.epochProverRewards(1, prover2);
+        assertEq(amount1, 100e18);
+        assertEq(amount2, 200e18);
+        assertFalse(distributed1);
+        assertFalse(distributed2);
         assertEq(epochRewards.epochTotalRewards(1), 300e18);
         assertEq(epochRewards.epochLastProver(1), prover2);
     }
@@ -204,8 +210,10 @@ contract EpochRewardsTest is Test {
         vm.prank(rewardUpdater);
         epochRewards.setRewards("mockProof2", circuitOutput2);
 
-        assertEq(epochRewards.epochProverRewards(1, prover1), 100e18);
-        assertEq(epochRewards.epochProverRewards(1, prover2), 200e18);
+        (uint128 amount1,) = epochRewards.epochProverRewards(1, prover1);
+        (uint128 amount2,) = epochRewards.epochProverRewards(1, prover2);
+        assertEq(amount1, 100e18);
+        assertEq(amount2, 200e18);
         assertEq(epochRewards.epochTotalRewards(1), 300e18);
     }
 
@@ -337,8 +345,10 @@ contract EpochRewardsTest is Test {
 
         // State should remain at the first batch totals
         assertEq(epochRewards.epochTotalRewards(1), 600e18);
-        assertEq(epochRewards.epochProverRewards(1, prover1), 600e18);
-        assertEq(epochRewards.epochProverRewards(1, prover2), 0);
+        (uint128 amount1,) = epochRewards.epochProverRewards(1, prover1);
+        (uint128 amount2,) = epochRewards.epochProverRewards(1, prover2);
+        assertEq(amount1, 600e18);
+        assertEq(amount2, 0);
     }
 
     // ===============================
@@ -377,8 +387,10 @@ contract EpochRewardsTest is Test {
         vm.prank(rewardUpdater);
         epochRewards.distributeRewards(1, provers);
 
-        // Verify rewards were zeroed
-        assertEq(epochRewards.epochProverRewards(1, prover1), 0);
+        // Verify rewards were marked as distributed
+        (uint128 amount, bool distributed) = epochRewards.epochProverRewards(1, prover1);
+        assertEq(amount, 100e18);
+        assertTrue(distributed);
     }
 
     function testDistributeRewardsInsufficientFundingReverts() public {

@@ -21,11 +21,15 @@ contract EpochRewards is BrevisProofApp, EpochManager {
     // STORAGE
     // =========================================================================
 
-    IStakingController public stakingController;
+    struct ProverReward {
+        uint128 amount;
+        bool distributed;
+    }
 
+    IStakingController public stakingController;
     bytes32 public vkHash;
-    // mapping of epoch => prover => reward amount
-    mapping(uint32 => mapping(address => uint256)) public epochProverRewards;
+
+    mapping(uint32 => mapping(address => ProverReward)) public epochProverRewards;
     mapping(uint32 => address) public epochLastProver;
     mapping(uint32 => uint256) public epochTotalRewards;
     uint32 public lastUpdatedEpoch;
@@ -44,7 +48,7 @@ contract EpochRewards is BrevisProofApp, EpochManager {
     // ERRORS
     // =========================================================================
 
-    error StakingRewardsZeroAmount(address prover);
+    error StakingRewardsNotDistributable(address prover);
     error StakingRewardsExceedsMax(uint32 epoch, uint256 totalRewards, uint256 maxAllowed);
     error StakingRewardsInvalidEpoch();
     error StakingRewardsEpochWindowMismatch(
@@ -148,7 +152,7 @@ contract EpochRewards is BrevisProofApp, EpochManager {
             }
             lastProver = prover;
             uint256 amount = uint128(bytes16(circuitOutput[(offset + 20):(offset + 20 + 16)]));
-            epochProverRewards[epoch][prover] = amount;
+            epochProverRewards[epoch][prover] = ProverReward({amount: uint128(amount), distributed: false});
             newRewards += amount;
             emit RewardsSet(epoch, prover, amount);
         }
@@ -169,14 +173,15 @@ contract EpochRewards is BrevisProofApp, EpochManager {
      */
     function distributeRewards(uint32 epoch, address[] calldata provers) external onlyRole(REWARD_UPDATER_ROLE) {
         uint256[] memory amounts = new uint256[](provers.length);
+
         for (uint256 i = 0; i < provers.length; i++) {
             address prover = provers[i];
-            uint256 amount = epochProverRewards[epoch][prover];
-            if (amount > 0) {
-                amounts[i] = amount;
-                epochProverRewards[epoch][prover] = 0;
+            ProverReward storage reward = epochProverRewards[epoch][prover];
+            if (reward.amount > 0 && !reward.distributed) {
+                amounts[i] = reward.amount;
+                reward.distributed = true;
             } else {
-                revert StakingRewardsZeroAmount(prover);
+                revert StakingRewardsNotDistributable(prover);
             }
         }
         stakingController.addRewards(provers, amounts);
