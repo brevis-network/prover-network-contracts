@@ -198,6 +198,22 @@ contract EpochRewards is BrevisProofApp, EpochManager {
     }
 
     /**
+     * @notice Get total rewards set for a range of epochs
+     * @param fromEpoch Start epoch (inclusive)
+     * @param toEpoch End epoch (inclusive)
+     * @return totalRewards Sum of all rewards across the epoch range
+     */
+    function getTotalRewardsForEpochRange(uint32 fromEpoch, uint32 toEpoch)
+        external
+        view
+        returns (uint256 totalRewards)
+    {
+        for (uint32 epoch = fromEpoch; epoch <= toEpoch; epoch++) {
+            totalRewards += epochTotalRewards[epoch];
+        }
+    }
+
+    /**
      * @notice Get reward details for a specific prover in an epoch
      * @param epoch Epoch number
      * @param prover Prover address
