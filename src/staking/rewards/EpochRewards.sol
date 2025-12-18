@@ -188,6 +188,118 @@ contract EpochRewards is BrevisProofApp, EpochManager {
     }
 
     // =========================================================================
+    // VIEW FUNCTIONS
+    // =========================================================================
+
+    struct ProverDistributableRewards {
+        address prover;
+        uint32[] epochs;
+        uint128[] amounts;
+    }
+
+    /**
+     * @notice Get reward details for a specific prover in an epoch
+     * @param epoch Epoch number
+     * @param prover Prover address
+     * @return amount Reward amount
+     * @return distributed Whether the reward has been distributed
+     */
+    function getProverReward(uint32 epoch, address prover) external view returns (uint128 amount, bool distributed) {
+        ProverReward memory reward = epochProverRewards[epoch][prover];
+        return (reward.amount, reward.distributed);
+    }
+
+    /**
+     * @notice Get rewards for multiple provers in an epoch
+     * @param epoch Epoch number
+     * @param provers Array of prover addresses
+     * @return amounts Array of reward amounts
+     * @return distributedFlags Array of distribution status
+     */
+    function getBatchProverRewards(uint32 epoch, address[] calldata provers)
+        external
+        view
+        returns (uint128[] memory amounts, bool[] memory distributedFlags)
+    {
+        amounts = new uint128[](provers.length);
+        distributedFlags = new bool[](provers.length);
+
+        for (uint256 i = 0; i < provers.length; i++) {
+            ProverReward memory reward = epochProverRewards[epoch][provers[i]];
+            amounts[i] = reward.amount;
+            distributedFlags[i] = reward.distributed;
+        }
+    }
+
+    /**
+     * @notice Find all epochs with distributable rewards for a prover within a range
+     * @param fromEpoch Start epoch (inclusive)
+     * @param toEpoch End epoch (inclusive)
+     * @param prover Prover address
+     * @return epochs Array of epoch numbers with undistributed rewards
+     * @return amounts Array of corresponding reward amounts
+     */
+    function getDistributableRewards(uint32 fromEpoch, uint32 toEpoch, address prover)
+        external
+        view
+        returns (uint32[] memory epochs, uint128[] memory amounts)
+    {
+        (epochs, amounts) = _getDistributableRewardsForProver(fromEpoch, toEpoch, prover);
+    }
+
+    /**
+     * @notice Find all epochs with distributable rewards for multiple provers within a range
+     * @param fromEpoch Start epoch (inclusive)
+     * @param toEpoch End epoch (inclusive)
+     * @param provers Array of prover addresses
+     * @return results Array of ProverDistributableRewards structs, one per prover
+     */
+    function getBatchDistributableRewards(uint32 fromEpoch, uint32 toEpoch, address[] calldata provers)
+        external
+        view
+        returns (ProverDistributableRewards[] memory results)
+    {
+        results = new ProverDistributableRewards[](provers.length);
+
+        for (uint256 i = 0; i < provers.length; i++) {
+            (uint32[] memory epochs, uint128[] memory amounts) =
+                _getDistributableRewardsForProver(fromEpoch, toEpoch, provers[i]);
+            results[i] = ProverDistributableRewards({prover: provers[i], epochs: epochs, amounts: amounts});
+        }
+    }
+
+    /**
+     * @dev Internal helper to get distributable rewards for a single prover
+     */
+    function _getDistributableRewardsForProver(uint32 fromEpoch, uint32 toEpoch, address prover)
+        internal
+        view
+        returns (uint32[] memory epochs, uint128[] memory amounts)
+    {
+        // First pass: count distributable epochs
+        uint256 count = 0;
+        for (uint32 epoch = fromEpoch; epoch <= toEpoch; epoch++) {
+            ProverReward memory reward = epochProverRewards[epoch][prover];
+            if (reward.amount > 0 && !reward.distributed) {
+                count++;
+            }
+        }
+
+        // Second pass: populate arrays
+        epochs = new uint32[](count);
+        amounts = new uint128[](count);
+        uint256 index = 0;
+        for (uint32 epoch = fromEpoch; epoch <= toEpoch; epoch++) {
+            ProverReward memory reward = epochProverRewards[epoch][prover];
+            if (reward.amount > 0 && !reward.distributed) {
+                epochs[index] = epoch;
+                amounts[index] = reward.amount;
+                index++;
+            }
+        }
+    }
+
+    // =========================================================================
     // OWNER FUNCTIONS
     // =========================================================================
 

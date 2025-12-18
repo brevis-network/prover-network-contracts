@@ -435,6 +435,218 @@ contract EpochRewardsTest is Test {
     }
 
     // ===============================
+    // VIEW FUNCTION TESTS
+    // ===============================
+
+    function testGetDistributableRewards() public {
+        // Set up rewards for multiple epochs
+        vm.warp(startTime + EPOCH_LENGTH + 100);
+
+        // Epoch 1: prover1 has 100e18
+        bytes memory circuitOutput1 = _buildCircuitOutput(1, startTime, startTime + EPOCH_LENGTH, prover1, 100e18);
+        bytes32 proofId1 = keccak256("mockProof1");
+        brevisProof.setProofData(proofId1, bytes32(uint256(1)), keccak256(circuitOutput1));
+        vm.prank(rewardUpdater);
+        epochRewards.setRewards("mockProof1", circuitOutput1);
+
+        // Epoch 2: prover1 has 200e18
+        vm.warp(startTime + 2 * EPOCH_LENGTH + 100);
+        bytes memory circuitOutput2 =
+            _buildCircuitOutput(2, startTime + EPOCH_LENGTH, startTime + 2 * EPOCH_LENGTH, prover1, 200e18);
+        bytes32 proofId2 = keccak256("mockProof2");
+        brevisProof.setProofData(proofId2, bytes32(uint256(1)), keccak256(circuitOutput2));
+        vm.prank(rewardUpdater);
+        epochRewards.setRewards("mockProof2", circuitOutput2);
+
+        // Epoch 3: prover1 has 300e18
+        vm.warp(startTime + 3 * EPOCH_LENGTH + 100);
+        bytes memory circuitOutput3 =
+            _buildCircuitOutput(3, startTime + 2 * EPOCH_LENGTH, startTime + 3 * EPOCH_LENGTH, prover1, 300e18);
+        bytes32 proofId3 = keccak256("mockProof3");
+        brevisProof.setProofData(proofId3, bytes32(uint256(1)), keccak256(circuitOutput3));
+        vm.prank(rewardUpdater);
+        epochRewards.setRewards("mockProof3", circuitOutput3);
+
+        // Query distributable rewards for epochs 1-3
+        (uint32[] memory epochs, uint128[] memory amounts) = epochRewards.getDistributableRewards(1, 3, prover1);
+
+        assertEq(epochs.length, 3);
+        assertEq(amounts.length, 3);
+        assertEq(epochs[0], 1);
+        assertEq(amounts[0], 100e18);
+        assertEq(epochs[1], 2);
+        assertEq(amounts[1], 200e18);
+        assertEq(epochs[2], 3);
+        assertEq(amounts[2], 300e18);
+    }
+
+    function testGetDistributableRewardsAfterDistribution() public {
+        // Set up rewards for epoch 1 and 2
+        vm.warp(startTime + EPOCH_LENGTH + 100);
+        bytes memory circuitOutput1 = _buildCircuitOutput(1, startTime, startTime + EPOCH_LENGTH, prover1, 100e18);
+        bytes32 proofId1 = keccak256("mockProof1");
+        brevisProof.setProofData(proofId1, bytes32(uint256(1)), keccak256(circuitOutput1));
+        vm.prank(rewardUpdater);
+        epochRewards.setRewards("mockProof1", circuitOutput1);
+
+        vm.warp(startTime + 2 * EPOCH_LENGTH + 100);
+        bytes memory circuitOutput2 =
+            _buildCircuitOutput(2, startTime + EPOCH_LENGTH, startTime + 2 * EPOCH_LENGTH, prover1, 200e18);
+        bytes32 proofId2 = keccak256("mockProof2");
+        brevisProof.setProofData(proofId2, bytes32(uint256(1)), keccak256(circuitOutput2));
+        vm.prank(rewardUpdater);
+        epochRewards.setRewards("mockProof2", circuitOutput2);
+
+        // Initialize prover1 in controller
+        vm.prank(admin);
+        stakingToken.mint(prover1, 100e18);
+
+        vm.startPrank(prover1);
+        stakingToken.approve(address(controller), 100e18);
+        controller.initializeProver(1000);
+        vm.stopPrank();
+
+        // Distribute epoch 1 rewards
+        vm.prank(admin);
+        stakingToken.mint(address(epochRewards), 100e18);
+
+        address[] memory provers = new address[](1);
+        provers[0] = prover1;
+
+        vm.prank(rewardUpdater);
+        epochRewards.distributeRewards(1, provers);
+
+        // Query distributable rewards - should only return epoch 2
+        (uint32[] memory epochs, uint128[] memory amounts) = epochRewards.getDistributableRewards(1, 2, prover1);
+
+        assertEq(epochs.length, 1);
+        assertEq(amounts.length, 1);
+        assertEq(epochs[0], 2);
+        assertEq(amounts[0], 200e18);
+    }
+
+    function testGetDistributableRewardsNoRewards() public view {
+        // Query when no rewards exist
+        (uint32[] memory epochs, uint128[] memory amounts) = epochRewards.getDistributableRewards(1, 10, prover1);
+
+        assertEq(epochs.length, 0);
+        assertEq(amounts.length, 0);
+    }
+
+    function testGetBatchDistributableRewards() public {
+        // Set up rewards for multiple provers and epochs
+        vm.warp(startTime + EPOCH_LENGTH + 100);
+
+        // Epoch 1: prover1 has 100e18, prover2 has 50e18
+        bytes memory circuitOutput1 =
+            _buildCircuitOutputMulti(1, startTime, startTime + EPOCH_LENGTH, prover1, 100e18, prover2, 50e18);
+        bytes32 proofId1 = keccak256("mockProof1");
+        brevisProof.setProofData(proofId1, bytes32(uint256(1)), keccak256(circuitOutput1));
+        vm.prank(rewardUpdater);
+        epochRewards.setRewards("mockProof1", circuitOutput1);
+
+        // Epoch 2: prover1 has 200e18, prover3 has 75e18
+        vm.warp(startTime + 2 * EPOCH_LENGTH + 100);
+        bytes memory circuitOutput2 = _buildCircuitOutputMulti(
+            2, startTime + EPOCH_LENGTH, startTime + 2 * EPOCH_LENGTH, prover1, 200e18, prover3, 75e18
+        );
+        bytes32 proofId2 = keccak256("mockProof2");
+        brevisProof.setProofData(proofId2, bytes32(uint256(1)), keccak256(circuitOutput2));
+        vm.prank(rewardUpdater);
+        epochRewards.setRewards("mockProof2", circuitOutput2);
+
+        // Query batch distributable rewards
+        address[] memory provers = new address[](3);
+        provers[0] = prover1;
+        provers[1] = prover2;
+        provers[2] = prover3;
+
+        EpochRewards.ProverDistributableRewards[] memory results =
+            epochRewards.getBatchDistributableRewards(1, 2, provers);
+
+        assertEq(results.length, 3);
+
+        // Prover1: has rewards in epoch 1 and 2
+        assertEq(results[0].prover, prover1);
+        assertEq(results[0].epochs.length, 2);
+        assertEq(results[0].epochs[0], 1);
+        assertEq(results[0].amounts[0], 100e18);
+        assertEq(results[0].epochs[1], 2);
+        assertEq(results[0].amounts[1], 200e18);
+
+        // Prover2: has rewards only in epoch 1
+        assertEq(results[1].prover, prover2);
+        assertEq(results[1].epochs.length, 1);
+        assertEq(results[1].epochs[0], 1);
+        assertEq(results[1].amounts[0], 50e18);
+
+        // Prover3: has rewards only in epoch 2
+        assertEq(results[2].prover, prover3);
+        assertEq(results[2].epochs.length, 1);
+        assertEq(results[2].epochs[0], 2);
+        assertEq(results[2].amounts[0], 75e18);
+    }
+
+    function testGetBatchDistributableRewardsAfterPartialDistribution() public {
+        // Set up rewards
+        vm.warp(startTime + EPOCH_LENGTH + 100);
+        bytes memory circuitOutput1 =
+            _buildCircuitOutputMulti(1, startTime, startTime + EPOCH_LENGTH, prover1, 100e18, prover2, 50e18);
+        bytes32 proofId1 = keccak256("mockProof1");
+        brevisProof.setProofData(proofId1, bytes32(uint256(1)), keccak256(circuitOutput1));
+        vm.prank(rewardUpdater);
+        epochRewards.setRewards("mockProof1", circuitOutput1);
+
+        // Initialize prover1 in controller
+        vm.prank(admin);
+        stakingToken.mint(prover1, 100e18);
+
+        vm.startPrank(prover1);
+        stakingToken.approve(address(controller), 100e18);
+        controller.initializeProver(1000);
+        vm.stopPrank();
+
+        // Distribute only prover1's rewards
+        vm.prank(admin);
+        stakingToken.mint(address(epochRewards), 100e18);
+
+        address[] memory singleProver = new address[](1);
+        singleProver[0] = prover1;
+
+        vm.prank(rewardUpdater);
+        epochRewards.distributeRewards(1, singleProver);
+
+        // Query batch - prover1 should have no distributable, prover2 should still have rewards
+        address[] memory provers = new address[](2);
+        provers[0] = prover1;
+        provers[1] = prover2;
+
+        EpochRewards.ProverDistributableRewards[] memory results =
+            epochRewards.getBatchDistributableRewards(1, 1, provers);
+
+        assertEq(results.length, 2);
+
+        // Prover1: no distributable rewards
+        assertEq(results[0].prover, prover1);
+        assertEq(results[0].epochs.length, 0);
+
+        // Prover2: still has distributable rewards
+        assertEq(results[1].prover, prover2);
+        assertEq(results[1].epochs.length, 1);
+        assertEq(results[1].epochs[0], 1);
+        assertEq(results[1].amounts[0], 50e18);
+    }
+
+    function testGetBatchDistributableRewardsEmptyProvers() public view {
+        address[] memory provers = new address[](0);
+
+        EpochRewards.ProverDistributableRewards[] memory results =
+            epochRewards.getBatchDistributableRewards(1, 10, provers);
+
+        assertEq(results.length, 0);
+    }
+
+    // ===============================
     // HELPER FUNCTIONS
     // ===============================
 
