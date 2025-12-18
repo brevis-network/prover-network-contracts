@@ -10,8 +10,16 @@ import "./EpochManager.sol";
 contract EpochRewards is BrevisProofApp, EpochManager {
     using SafeERC20 for IERC20;
 
+    // =========================================================================
+    // CONSTANTS
+    // =========================================================================
+
     // 0x9188644bf0c7a694e572b54fd40005e1230f80a50c59be6fb567a312ab5a1d4d
     bytes32 public constant REWARD_UPDATER_ROLE = keccak256("REWARD_UPDATER_ROLE");
+
+    // =========================================================================
+    // STORAGE
+    // =========================================================================
 
     IStakingController public stakingController;
 
@@ -22,8 +30,19 @@ contract EpochRewards is BrevisProofApp, EpochManager {
     mapping(uint32 => uint256) public epochTotalRewards;
     uint32 public lastUpdatedEpoch;
 
+    // Storage gap for future upgrades. Reserves 40 slots.
+    uint256[40] private __gap;
+
+    // =========================================================================
+    // EVENTS
+    // =========================================================================
+
     event RewardsSet(uint32 indexed epoch, address indexed prover, uint256 amount);
-    event EpochRewardsSet(uint32 indexed epoch, uint256 deltaAmount, uint256 cumulativeAmount);
+    event EpochRewardsSet(uint32 indexed epoch, uint256 newAmount, uint256 cumulativeAmount);
+
+    // =========================================================================
+    // ERRORS
+    // =========================================================================
 
     error StakingRewardsZeroAmount(address prover);
     error StakingRewardsExceedsMax(uint32 epoch, uint256 totalRewards, uint256 maxAllowed);
@@ -33,6 +52,10 @@ contract EpochRewards is BrevisProofApp, EpochManager {
     );
     error StakingRewardsEpochNotReady(uint32 epoch, uint64 epochEndTime, uint64 currentTime);
     error StakingRewardsUnsortedProvers(address previousProver, address currentProver);
+
+    // =========================================================================
+    // CONSTRUCTOR / INITIALIZATION
+    // =========================================================================
 
     /**
      * @notice Deploy with initial staking controller, Brevis proof verifier, and reward updater.
@@ -78,6 +101,10 @@ contract EpochRewards is BrevisProofApp, EpochManager {
         // Approve unlimited tokens to staking controller for reward distribution
         IERC20(stakingController.stakingToken()).approve(address(stakingController), type(uint256).max);
     }
+
+    // =========================================================================
+    // EXTERNAL FUNCTIONS
+    // =========================================================================
 
     /**
      * @notice Record per-prover rewards for an epoch using Brevis proof output.
@@ -154,6 +181,10 @@ contract EpochRewards is BrevisProofApp, EpochManager {
         }
         stakingController.addRewards(provers, amounts);
     }
+
+    // =========================================================================
+    // OWNER FUNCTIONS
+    // =========================================================================
 
     /**
      * @notice Owner can rescue reward tokens.
