@@ -187,6 +187,16 @@ interface IStakingController {
     // =========================================================================
 
     /**
+     * @notice Stake tokens for a specific user (caller must have tokens approved)
+     * @dev Useful for helper contracts that wrap native tokens
+     * @param prover The prover to stake with
+     * @param staker The address to receive the stake shares
+     * @param amount The amount of tokens to stake
+     * @return shares The number of vault shares received by staker
+     */
+    function stakeFor(address prover, address staker, uint256 amount) external returns (uint256 shares);
+
+    /**
      * @notice Convenience function to stake with a prover
      * @param prover The prover to stake with
      * @param amount The amount of tokens to stake
@@ -208,6 +218,14 @@ interface IStakingController {
      * @return amount The amount of tokens received by the user
      */
     function completeUnstake(address prover) external returns (uint256 amount);
+
+    /**
+     * @notice Complete unstaking for a specific staker after delay period
+     * @param prover The prover to complete unstaking from
+     * @param staker The address whose unstake requests to complete
+     * @return amount The amount of tokens received
+     */
+    function completeUnstakeFor(address prover, address staker) external returns (uint256 amount);
 
     // =========================================================================
     // REWARD & COMMISSION

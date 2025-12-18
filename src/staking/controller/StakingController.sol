@@ -357,14 +357,15 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
     // =========================================================================
 
     /**
-     * @notice Stake tokens with a prover
-     * @dev Transfers tokens from caller to the prover's vault and mints shares.
-     *      Provers can always self-stake; delegators can only stake with active provers.
+     * @notice Stake tokens for a specific user (caller must have tokens approved)
+     * @dev Useful for helper contracts that wrap native tokens. Transfers tokens from msg.sender
+     *      but credits shares to the specified staker address.
      * @param prover The prover address to stake with
+     * @param staker The address to receive the stake shares
      * @param amount The amount of tokens to stake
-     * @return shares The number of vault shares minted to the caller
+     * @return shares The number of vault shares minted to the staker
      */
-    function stake(address prover, uint256 amount)
+    function stakeFor(address prover, address staker, uint256 amount)
         public
         override
         whenNotPaused
@@ -372,7 +373,6 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
         returns (uint256 shares)
     {
         if (amount < MIN_STAKING_AMOUNT) revert ControllerInvalidStakeAmount();
-        address staker = msg.sender;
 
         // Validate prover exists
         ProverInfo storage proverInfo = _proverInfo[prover];
@@ -383,8 +383,8 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
             revert ControllerProverNotActive();
         }
 
-        // Transfer assets from user to this controller
-        stakingToken.safeTransferFrom(staker, address(this), amount);
+        // Transfer assets from caller (msg.sender, not staker) to this controller
+        stakingToken.safeTransferFrom(msg.sender, address(this), amount);
 
         // Approve and deposit into prover's vault (set unlimited allowance once for gas efficiency)
         if (stakingToken.allowance(address(this), proverInfo.vault) < amount) {
@@ -407,6 +407,18 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
 
         // Return shares received
         return shares;
+    }
+
+    /**
+     * @notice Stake tokens with a prover
+     * @dev Transfers tokens from caller to the prover's vault and mints shares.
+     *      Provers can always self-stake; delegators can only stake with active provers.
+     * @param prover The prover address to stake with
+     * @param amount The amount of tokens to stake
+     * @return shares The number of vault shares minted to the caller
+     */
+    function stake(address prover, uint256 amount) public override returns (uint256 shares) {
+        return stakeFor(prover, msg.sender, amount);
     }
 
     /**
@@ -481,12 +493,32 @@ contract StakingController is IStakingController, ReentrancyGuard, PauserControl
     }
 
     /**
+     * @notice Complete unstaking for a specific staker after delay period
+     * @dev Useful for helper contracts that handle token conversions
+     * @param prover The prover to complete unstaking from
+     * @param staker The address whose unstake requests to complete
+     * @return amount The amount of tokens received
+     */
+    function completeUnstakeFor(address prover, address staker)
+        external
+        whenNotPaused
+        nonReentrant
+        returns (uint256 amount)
+    {
+        amount = _completeUnstake(prover, staker);
+        if (amount > 0) {
+            stakingToken.safeTransfer(msg.sender, amount);
+        }
+        emit UnstakeCompleted(prover, staker, amount);
+    }
+
+    /**
      * @notice Function to complete unstaking after delay period
      * @param prover The prover to complete unstaking from
      * @return amount The amount of tokens received by the user
      */
     function completeUnstake(address prover) external override whenNotPaused nonReentrant returns (uint256 amount) {
-        amount = _completeUnstake(prover);
+        amount = _completeUnstake(prover, msg.sender);
         if (amount > 0) {
             stakingToken.safeTransfer(msg.sender, amount);
         }

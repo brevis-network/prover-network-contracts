@@ -81,10 +81,10 @@ abstract contract PendingUnstakes is IStakingController {
     /**
      * @notice Processes ready unstaking requests after delay period
      * @param prover The prover to complete unstaking from
+     * @param staker The staker completing the unstake
      * @return assets The total amount of assets ready for transfer
      */
-    function _completeUnstake(address prover) internal returns (uint256 assets) {
-        address staker = msg.sender;
+    function _completeUnstake(address prover, address staker) internal returns (uint256 assets) {
         UnstakeRequest[] storage unstakeRequests = pendingUnstakes[prover].requests[staker];
 
         if (unstakeRequests.length == 0) {
