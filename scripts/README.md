@@ -21,8 +21,7 @@ Notes:
 
 ## 2) Deploy (baseline flow)
 
-> **📌 BLOCKSCOUT USERS:** For Blockscout-based explorers, append `--verifier blockscout --verifier-url $VERIFIER_URL` to any `--verify` command below. Example:
-> `forge script <script> --rpc-url $RPC_URL --broadcast --verify -vv --verifier blockscout --verifier-url $VERIFIER_URL`
+> **📌 For Blockscout-based explorers**, append `--verifier blockscout --verifier-url $VERIFIER_URL` to any command below. 
 
 1. Deploy a shared ProxyAdmin (one-time per network):
    ```bash
@@ -49,7 +48,7 @@ Where to find addresses:
 
 For advanced or partial rollouts, you can deploy components separately. These commands are compact wrappers around the same contracts used in the full deploy.
 
-> **📌 BLOCKSCOUT USERS:** Append `--verifier blockscout --verifier-url $VERIFIER_URL` to any `--verify` command.
+> **📌 For Blockscout-based explorers**, Append `--verifier blockscout --verifier-url $VERIFIER_URL` to any command below.
 
 - WrappedNativeToken:
    ```bash
@@ -91,7 +90,7 @@ For advanced or partial rollouts, you can deploy components separately. These co
    ```
 - SimpleBrevisProof:
    ```bash
-   forge script scripts/SimpleBrevisProof.s.sol --rpc-url $RPC_URL --broadcast -vv
+   forge script scripts/SimpleBrevisProof.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
    ```
 - EpochRewards (upgradeable via Transparent Proxy):
    ```bash
