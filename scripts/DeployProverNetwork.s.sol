@@ -273,16 +273,25 @@ contract DeployProverNetwork is Script {
         console.log("BrevisMarket Implementation:", brevisMarketImpl);
         console.log("BrevisMarket Proxy:", brevisMarketProxy);
         console.log("MarketViewer:", marketViewer);
-        console.log("EpochRewards Implementation:", epochRewardsImpl);
-        console.log("EpochRewards Proxy:", epochRewardsProxy);
+        if (epochRewardsProxy != address(0)) {
+            console.log("EpochRewards Implementation:", epochRewardsImpl);
+            console.log("EpochRewards Proxy:", epochRewardsProxy);
+        } else {
+            console.log("EpochRewards: Not deployed");
+        }
         console.log("\nTransfer ProxyAdmin ownership to multisig for production!");
     }
 
     function _deployEpochRewards() internal {
         console.log("\n=== EPOCH REWARDS DEPLOYMENT ===");
 
+        // Skip if brevisProof is not configured
+        if (!_json.keyExists("$.epochRewards.brevisProof")) {
+            console.log("Skipping EpochRewards deployment (brevisProof not configured)");
+            return;
+        }
+
         // Resolve required params
-        require(_json.keyExists("$.epochRewards.brevisProof"), "config.epochRewards.brevisProof missing");
         require(_json.keyExists("$.epochRewards.rewardUpdater"), "config.epochRewards.rewardUpdater missing");
         require(_json.keyExists("$.epochRewards.epochUpdater"), "config.epochRewards.epochUpdater missing");
 

@@ -17,9 +17,12 @@ This guide keeps deployment simple. It focuses on the core two-step process. Aft
 
 Notes:
 - The deployer is the initial owner of ProxyAdmin and all deployed contracts.
-- For production, transfer ProxyAdmin ownership to a multisig after deployment (via Etherscan UI).
+- For production, transfer ProxyAdmin ownership to a multisig after deployment (via block explorer UI).
 
 ## 2) Deploy (baseline flow)
+
+> **📌 BLOCKSCOUT USERS:** For Blockscout-based explorers, append `--verifier blockscout --verifier-url $VERIFIER_URL` to any `--verify` command below. Example:
+> `forge script <script> --rpc-url $RPC_URL --broadcast --verify -vv --verifier blockscout --verifier-url $VERIFIER_URL`
 
 1. Deploy a shared ProxyAdmin (one-time per network):
    ```bash
@@ -46,6 +49,12 @@ Where to find addresses:
 
 For advanced or partial rollouts, you can deploy components separately. These commands are compact wrappers around the same contracts used in the full deploy.
 
+> **📌 BLOCKSCOUT USERS:** Append `--verifier blockscout --verifier-url $VERIFIER_URL` to any `--verify` command.
+
+- WrappedNativeToken:
+   ```bash
+   forge script scripts/WrappedNativeToken.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
+   ```
 - StakingController (upgradeable via Transparent Proxy):
    ```bash
    forge script scripts/StakingController.s.sol --rpc-url $RPC_URL --broadcast --verify -vv
@@ -99,7 +108,7 @@ Notes:
 - `MarketViewer.s.sol` requires `addresses.brevisMarket` in `config.json` (the BrevisMarket proxy/address to read from).
 - Upgradeable component scripts (`VaultFactory.s.sol`, `StakingController.s.sol`, `BrevisMarket.s.sol`, `EpochRewards.s.sol`) auto-deploy a ProxyAdmin if `proxyAdmin.address` is missing; the full-network script always uses an existing one.
 
-## 4) After deployment (Etherscan + MetaMask)
+## 4) After deployment (Block Explorer + MetaMask)
 
 - **Verification**: Using `--verify` usually verifies all contracts automatically. If anything remains unverified, open the address on the explorer and use “Verify & Publish” in the UI.
 - **Proxy ABI**: If the proxy page shows no ABI, verify both the proxy and the implementation. Explorers usually auto-link; otherwise, look for “Is this a proxy?” on the page.
@@ -108,11 +117,16 @@ Notes:
 
 ## 5) Tips
 
-- Use the chain-specific explorer API key to reduce verification hiccups:
+### Etherscan verification
+- Use chain-specific explorer API keys to reduce verification hiccups:
   - Ethereum: `ETHERSCAN_API_KEY`
   - Optimism (incl. OP Sepolia): `OPTIMISM_ETHERSCAN_API_KEY`
-  - Arbitrum: `ARBISCAN_API_KEY`, Base: `BASESCAN_API_KEY`, Polygon: `POLYGONSCAN_API_KEY`, etc.
-- Occasional HTML 403 logs during `--verify` are benign if subsequent submissions succeed. They’re temporary rate-limit responses from the explorer.
+  - Arbitrum: `ARBISCAN_API_KEY`, Base: `BASESCAN_API_KEY` etc.
+- Occasional HTML 403 logs during `--verify` are benign if subsequent submissions succeed. They're temporary rate-limit responses from the explorer.
+
+### Blockscout verification
+- Set `VERIFIER_URL` to your Blockscout instance's API endpoint (e.g., `https://explorer.example.com/api`).
+- No API key required—just add `--verifier blockscout --verifier-url $VERIFIER_URL` to any command with `--verify`.
 
 ## 6) Testing (optional)
 
