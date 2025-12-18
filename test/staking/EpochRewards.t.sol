@@ -144,6 +144,167 @@ contract EpochRewardsTest is Test {
         vm.stopPrank();
     }
 
+    function testCannotPopLastEpochConfig() public {
+        // Only one config exists (from initEpoch)
+        assertEq(epochRewards.getEpochConfigNumber(), 1);
+
+        vm.prank(epochUpdater);
+        vm.expectRevert(EpochManager.EpochManagerNoConfigs.selector);
+        epochRewards.popEpochConfig();
+    }
+
+    function testSetEpochConfigBeforeInit() public {
+        // Deploy a new EpochRewards without initialization
+        EpochRewards newRewards = new EpochRewards(address(controller), address(brevisProof), address(0), epochUpdater);
+
+        vm.prank(epochUpdater);
+        vm.expectRevert(EpochManager.EpochManagerNotInitialized.selector);
+        newRewards.setEpochConfig(1, EPOCH_LENGTH, MAX_EPOCH_REWARD);
+    }
+
+    function testSetEpochConfigByTime() public {
+        uint64 futureTime = startTime + EPOCH_LENGTH * 10;
+        uint64 newEpochLength = 2 days;
+        uint256 newMaxReward = 2000e18;
+
+        vm.prank(epochUpdater);
+        epochRewards.setEpochConfigByTime(futureTime, newEpochLength, newMaxReward);
+
+        // Verify config was added
+        assertEq(epochRewards.getEpochConfigNumber(), 2);
+
+        // The new config starts at epoch 11 (epochsDelta = 10, fromEpoch = 1 + 10)
+        // Check that epoch 10 still uses old config
+        (uint64 epochStartTime10, uint64 epochLength10, uint256 maxReward10) =
+            epochRewards.getEpochInfoByEpochNumber(10);
+        assertEq(epochStartTime10, startTime + EPOCH_LENGTH * 9);
+        assertEq(epochLength10, EPOCH_LENGTH);
+        assertEq(maxReward10, MAX_EPOCH_REWARD);
+
+        // Check that epoch 11 uses new config
+        (uint64 epochStartTime11, uint64 epochLength11, uint256 maxReward11) =
+            epochRewards.getEpochInfoByEpochNumber(11);
+        assertEq(epochStartTime11, startTime + EPOCH_LENGTH * 10);
+        assertEq(epochLength11, newEpochLength);
+        assertEq(maxReward11, newMaxReward);
+    }
+
+    function testSetEpochConfigByTimeBeforeInit() public {
+        // Deploy a new EpochRewards without initialization
+        EpochRewards newRewards = new EpochRewards(address(controller), address(brevisProof), address(0), epochUpdater);
+
+        vm.prank(epochUpdater);
+        vm.expectRevert(EpochManager.EpochManagerNotInitialized.selector);
+        newRewards.setEpochConfigByTime(uint64(block.timestamp + 1000), EPOCH_LENGTH, MAX_EPOCH_REWARD);
+    }
+
+    function testCannotSetEpochConfigByTimeInPast() public {
+        vm.prank(epochUpdater);
+        vm.expectRevert();
+        epochRewards.setEpochConfigByTime(startTime, EPOCH_LENGTH, MAX_EPOCH_REWARD);
+    }
+
+    function testPopFutureEpochConfigs() public {
+        vm.startPrank(epochUpdater);
+
+        // Add multiple future configs
+        uint64 futureTime1 = startTime + EPOCH_LENGTH * 10;
+        uint64 futureTime2 = startTime + EPOCH_LENGTH * 20;
+
+        epochRewards.setEpochConfigByTime(futureTime1, 2 days, 2000e18);
+        epochRewards.setEpochConfigByTime(futureTime2, 3 days, 3000e18);
+
+        assertEq(epochRewards.getEpochConfigNumber(), 3);
+
+        // Pop future configs (both should be removed since we're still at startTime)
+        epochRewards.popFutureEpochConfigs();
+
+        assertEq(epochRewards.getEpochConfigNumber(), 1);
+        vm.stopPrank();
+    }
+
+    function testPopFutureEpochConfigsPreservesActiveConfig() public {
+        vm.startPrank(epochUpdater);
+
+        // Add future config
+        uint64 futureTime = startTime + EPOCH_LENGTH * 10;
+        epochRewards.setEpochConfigByTime(futureTime, 2 days, 2000e18);
+
+        // Warp to after the future config becomes active
+        vm.warp(futureTime + 100);
+
+        // Add another future config after current time
+        uint64 furtherFutureTime = futureTime + EPOCH_LENGTH * 10;
+        epochRewards.setEpochConfigByTime(furtherFutureTime, 3 days, 3000e18);
+
+        assertEq(epochRewards.getEpochConfigNumber(), 3);
+
+        // Pop future configs - should only remove the last one
+        epochRewards.popFutureEpochConfigs();
+
+        assertEq(epochRewards.getEpochConfigNumber(), 2);
+        vm.stopPrank();
+    }
+
+    function testEpochConfigTransition() public {
+        // Set a new config starting at epoch 5
+        vm.prank(epochUpdater);
+        epochRewards.setEpochConfig(5, 2 days, 2000e18);
+
+        // Check epoch 4 uses old config
+        (uint64 startTime4, uint64 length4, uint256 reward4) = epochRewards.getEpochInfoByEpochNumber(4);
+        assertEq(startTime4, startTime + EPOCH_LENGTH * 3);
+        assertEq(length4, EPOCH_LENGTH);
+        assertEq(reward4, MAX_EPOCH_REWARD);
+
+        // Check epoch 5 uses new config
+        (uint64 startTime5, uint64 length5, uint256 reward5) = epochRewards.getEpochInfoByEpochNumber(5);
+        assertEq(startTime5, startTime + EPOCH_LENGTH * 4);
+        assertEq(length5, 2 days);
+        assertEq(reward5, 2000e18);
+
+        // Check epoch 6 also uses new config
+        (uint64 startTime6, uint64 length6, uint256 reward6) = epochRewards.getEpochInfoByEpochNumber(6);
+        assertEq(startTime6, startTime + EPOCH_LENGTH * 4 + 2 days);
+        assertEq(length6, 2 days);
+        assertEq(reward6, 2000e18);
+    }
+
+    function testGetCurrentEpochInfoAcrossConfigTransition() public {
+        // Set a new config starting at epoch 3
+        vm.prank(epochUpdater);
+        epochRewards.setEpochConfig(3, 2 days, 2000e18);
+
+        // Before transition (epoch 2)
+        vm.warp(startTime + EPOCH_LENGTH + 100);
+        (uint32 epoch, uint64 length, uint256 reward) = epochRewards.getCurrentEpochInfo();
+        assertEq(epoch, 2);
+        assertEq(length, EPOCH_LENGTH);
+        assertEq(reward, MAX_EPOCH_REWARD);
+
+        // After transition (epoch 3)
+        vm.warp(startTime + EPOCH_LENGTH * 2 + 100);
+        (epoch, length, reward) = epochRewards.getCurrentEpochInfo();
+        assertEq(epoch, 3);
+        assertEq(length, 2 days);
+        assertEq(reward, 2000e18);
+    }
+
+    function testCannotSetEpochConfigWithZeroValues() public {
+        vm.startPrank(epochUpdater);
+
+        vm.expectRevert();
+        epochRewards.setEpochConfig(0, EPOCH_LENGTH, MAX_EPOCH_REWARD);
+
+        vm.expectRevert();
+        epochRewards.setEpochConfig(10, 0, MAX_EPOCH_REWARD);
+
+        vm.expectRevert();
+        epochRewards.setEpochConfig(10, EPOCH_LENGTH, 0);
+
+        vm.stopPrank();
+    }
+
     // ===============================
     // REWARD SETTING TESTS
     // ===============================
