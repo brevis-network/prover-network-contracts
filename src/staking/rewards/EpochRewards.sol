@@ -10,22 +10,45 @@ import "./EpochManager.sol";
 contract EpochRewards is BrevisProofApp, EpochManager {
     using SafeERC20 for IERC20;
 
+    // =========================================================================
+    // CONSTANTS
+    // =========================================================================
+
     // 0x9188644bf0c7a694e572b54fd40005e1230f80a50c59be6fb567a312ab5a1d4d
     bytes32 public constant REWARD_UPDATER_ROLE = keccak256("REWARD_UPDATER_ROLE");
 
-    IStakingController public stakingController;
+    // =========================================================================
+    // STORAGE
+    // =========================================================================
 
+    struct ProverReward {
+        uint128 amount;
+        bool distributed;
+    }
+
+    IStakingController public stakingController;
     bytes32 public vkHash;
-    // mapping of epoch => prover => reward amount
-    mapping(uint32 => mapping(address => uint256)) public epochProverRewards;
+
+    mapping(uint32 => mapping(address => ProverReward)) public epochProverRewards;
     mapping(uint32 => address) public epochLastProver;
     mapping(uint32 => uint256) public epochTotalRewards;
     uint32 public lastUpdatedEpoch;
 
-    event RewardsSet(uint32 indexed epoch, address indexed prover, uint256 amount);
-    event EpochRewardsSet(uint32 indexed epoch, uint256 deltaAmount, uint256 cumulativeAmount);
+    // Storage gap for future upgrades. Reserves 40 slots.
+    uint256[40] private __gap;
 
-    error StakingRewardsZeroAmount(address prover);
+    // =========================================================================
+    // EVENTS
+    // =========================================================================
+
+    event RewardsSet(uint32 indexed epoch, address indexed prover, uint256 amount);
+    event EpochRewardsSet(uint32 indexed epoch, uint256 newAmount, uint256 cumulativeAmount);
+
+    // =========================================================================
+    // ERRORS
+    // =========================================================================
+
+    error StakingRewardsNotDistributable(address prover);
     error StakingRewardsExceedsMax(uint32 epoch, uint256 totalRewards, uint256 maxAllowed);
     error StakingRewardsInvalidEpoch();
     error StakingRewardsEpochWindowMismatch(
@@ -33,6 +56,10 @@ contract EpochRewards is BrevisProofApp, EpochManager {
     );
     error StakingRewardsEpochNotReady(uint32 epoch, uint64 epochEndTime, uint64 currentTime);
     error StakingRewardsUnsortedProvers(address previousProver, address currentProver);
+
+    // =========================================================================
+    // CONSTRUCTOR / INITIALIZATION
+    // =========================================================================
 
     /**
      * @notice Deploy with initial staking controller, Brevis proof verifier, and reward updater.
@@ -79,6 +106,10 @@ contract EpochRewards is BrevisProofApp, EpochManager {
         IERC20(stakingController.stakingToken()).approve(address(stakingController), type(uint256).max);
     }
 
+    // =========================================================================
+    // EXTERNAL FUNCTIONS
+    // =========================================================================
+
     /**
      * @notice Record per-prover rewards for an epoch using Brevis proof output.
      * @dev Validates epoch window, ordering, and max reward cap before storing.
@@ -121,7 +152,7 @@ contract EpochRewards is BrevisProofApp, EpochManager {
             }
             lastProver = prover;
             uint256 amount = uint128(bytes16(circuitOutput[(offset + 20):(offset + 20 + 16)]));
-            epochProverRewards[epoch][prover] = amount;
+            epochProverRewards[epoch][prover] = ProverReward({amount: uint128(amount), distributed: false});
             newRewards += amount;
             emit RewardsSet(epoch, prover, amount);
         }
@@ -142,18 +173,135 @@ contract EpochRewards is BrevisProofApp, EpochManager {
      */
     function distributeRewards(uint32 epoch, address[] calldata provers) external onlyRole(REWARD_UPDATER_ROLE) {
         uint256[] memory amounts = new uint256[](provers.length);
+
         for (uint256 i = 0; i < provers.length; i++) {
             address prover = provers[i];
-            uint256 amount = epochProverRewards[epoch][prover];
-            if (amount > 0) {
-                amounts[i] = amount;
-                epochProverRewards[epoch][prover] = 0;
+            ProverReward storage reward = epochProverRewards[epoch][prover];
+            if (reward.amount > 0 && !reward.distributed) {
+                amounts[i] = reward.amount;
+                reward.distributed = true;
             } else {
-                revert StakingRewardsZeroAmount(prover);
+                revert StakingRewardsNotDistributable(prover);
             }
         }
         stakingController.addRewards(provers, amounts);
     }
+
+    // =========================================================================
+    // VIEW FUNCTIONS
+    // =========================================================================
+
+    struct ProverDistributableRewards {
+        address prover;
+        uint32[] epochs;
+        uint128[] amounts;
+    }
+
+    /**
+     * @notice Get reward details for a specific prover in an epoch
+     * @param epoch Epoch number
+     * @param prover Prover address
+     * @return amount Reward amount
+     * @return distributed Whether the reward has been distributed
+     */
+    function getProverReward(uint32 epoch, address prover) external view returns (uint128 amount, bool distributed) {
+        ProverReward memory reward = epochProverRewards[epoch][prover];
+        return (reward.amount, reward.distributed);
+    }
+
+    /**
+     * @notice Get rewards for multiple provers in an epoch
+     * @param epoch Epoch number
+     * @param provers Array of prover addresses
+     * @return amounts Array of reward amounts
+     * @return distributedFlags Array of distribution status
+     */
+    function getBatchProverRewards(uint32 epoch, address[] calldata provers)
+        external
+        view
+        returns (uint128[] memory amounts, bool[] memory distributedFlags)
+    {
+        amounts = new uint128[](provers.length);
+        distributedFlags = new bool[](provers.length);
+
+        for (uint256 i = 0; i < provers.length; i++) {
+            ProverReward memory reward = epochProverRewards[epoch][provers[i]];
+            amounts[i] = reward.amount;
+            distributedFlags[i] = reward.distributed;
+        }
+    }
+
+    /**
+     * @notice Find all epochs with distributable rewards for a prover within a range
+     * @param fromEpoch Start epoch (inclusive)
+     * @param toEpoch End epoch (inclusive)
+     * @param prover Prover address
+     * @return epochs Array of epoch numbers with undistributed rewards
+     * @return amounts Array of corresponding reward amounts
+     */
+    function getDistributableRewards(uint32 fromEpoch, uint32 toEpoch, address prover)
+        external
+        view
+        returns (uint32[] memory epochs, uint128[] memory amounts)
+    {
+        (epochs, amounts) = _getDistributableRewardsForProver(fromEpoch, toEpoch, prover);
+    }
+
+    /**
+     * @notice Find all epochs with distributable rewards for multiple provers within a range
+     * @param fromEpoch Start epoch (inclusive)
+     * @param toEpoch End epoch (inclusive)
+     * @param provers Array of prover addresses
+     * @return results Array of ProverDistributableRewards structs, one per prover
+     */
+    function getBatchDistributableRewards(uint32 fromEpoch, uint32 toEpoch, address[] calldata provers)
+        external
+        view
+        returns (ProverDistributableRewards[] memory results)
+    {
+        results = new ProverDistributableRewards[](provers.length);
+
+        for (uint256 i = 0; i < provers.length; i++) {
+            (uint32[] memory epochs, uint128[] memory amounts) =
+                _getDistributableRewardsForProver(fromEpoch, toEpoch, provers[i]);
+            results[i] = ProverDistributableRewards({prover: provers[i], epochs: epochs, amounts: amounts});
+        }
+    }
+
+    /**
+     * @dev Internal helper to get distributable rewards for a single prover
+     */
+    function _getDistributableRewardsForProver(uint32 fromEpoch, uint32 toEpoch, address prover)
+        internal
+        view
+        returns (uint32[] memory epochs, uint128[] memory amounts)
+    {
+        // First pass: count distributable epochs
+        uint256 count = 0;
+        for (uint32 epoch = fromEpoch; epoch <= toEpoch; epoch++) {
+            ProverReward memory reward = epochProverRewards[epoch][prover];
+            if (reward.amount > 0 && !reward.distributed) {
+                count++;
+            }
+        }
+
+        // Second pass: populate arrays
+        epochs = new uint32[](count);
+        amounts = new uint128[](count);
+        uint256 index = 0;
+        for (uint32 epoch = fromEpoch; epoch <= toEpoch; epoch++) {
+            ProverReward memory reward = epochProverRewards[epoch][prover];
+            if (reward.amount > 0 && !reward.distributed) {
+                epochs[index] = epoch;
+                amounts[index] = reward.amount;
+                index++;
+            }
+        }
+    }
+
+    // =========================================================================
+    // OWNER FUNCTIONS
+    // =========================================================================
 
     /**
      * @notice Owner can rescue reward tokens.

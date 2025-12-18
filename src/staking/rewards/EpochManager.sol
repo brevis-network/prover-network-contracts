@@ -155,6 +155,7 @@ abstract contract EpochManager is AccessControl {
         external
         onlyRole(EPOCH_UPDATER_ROLE)
     {
+        if (epochConfigs.length == 0) revert EpochManagerNotInitialized();
         _setEpochConfig(fromEpoch, epochLength, maxEpochReward);
     }
 
@@ -182,9 +183,10 @@ abstract contract EpochManager is AccessControl {
 
     /**
      * @notice Remove the most recently scheduled epoch configuration.
+     * @dev Cannot remove the initial config to prevent breaking the contract.
      */
     function popEpochConfig() external onlyRole(EPOCH_UPDATER_ROLE) {
-        if (epochConfigs.length == 0) revert EpochManagerNoConfigs();
+        if (epochConfigs.length <= 1) revert EpochManagerNoConfigs();
         EpochConfig memory lastConfig = epochConfigs[epochConfigs.length - 1];
         epochConfigs.pop();
         emit EpochConfigPopped(
@@ -194,12 +196,12 @@ abstract contract EpochManager is AccessControl {
 
     /**
      * @notice Remove all configs that start after the current block time.
-     * @dev Useful for overwriting future epoch configurations.
+     * @dev Useful for overwriting future epoch configurations. Keeps at least the initial config.
      */
     function popFutureEpochConfigs() external onlyRole(EPOCH_UPDATER_ROLE) {
         if (epochConfigs.length == 0) revert EpochManagerNoConfigs();
         uint64 currentTime = uint64(block.timestamp);
-        while (epochConfigs.length > 0 && epochConfigs[epochConfigs.length - 1].fromTime > currentTime) {
+        while (epochConfigs.length > 1 && epochConfigs[epochConfigs.length - 1].fromTime > currentTime) {
             EpochConfig memory lastConfig = epochConfigs[epochConfigs.length - 1];
             epochConfigs.pop();
             emit EpochConfigPopped(
