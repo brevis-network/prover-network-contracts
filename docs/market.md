@@ -126,7 +126,7 @@ To preserve slashing feasibility and avoid overcommitting provers across concurr
 
 #### Lifecycle of `assignedStake`:
 - On reveal, when a prover becomes the current winner, their `assignedStake` increases by the request’s `minStake`. If a later reveal produces a lower bid, the `assignedStake` moves from the previous winner to the new winner.
-- On `submitProof` (success) or `slash` (failure after refund), the request’s `minStake` is released from the winning prover’s `assignedStake`.
+- On `submitProof` (success) or `refund` (failure), the request’s `minStake` is released from the winning prover’s `assignedStake`.
 
 #### Tuning guidance:
 - Set `overcommitBps` to balance throughput vs. safety. For example, `500` (5%) adds a small buffer; `10000` (100%) requires a prover to have enough stake to cover all assigned `minStake` cumulatively before taking new work.
