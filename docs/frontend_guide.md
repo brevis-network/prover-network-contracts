@@ -323,7 +323,7 @@ Global (system-wide) stats:
 struct GlobalStats {
     uint64 totalRequests;   // total proof requests made
     uint64 totalFulfilled;  // total proof requests fulfilled
-    uint256 totalFees;      // total requester fees actually paid
+    uint256 totalFees;      // total prover rewards paid (after protocol fee)
 }
 ```
 

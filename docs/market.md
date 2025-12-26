@@ -181,7 +181,7 @@ Global (system-wide) stats:
 struct GlobalStats {
     uint64 totalRequests;   // total proof requests made
     uint64 totalFulfilled;  // total proof requests fulfilled
-    uint256 totalFees;      // total requester fees actually paid
+    uint256 totalFees;      // total prover rewards paid (after protocol fee)
 }
 ```
 
@@ -225,7 +225,7 @@ Epoch helpers:
 Global stats mirror the above:
 - totalRequests: increments on `requestProof()`.
 - totalFulfilled: increments on `submitProof()`.
-- totalFees: adds the actual fee paid on `submitProof()`.
+- totalFees: adds the prover reward paid on `submitProof()` (i.e., actual fee minus protocol fee).
 - Epochs are scheduled by admin; rollover to a new epoch is lazy on first activity at/after the start time.
 
 ---

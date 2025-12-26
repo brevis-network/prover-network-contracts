@@ -167,7 +167,7 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         uint64 _revealPhaseDuration,
         uint256 _minMaxFee
     ) internal {
-        if (_stakingController == IStakingController(address(0))) {
+        if (address(_stakingController) == address(0)) {
             revert MarketInvalidStakingController();
         }
 
@@ -410,10 +410,10 @@ contract BrevisMarket is IBrevisMarket, ProverSubmitters, AccessControl, Reentra
         s2.requestsFulfilled += 1;
         s2.lastActiveAt = uint64(block.timestamp);
 
-        // Update global stats: fulfilled count and total actual fees
+        // Update global stats: fulfilled count and total fees
         GlobalStats storage gs2 = _currentCumulativeGlobalStats();
         gs2.totalFulfilled += 1;
-        gs2.totalFees += actualFee;
+        gs2.totalFees += proverReward;
 
         proverPendingRequests[prover].remove(reqid);
         senderPendingRequests[req.sender].remove(reqid);

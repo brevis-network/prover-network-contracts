@@ -528,6 +528,36 @@ contract ProverStatsTest is Test {
     // GlobalStats tests
     // =============================
 
+    function test_GlobalStats_TotalFees_ExcludesProtocolFee() public {
+        uint256 protocolFeeBps = 1000; // 10%
+        vm.prank(owner);
+        market.setProtocolFeeBps(protocolFeeBps);
+
+        (bytes32 reqid, IBrevisMarket.ProofRequest memory req) = _createBasicRequest();
+        vm.prank(requester);
+        market.requestProof(req);
+
+        uint256 bidFee = 5e17;
+        uint256 bidNonce = 123;
+        vm.prank(prover1);
+        market.bid(reqid, _createBidHash(reqid, prover1, bidFee, bidNonce));
+        vm.warp(block.timestamp + BIDDING_DURATION + 1);
+        vm.prank(prover1);
+        market.reveal(reqid, bidFee, bidNonce);
+        vm.warp(block.timestamp + REVEAL_DURATION + 1);
+        vm.prank(prover1);
+        market.submitProof(reqid, VALID_PROOF);
+
+        uint256 expectedProtocolFee = (bidFee * protocolFeeBps) / 10000;
+        uint256 expectedProverReward = bidFee - expectedProtocolFee;
+
+        IBrevisMarket.GlobalStats memory gTotal = market.getGlobalStatsTotal();
+        assertEq(gTotal.totalFees, expectedProverReward);
+
+        IBrevisMarket.ProverStats memory pTotal = market.getProverStatsTotal(prover1);
+        assertEq(pTotal.feeReceived, expectedProverReward);
+    }
+
     function test_GlobalStats_TotalAndRecent_RequestAndSubmit() public {
         // Initial epoch info
         (uint64 startAt, uint64 epochId) = market.getRecentStatsInfo();
