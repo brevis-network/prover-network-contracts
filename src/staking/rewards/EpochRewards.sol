@@ -116,7 +116,11 @@ contract EpochRewards is BrevisProofApp, EpochManager {
      * @param proof Brevis proof bytes.
      * @param circuitOutput Encoded circuit output containing epoch window and prover rewards.
      */
-    function setRewards(bytes calldata proof, bytes calldata circuitOutput) external onlyRole(REWARD_UPDATER_ROLE) {
+    function setRewards(bytes calldata proof, bytes calldata circuitOutput)
+        external
+        whenNotPaused
+        onlyRole(REWARD_UPDATER_ROLE)
+    {
         uint32 epoch = uint32(bytes4(circuitOutput[0:4]));
         if (epoch == 0 || epoch < lastUpdatedEpoch) {
             revert StakingRewardsInvalidEpoch();
@@ -171,7 +175,11 @@ contract EpochRewards is BrevisProofApp, EpochManager {
      * @param epoch Epoch number whose rewards are being distributed.
      * @param provers Ordered list of provers to pay out.
      */
-    function distributeRewards(uint32 epoch, address[] calldata provers) external onlyRole(REWARD_UPDATER_ROLE) {
+    function distributeRewards(uint32 epoch, address[] calldata provers)
+        external
+        whenNotPaused
+        onlyRole(REWARD_UPDATER_ROLE)
+    {
         uint256[] memory amounts = new uint256[](provers.length);
 
         for (uint256 i = 0; i < provers.length; i++) {

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@security/access/AccessControl.sol";
+import "@security/access/PauserControl.sol";
 
-abstract contract EpochManager is AccessControl {
+abstract contract EpochManager is PauserControl {
     // f6c9577ec051004416f650ed5cde59ebe31c63663b16e28b9da8cda95777240c
     bytes32 public constant EPOCH_UPDATER_ROLE = keccak256("EPOCH_UPDATER_ROLE");
 
