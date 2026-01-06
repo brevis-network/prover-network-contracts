@@ -43,6 +43,9 @@ contract EpochRewards is BrevisProofApp, EpochManager {
 
     event RewardsSet(uint32 indexed epoch, address indexed prover, uint256 amount);
     event EpochRewardsSet(uint32 indexed epoch, uint256 newAmount, uint256 cumulativeAmount);
+    event BrevisProofUpdated(address indexed oldBrevisProof, address indexed newBrevisProof);
+    event VkHashUpdated(bytes32 indexed oldVkHash, bytes32 indexed newVkHash);
+    event RewardsWithdrawn(address indexed to, uint256 amount);
 
     // =========================================================================
     // ERRORS
@@ -334,6 +337,7 @@ contract EpochRewards is BrevisProofApp, EpochManager {
      */
     function withdrawRewards(address to, uint256 amount) external onlyOwner {
         IERC20(stakingController.stakingToken()).safeTransfer(to, amount);
+        emit RewardsWithdrawn(to, amount);
     }
 
     /**
@@ -341,6 +345,20 @@ contract EpochRewards is BrevisProofApp, EpochManager {
      * @param _vkHash New VK hash.
      */
     function setVkHash(bytes32 _vkHash) external onlyOwner {
+        bytes32 old = vkHash;
         vkHash = _vkHash;
+        emit VkHashUpdated(old, _vkHash);
+    }
+
+    /**
+     * @notice Update the Brevis proof verifier contract address.
+     * @dev Changing this changes which verifier is used for subsequent `setRewards` calls.
+     * @param _brevisProof New Brevis proof verifier contract address.
+     */
+    function setBrevisProof(address _brevisProof) external onlyOwner {
+        require(_brevisProof != address(0), "brevisProof is zero");
+        address old = address(brevisProof);
+        brevisProof = IBrevisProof(_brevisProof);
+        emit BrevisProofUpdated(old, _brevisProof);
     }
 }
